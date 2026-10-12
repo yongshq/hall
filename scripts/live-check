@@ -18,9 +18,12 @@ part passes, 1 when any fails, 2 on a usage error:
         pane-graphics  /var/tmp/herdr-pane-graphics-<uid> one level: server-<pid>-<nonce>
       An absent folder is an empty listing, recorded as such. An entry not in
       the baseline fails until accepted (decision 42); each is printed with what
-      made it, as far as the filesystem and process table tell. An entry gone
-      from the baseline is printed and does not fail: the liege's herdr deletes
-      its own.
+      made it, as far as the filesystem and process table tell. A folder absent
+      in the baseline and present now fails too, even when empty (an empty base
+      folder is what a herdr-pathed server leaves behind), with its birth time,
+      until the folder itself is accepted as the entry `.` (decision 44e); the
+      entries inside it are judged on their own. An entry gone from the
+      baseline is printed and does not fail: the liege's herdr deletes its own.
 
   peers
       No hall process connected to a live herdr socket. Hall's unix fds come
@@ -28,7 +31,9 @@ part passes, 1 when any fails, 2 on a usage error:
       herdr` (every herdr process); a hall fd whose `->0x<addr>` peer is a herdr
       socket fd named under ~/.config/herdr fails. This sees only connections
       open at the instant lsof runs: a short-lived connection that opens and
-      closes between runs is not seen. lsof missing or erroring fails the part.
+      closes between runs is not seen. lsof missing or erroring fails the part,
+      and so does a line of hall's or herdr's that the check cannot parse
+      (decision 44e): an fd it cannot read is never taken as harmless.
 
   reeve-state
       No file under ~/.reeve/state (read only) names the test reeve home or a
@@ -49,7 +54,9 @@ that.
 
   accept <place> <entry> --by <who> --reason <why>
       Adds one entry that is on disk now and not in the baseline to the
-      baseline, recording who accepted it, why, and when.
+      baseline, recording who accepted it, why, and when. The entry `.` is the
+      place's folder itself: it accepts a folder that was absent in the
+      baseline and is present now.
 
 HALL_LIVE_CHECK_VAR_TMP replaces /var/tmp as the pane-graphics folder's parent;
 the tests use it. Every line names the folder it read.
@@ -210,15 +217,25 @@ def check_places(base, snap):
         now_set = set(s["entries"])
         new = sorted(now_set - known)
         gone = sorted(known - now_set)
+        appeared = s["exists"] and not b["exists"]
         state = "absent" if not s["exists"] else f"{len(s['entries'])} entries"
-        if new:
+        if new or appeared:
             ok = False
-            print(f"{place}: FAIL {len(new)} new entries in {s['path']} ({state})")
+            what = (["appeared, absent in the baseline"] if appeared else []) + (
+                [f"{len(new)} new entries"] if new else []
+            )
+            print(f"{place}: FAIL {', '.join(what)} in {s['path']} ({state})")
+            if appeared:
+                warn(f"{place}: {s['path']} appeared ({birth(s['path'])})")
+                warn(
+                    f"{place}: judge it; accept the folder with: scripts/live-check accept {place} . --by <who> --reason <why>"
+                )
             for e in new:
                 warn(f"{place}: new {e} ({describe(place, s['path'], e)})")
-            warn(
-                f"{place}: judge each; accept with: scripts/live-check accept {place} <entry> --by <who> --reason <why>"
-            )
+            if new:
+                warn(
+                    f"{place}: judge each; accept with: scripts/live-check accept {place} <entry> --by <who> --reason <why>"
+                )
         else:
             print(f"{place}: pass {s['path']} ({state}, none new)")
         for e in gone:
@@ -226,13 +243,18 @@ def check_places(base, snap):
     return ok
 
 
-LSOF_LINE = re.compile(r"^(\S+)\s+(\d+)\s+\S+\s+(\S+)\s+(\S+)\s+(0x[0-9a-fA-F]+)\s+\S+\s+(.*)$")
+LSOF_LINE = re.compile(r"^(\S+)\s+(\d+)\s+\S+\s+(\S+)\s+(\S+)\s+(0x[0-9a-fA-F]+)\s+\S+(?:\s+(.*))?$")
+
+
+class LsofUnparsed(RuntimeError):
+    pass
 
 
 def lsof(command):
     """Unix socket fds of processes whose name starts with command, as
     (command, pid, fd, device, name) tuples. Raises RuntimeError when lsof is
-    missing or errors. lsof exits 1 with no output at all when nothing matches."""
+    missing or errors, LsofUnparsed when a line of that command does not parse.
+    lsof exits 1 with no output at all when nothing matches."""
     argv = ["lsof", "-nP", "-a", "-U", "-c", command]
     try:
         out = subprocess.run(argv, capture_output=True, text=True)
@@ -244,16 +266,25 @@ def lsof(command):
         raise RuntimeError(f"{' '.join(argv)} exited {out.returncode}: {out.stderr.strip()}")
     if out.stderr.strip():
         warn(f"{' '.join(argv)}: {out.stderr.strip()}")
-    fds = []
+    fds, unparsed = [], []
     for line in out.stdout.splitlines()[1:]:
         m = LSOF_LINE.match(line)
         if not m:
+            # Another command's line (lsof without -a) is not ours to judge.
+            fields = line.split()
+            if fields and fields[0].startswith(command):
+                unparsed.append(line)
             continue
         cmd, pid, fd, typ, dev, name = m.groups()
         # Kept even if lsof ran without -a: only that command's unix fds.
         if typ != "unix" or not cmd.startswith(command):
             continue
-        fds.append((cmd, int(pid), fd, dev.lower(), name.strip()))
+        fds.append((cmd, int(pid), fd, dev.lower(), (name or "").strip()))
+    if unparsed:
+        raise LsofUnparsed(
+            f"{' '.join(argv)}: {len(unparsed)} {command} lines not parsed: "
+            + " | ".join(unparsed)
+        )
     return fds
 
 
@@ -264,6 +295,10 @@ def check_peers():
     try:
         hall_fds = lsof("hall")
         herdr_fds = lsof("herdr")
+    except LsofUnparsed as e:
+        print("peers: FAIL an lsof line of hall or herdr did not parse")
+        warn(f"peers: {e}")
+        return False
     except RuntimeError as e:
         print("peers: FAIL lsof did not run cleanly")
         warn(f"peers: {e}")
@@ -399,13 +434,22 @@ def accept(args):
         warn(f"no baseline at {baseline_path()}: run scripts/live-check first")
         return 1
     snap = snapshot()[place]
-    if entry in base["places"][place]["entries"]:
+    if entry == ".":
+        if base["places"][place]["exists"]:
+            warn(f"{place}: {snap['path']} was present in the baseline; nothing to accept")
+            return 1
+        if not snap["exists"]:
+            warn(f"{place}: {snap['path']} is absent now; only a folder on disk can be accepted")
+            return 1
+        base["places"][place]["exists"] = True
+    elif entry in base["places"][place]["entries"]:
         warn(f"{place}: {entry} is already in the baseline")
         return 1
-    if entry not in snap["entries"]:
+    elif entry not in snap["entries"]:
         warn(f"{place}: {entry} is not in {snap['path']} now; only an entry on disk can be accepted")
         return 1
-    base["places"][place]["entries"] = sorted(base["places"][place]["entries"] + [entry])
+    else:
+        base["places"][place]["entries"] = sorted(base["places"][place]["entries"] + [entry])
     record = {"place": place, "entry": entry, "by": by, "reason": reason, "at": now()}
     base["accepted"].append(record)
     save_baseline(base)

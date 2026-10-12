@@ -232,6 +232,72 @@ fn absent_place_is_an_empty_listing() {
 }
 
 #[test]
+fn absent_place_appearing_empty_fails_until_accepted() {
+    // An empty base folder is what a herdr-pathed server leaves behind
+    // (decision 44e): absent in the baseline, present now, fails.
+    let rig = Rig::new("appeared");
+    passes(&rig.run(&[]));
+    std::fs::create_dir_all(rig.pane_graphics()).unwrap();
+    std::fs::create_dir_all(rig.config()).unwrap();
+
+    let (stdout, stderr) = fails(&rig.run(&[]));
+    for part in ["pane-graphics", "config"] {
+        assert!(
+            line(&stdout, part).contains("FAIL appeared, absent in the baseline"),
+            "{stdout}"
+        );
+    }
+    assert!(line(&stdout, "state").contains("pass"), "{stdout}");
+    assert!(
+        stderr.contains(&format!(
+            "pane-graphics: {} appeared (born 20",
+            rig.pane_graphics().display()
+        )),
+        "{stderr}"
+    );
+    assert!(stderr.contains("accept pane-graphics ."), "{stderr}");
+
+    // The folder itself is accepted as `.`, with who and why; only a folder
+    // that is on disk now and was absent in the baseline.
+    let accept_dot = |place: &str| {
+        rig.run(&[
+            "accept",
+            place,
+            ".",
+            "--by",
+            "liege",
+            "--reason",
+            "live herdr images",
+        ])
+    };
+    assert_eq!(accept_dot("state").status.code(), Some(1));
+    passes(&accept_dot("pane-graphics"));
+    assert_eq!(accept_dot("pane-graphics").status.code(), Some(1));
+    let b = rig.baseline();
+    assert_eq!(b["places"]["pane-graphics"]["exists"], true);
+    assert!(entries(&b, "pane-graphics").is_empty());
+    let accepted = b["accepted"].as_array().unwrap();
+    assert_eq!(accepted.len(), 1);
+    assert_eq!(accepted[0]["place"], "pane-graphics");
+    assert_eq!(accepted[0]["entry"], ".");
+    assert_eq!(accepted[0]["by"], "liege");
+
+    let (stdout, _) = fails(&rig.run(&[]));
+    assert!(line(&stdout, "pane-graphics").contains("pass"), "{stdout}");
+    assert!(line(&stdout, "config").contains("FAIL"), "{stdout}");
+
+    // Entries inside an accepted folder are still judged on their own.
+    passes(&accept_dot("config"));
+    passes(&rig.run(&[]));
+    std::fs::create_dir_all(rig.pane_graphics().join("server-7-n")).unwrap();
+    let (stdout, _) = fails(&rig.run(&[]));
+    assert!(
+        line(&stdout, "pane-graphics").contains("FAIL 1 new entries"),
+        "{stdout}"
+    );
+}
+
+#[test]
 fn place_that_is_a_symlink_is_followed() {
     // As on the liege's Mac: ~/.config/herdr links into a dotfiles folder.
     let rig = Rig::new("symlink-root");
@@ -476,6 +542,49 @@ fn peer_check_ignores_lines_lsof_without_a_would_add() {
         "{stdout}"
     );
     assert!(stderr.contains("hall-stan pid 4343"), "{stderr}");
+}
+
+#[test]
+fn unparsed_lsof_line_of_the_target_command_fails() {
+    // Decision 44e: an fd of hall's or herdr's the check cannot read fails the
+    // part rather than being skipped as harmless.
+    let rig = Rig::new("lsof-unparsed");
+    rig.lsof_out(
+        "hall",
+        "hall     4242 yong    3u  unix 0xbf80ef7d4cee9c28      0t0      ->0x6680e81d2b274bc8\n\
+         hall     4242 yong    4u  unix\n",
+    );
+    let (stdout, stderr) = fails(&rig.run(&[]));
+    assert!(
+        line(&stdout, "peers").contains("FAIL an lsof line of hall or herdr did not parse"),
+        "{stdout}"
+    );
+    assert!(
+        stderr.contains("1 hall lines not parsed: hall     4242 yong    4u  unix"),
+        "{stderr}"
+    );
+
+    // The same on herdr's side.
+    rig.lsof_out(
+        "hall",
+        "hall     4242 yong    3u  unix 0xbf80ef7d4cee9c28      0t0      ->0x6680e81d2b274bc8\n",
+    );
+    rig.lsof_out("herdr", "herdr 1186 yong 17u unix ?\n");
+    let (stdout, _) = fails(&rig.run(&[]));
+    assert!(line(&stdout, "peers").contains("did not parse"), "{stdout}");
+
+    // Another command's odd line (lsof without -a) and a line with no NAME
+    // are not failures.
+    rig.lsof_out(
+        "herdr",
+        "Google   777 yong    3u  unix ???\n\
+         herdr    1186 yong   18u  unix 0x1234567812345678      0t0\n",
+    );
+    let stdout = passes(&rig.run(&[]));
+    assert!(
+        line(&stdout, "peers").contains("pass (1 hall unix fds, 0 live herdr socket fds"),
+        "{stdout}"
+    );
 }
 
 #[test]
