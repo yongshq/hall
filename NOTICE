@@ -1,0 +1,7 @@
+hall is a modified version of herdr (https://github.com/herdrdev/herdr), Apache-2.0.
+
+hall forks herdr at v0.9.0 (commit b99002ac99b09e00b4ca692436cb15a6b0d676f1).
+Herdr's licence is in LICENSE; the files hall changes are listed in
+MODIFICATIONS.md. The vendored libghostty-vt and portable-pty keep their MIT
+licences in vendor/libghostty-vt/LICENSE, vendor/libghostty-vt/pkg/afl++/LICENSE
+and vendor/portable-pty/LICENSE.md.
