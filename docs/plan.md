@@ -78,7 +78,7 @@ Hall is built and tested only against the test setup (decisions 10 and 23, ADR 0
 
 **Hard rule: never the herdr session `default`, never `~/.reeve`.** Those belong to the live setup, which the liege uses for the household's real work and which stays untouched while hall is developed (decision 9). Hall takes the herdr sessions and the reeve home it works against explicitly, and has no built-in fallback to either live one.
 
-**The "live setup unchanged" check** (decision 28). The rule holds even for reads, so which panes `default` holds is never looked at. What is checked instead: every pane the test setup made is recorded with its `hall-dev*` session and confirmed there; `default`'s entry in `herdr session list --json` is unchanged against the baseline taken at setup; and `~/.reeve`, including `~/.reeve/state`, is unchanged.
+**The "live setup unchanged" check** (decision 28). The rule holds even for reads, so which panes `default` holds is never looked at. What is checked instead: every pane the test setup made is recorded with its `hall-dev*` session and confirmed there; `default`'s entry in `herdr session list --json` is unchanged against the baseline taken at setup; and no file under `~/.reeve/state` mentions the test home's path or a test reeve or errand name.
 
 How "explicitly" is met (decision 24, ADR 0003 consequences):
 
