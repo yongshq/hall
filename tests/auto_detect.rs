@@ -105,14 +105,14 @@ fn spawn_server(
         })
         .unwrap();
 
-    let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_herdr"));
+    let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_hall"));
     cmd.arg("server");
     cmd.env("XDG_CONFIG_HOME", config_home);
     cmd.env("XDG_RUNTIME_DIR", runtime_dir);
-    cmd.env("HERDR_SOCKET_PATH", api_socket_path);
-    cmd.env_remove("HERDR_CLIENT_SOCKET_PATH");
+    cmd.env("HALL_SOCKET_PATH", api_socket_path);
+    cmd.env_remove("HALL_CLIENT_SOCKET_PATH");
     cmd.env("SHELL", "/bin/sh");
-    cmd.env_remove("HERDR_ENV");
+    cmd.env_remove("HALL_ENV");
 
     let child = pair.slave.spawn_command(cmd).unwrap();
     register_spawned_herdr_pid(child.process_id());
@@ -149,14 +149,14 @@ fn spawn_herdr_auto(
         })
         .unwrap();
 
-    let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_herdr"));
+    let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_hall"));
     // No subcommand → auto-detect launch.
     cmd.env("XDG_CONFIG_HOME", config_home);
     cmd.env("XDG_RUNTIME_DIR", runtime_dir);
-    cmd.env("HERDR_SOCKET_PATH", api_socket_path);
-    cmd.env_remove("HERDR_CLIENT_SOCKET_PATH");
+    cmd.env("HALL_SOCKET_PATH", api_socket_path);
+    cmd.env_remove("HALL_CLIENT_SOCKET_PATH");
     cmd.env("SHELL", "/bin/sh");
-    cmd.env_remove("HERDR_ENV");
+    cmd.env_remove("HALL_ENV");
 
     let child = pair.slave.spawn_command(cmd).unwrap();
     register_spawned_herdr_pid(child.process_id());
@@ -200,9 +200,9 @@ fn wait_for_log_contains(path: &Path, needle: &str, timeout: Duration) {
 }
 
 fn run_cli(socket_path: &Path, args: &[&str]) -> std::process::Output {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_herdr"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_hall"));
     command.args(args);
-    command.env("HERDR_SOCKET_PATH", socket_path);
+    command.env("HALL_SOCKET_PATH", socket_path);
     command.output().unwrap()
 }
 
@@ -338,7 +338,7 @@ fn auto_detect_server_running_attaches_directly() {
 }
 
 /// Socket path resolution is consistent between server and client.
-/// Both derive the client socket from the `HERDR_SOCKET_PATH` override,
+/// Both derive the client socket from the `HALL_SOCKET_PATH` override,
 /// so overriding the API socket keeps both endpoints aligned.
 #[test]
 fn auto_detect_socket_path_consistency() {
@@ -503,10 +503,10 @@ fn auto_detect_default_socket_path_from_config_dir() {
     let config_home = base.join("config");
     let runtime_dir = base.join("runtime");
 
-    // Don't set HERDR_SOCKET_PATH or HERDR_CLIENT_SOCKET_PATH.
+    // Don't set HALL_SOCKET_PATH or HALL_CLIENT_SOCKET_PATH.
     // The default paths should come from the app config directory, not XDG_RUNTIME_DIR.
     let app_dir_name = if cfg!(debug_assertions) {
-        "herdr-dev"
+        "hall-dev"
     } else {
         "herdr"
     };
@@ -532,15 +532,15 @@ fn auto_detect_default_socket_path_from_config_dir() {
         })
         .unwrap();
 
-    let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_herdr"));
+    let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_hall"));
     cmd.arg("server");
     cmd.env("XDG_CONFIG_HOME", &config_home);
     cmd.env("XDG_RUNTIME_DIR", &runtime_dir);
     cmd.env("SHELL", "/bin/sh");
-    cmd.env_remove("HERDR_ENV");
+    cmd.env_remove("HALL_ENV");
     // Explicitly remove socket overrides to test default path resolution.
-    cmd.env_remove("HERDR_SOCKET_PATH");
-    cmd.env_remove("HERDR_CLIENT_SOCKET_PATH");
+    cmd.env_remove("HALL_SOCKET_PATH");
+    cmd.env_remove("HALL_CLIENT_SOCKET_PATH");
 
     let child = pair.slave.spawn_command(cmd).unwrap();
     register_spawned_herdr_pid(child.process_id());
@@ -585,7 +585,7 @@ fn auto_detect_writes_client_and_server_logs_to_separate_files() {
     wait_for_socket(&client_socket, Duration::from_secs(10));
 
     let app_dir_name = if cfg!(debug_assertions) {
-        "herdr-dev"
+        "hall-dev"
     } else {
         "herdr"
     };
@@ -641,12 +641,12 @@ fn auto_detect_respects_nested_guard_before_auto_attach() {
         .map(|workspaces| workspaces.len())
         .unwrap_or(0);
 
-    let output = Command::new(env!("CARGO_BIN_EXE_herdr"))
+    let output = Command::new(env!("CARGO_BIN_EXE_hall"))
         .env("XDG_CONFIG_HOME", &config_home)
         .env("XDG_RUNTIME_DIR", &runtime_dir)
-        .env("HERDR_SOCKET_PATH", &api_socket)
-        .env_remove("HERDR_CLIENT_SOCKET_PATH")
-        .env("HERDR_ENV", "1")
+        .env("HALL_SOCKET_PATH", &api_socket)
+        .env_remove("HALL_CLIENT_SOCKET_PATH")
+        .env("HALL_ENV", "1")
         .output()
         .unwrap();
 

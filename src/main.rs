@@ -1,6 +1,10 @@
 use std::io;
 
+/// Outbound: set into every pane, unchanged from herdr for now.
 pub(crate) const HERDR_ENV_VAR: &str = "HERDR_ENV";
+/// Inbound: the nested guard's marker, renamed so hall typed in a live herdr
+/// pane is not refused as nested.
+pub(crate) const NESTED_GUARD_ENV_VAR: &str = "HALL_ENV";
 pub(crate) const HERDR_ENV_VALUE: &str = "1";
 const NESTED_HERDR_MESSAGES: [&str; 6] = [
     "inception detected. we need to go deeper... said no one ever.",
@@ -123,11 +127,9 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # so existing preview installs stay there until explicitly switched.
 # channel = "stable"
 
-# Check herdr.dev for new Herdr versions in the background.
-# version_check = true
-
-# Check herdr.dev for remote agent-detection manifest updates in the background.
-# manifest_check = true
+# hall never checks herdr.dev: both checks are off and cannot be turned on.
+# version_check = false
+# manifest_check = false
 
 [keys]
 # Prefix key to enter prefix mode (default: "ctrl+b")
@@ -225,7 +227,7 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # headless_rows = 40
 
 # [worktrees]
-# directory = "~/.herdr/worktrees"
+# directory = "~/.hall/worktrees"
 
 [ui]
 # Sidebar width (auto-scaled based on workspace names, this sets the default)
@@ -441,7 +443,7 @@ pane_history = false
 const SKILL: &str = include_str!("../skills/herdr/SKILL.md");
 
 fn should_block_nested(config: &config::Config) -> bool {
-    should_block_nested_for_env(config, std::env::var(HERDR_ENV_VAR).ok().as_deref())
+    should_block_nested_for_env(config, std::env::var(NESTED_GUARD_ENV_VAR).ok().as_deref())
 }
 
 fn should_block_nested_for_env(config: &config::Config, herdr_env: Option<&str>) -> bool {
@@ -508,6 +510,13 @@ fn main() -> io::Result<()> {
         }
     };
 
+    // hall: --remote would fetch herdr from herdr.dev and install it on the
+    // remote host; refused (decision 33).
+    if remote_launch.is_some() {
+        eprintln!("error: --remote is disabled in hall: it would install herdr from herdr.dev on the remote host");
+        std::process::exit(2);
+    }
+
     if remote_launch.is_some()
         && args.get(1).is_some()
         && !args.iter().any(|a| {
@@ -554,6 +563,14 @@ fn main() -> io::Result<()> {
     }
 
     if args.get(1).map(|s| s.as_str()) == Some("update") {
+        // hall: refused outright (decision 33); update::self_update refuses too.
+        if update::HALL_REFUSES_UPDATE {
+            eprintln!(
+                "hall update is disabled: {}",
+                update::HALL_SELF_UPDATE_REFUSED
+            );
+            std::process::exit(1);
+        }
         let options = match update::parse_self_update_args(&args[2..]) {
             Ok(options) => options,
             Err(err) if err.starts_with("usage:") => {
@@ -581,7 +598,7 @@ fn main() -> io::Result<()> {
 
     if args.iter().any(|a| a == "--help" || a == "-h") {
         platform::begin_cli_output();
-        println!("herdr — terminal workspace manager for AI coding agents");
+        println!("hall: the liege's audience hall, a modified herdr v0.9.0");
         println!();
         println!("Usage: herdr [options]");
         println!("       herdr --session <name> [options]");
@@ -689,7 +706,7 @@ fn main() -> io::Result<()> {
         println!();
         println!("Config: {}", config::config_path().display());
         println!("Logs:   {}", logging::help_log_paths_summary());
-        println!("Env:    HERDR_CONFIG_PATH overrides config file path");
+        println!("Env:    HALL_CONFIG_PATH overrides config file path");
         println!("Home:   https://herdr.dev");
         println!();
         println!("{}", cli::AGENT_HELP_FOOTER);
@@ -698,7 +715,7 @@ fn main() -> io::Result<()> {
 
     if args.iter().any(|a| a == "--version" || a == "-V") {
         platform::begin_cli_output();
-        println!("herdr {}", crate::build_info::version());
+        println!("hall {}", crate::build_info::version());
         return Ok(());
     }
 

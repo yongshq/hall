@@ -234,7 +234,7 @@ fn build_server_daemon_command(exe: PathBuf) -> Command {
     if crate::session::explicit_session_requested() {
         command
             .env_remove(crate::api::SOCKET_PATH_ENV_VAR)
-            .env_remove("HERDR_CLIENT_SOCKET_PATH");
+            .env_remove(crate::server::socket_paths::CLIENT_SOCKET_PATH_ENV_VAR);
     }
 
     command
@@ -355,7 +355,10 @@ mod tests {
     fn server_daemon_command_clears_socket_overrides_for_explicit_session() {
         let _guard = env_lock().lock().unwrap();
         std::env::set_var(crate::api::SOCKET_PATH_ENV_VAR, "/tmp/inherited.sock");
-        std::env::set_var("HERDR_CLIENT_SOCKET_PATH", "/tmp/inherited-client.sock");
+        std::env::set_var(
+            crate::server::socket_paths::CLIENT_SOCKET_PATH_ENV_VAR,
+            "/tmp/inherited-client.sock",
+        );
         std::env::remove_var(crate::session::SESSION_ENV_VAR);
         crate::session::clear_explicit_session_for_test();
         let args = vec![
@@ -372,10 +375,11 @@ mod tests {
             *key == OsStr::new(crate::api::SOCKET_PATH_ENV_VAR) && value.is_none()
         }));
         assert!(envs.iter().any(|(key, value)| {
-            *key == OsStr::new("HERDR_CLIENT_SOCKET_PATH") && value.is_none()
+            *key == OsStr::new(crate::server::socket_paths::CLIENT_SOCKET_PATH_ENV_VAR)
+                && value.is_none()
         }));
         std::env::remove_var(crate::api::SOCKET_PATH_ENV_VAR);
-        std::env::remove_var("HERDR_CLIENT_SOCKET_PATH");
+        std::env::remove_var(crate::server::socket_paths::CLIENT_SOCKET_PATH_ENV_VAR);
         std::env::remove_var(crate::session::SESSION_ENV_VAR);
         crate::session::clear_explicit_session_for_test();
     }

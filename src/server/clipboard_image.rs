@@ -76,7 +76,8 @@ fn staging_dir() -> PathBuf {
     let user_id = unsafe { libc::geteuid() };
     #[cfg(windows)]
     let user_id = std::process::id();
-    std::env::temp_dir().join(format!("herdr-clipboard-images-{user_id}"))
+    // hall: its own folder; herdr's is pruned by the live herdr only.
+    std::env::temp_dir().join(format!("hall-clipboard-images-{user_id}"))
 }
 
 fn ensure_staging_dir() -> io::Result<PathBuf> {

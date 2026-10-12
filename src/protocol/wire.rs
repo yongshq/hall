@@ -17,7 +17,9 @@ use serde::{Deserialize, Serialize};
 // ---------------------------------------------------------------------------
 
 /// Current protocol version. Bumped when wire format changes incompatibly.
-pub const PROTOCOL_VERSION: u32 = 22;
+// hall: off herdr's 22, so a herdr CLI, client or observer on a hall socket,
+// or the reverse, fails at the protocol guard (decision 33).
+pub const PROTOCOL_VERSION: u32 = 1022;
 
 /// Maximum allowed frame payload size (2 MB). Frames larger than this are
 /// rejected to prevent denial-of-service via oversized length prefixes.

@@ -17,7 +17,12 @@ use tokio::sync::mpsc;
 
 use crate::api::schema::{Method, Request};
 
-pub const SOCKET_PATH_ENV_VAR: &str = "HERDR_SOCKET_PATH";
+/// Inbound: the socket a hall process talks to. Renamed from herdr's
+/// `HERDR_SOCKET_PATH` so hall typed in a live herdr pane never reaches herdr.
+pub const SOCKET_PATH_ENV_VAR: &str = "HALL_SOCKET_PATH";
+/// Outbound: the name hall sets into its panes, plugins and custom commands,
+/// unchanged from herdr for now (plan: "Environment names set into panes").
+pub const PANE_SOCKET_PATH_ENV_VAR: &str = "HERDR_SOCKET_PATH";
 
 pub(crate) fn request_changes_ui(request: &Request) -> bool {
     matches!(

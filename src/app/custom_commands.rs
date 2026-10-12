@@ -243,7 +243,7 @@ impl App {
 
     pub(crate) fn custom_command_env(&self) -> (Vec<(String, String)>, Option<std::path::PathBuf>) {
         let mut env = vec![(
-            crate::api::SOCKET_PATH_ENV_VAR.to_string(),
+            crate::api::PANE_SOCKET_PATH_ENV_VAR.to_string(),
             crate::api::socket_path().display().to_string(),
         )];
         if let Ok(current_exe) = std::env::current_exe() {
@@ -733,7 +733,7 @@ mod tests {
     fn shell_command_invocation_executes_endpoint_owned_definition() {
         let mut app = test_app();
         let path = std::path::PathBuf::from(format!(
-            "/var/tmp/herdr-command-invoke-{}-{}",
+            "/var/tmp/hall-command-invoke-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

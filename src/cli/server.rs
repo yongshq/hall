@@ -1,5 +1,7 @@
 use crate::api::schema::{EmptyParams, Method, Request, ServerLiveHandoffParams};
 
+const HALL_REFUSES_MANIFEST_UPDATE: bool = true;
+
 pub(super) fn run_server_command(args: &[String]) -> std::io::Result<Option<i32>> {
     let Some(subcommand) = args.first().map(|arg| arg.as_str()) else {
         return Ok(None);
@@ -86,6 +88,11 @@ fn server_reload_agent_manifests(args: &[String]) -> std::io::Result<i32> {
 }
 
 fn server_update_agent_manifests(args: &[String]) -> std::io::Result<i32> {
+    // hall: refused before any request; manifests are never fetched from herdr.dev.
+    if HALL_REFUSES_MANIFEST_UPDATE {
+        eprintln!("hall server update-agent-manifests is disabled: hall never fetches agent manifests from herdr.dev");
+        return Ok(1);
+    }
     let json = match args {
         [] => false,
         [flag] if flag == "--json" => true,

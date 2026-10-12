@@ -28,6 +28,8 @@ const CURRENT_PROTOCOL: u32 = crate::protocol::PROTOCOL_VERSION;
 const STABLE_UPDATE_MANIFEST_URL: &str = "https://herdr.dev/latest.json";
 const PREVIEW_UPDATE_MANIFEST_URL: &str = "https://herdr.dev/preview.json";
 const REMOTE_BINARY_ENV_VAR: &str = "HERDR_REMOTE_BINARY";
+/// hall: `--remote` is refused in main; this keeps herdr's download from ever running.
+const HALL_REFUSES_REMOTE_INSTALL: bool = true;
 const SSH_CONTROL_SOCKET_NAME: &str = "ctl";
 pub(crate) fn run_remote(remote: RemoteLaunch) -> io::Result<()> {
     let session_name = crate::session::active_name()
@@ -1522,6 +1524,10 @@ fn remote_shell_resolves_managed_install(stdout: &str) -> bool {
 }
 
 fn download_release_asset(platform: &RemotePlatform) -> io::Result<InstallSource> {
+    // hall: never downloads herdr's release.
+    if HALL_REFUSES_REMOTE_INSTALL {
+        return Err(io::Error::other("remote install is disabled in hall"));
+    }
     let asset_key = platform.asset_key();
     let asset = remote_release_asset(&asset_key)?;
 
@@ -1551,6 +1557,10 @@ fn download_release_asset(platform: &RemotePlatform) -> io::Result<InstallSource
 }
 
 fn fetch_remote_manifest(url: &str) -> io::Result<Vec<u8>> {
+    // hall: never fetches herdr's update manifest.
+    if !url.starts_with("file://") {
+        return Err(io::Error::other("remote install is disabled in hall"));
+    }
     let output = crate::noninteractive_process::curl_command()
         .args([
             "-sfL",

@@ -163,8 +163,9 @@ pub struct App {
 pub(crate) const APP_EVENT_CHANNEL_CAPACITY: usize = 256;
 pub(crate) const APP_EVENT_DRAIN_LIMIT: usize = 64;
 
-fn auto_updates_enabled(background_updates: bool) -> bool {
-    background_updates && !cfg!(debug_assertions)
+// hall: never checks herdr.dev for a release or agent manifests (decision 33).
+fn auto_updates_enabled(_background_updates: bool) -> bool {
+    false
 }
 
 fn background_update_check_enabled(background_updates: bool, check_enabled: bool) -> bool {

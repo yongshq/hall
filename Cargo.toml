@@ -1,12 +1,12 @@
 [package]
-name = "herdr"
+# hall: a modified herdr v0.9.0 (NOTICE, MODIFICATIONS.md); the binary is `hall`.
+name = "hall"
 version = "0.9.0"
 edition = "2021"
 build = "build.rs"
-description = "terminal workspace manager for AI coding agents"
+description = "the liege's audience hall: herdr v0.9.0, forked and renamed"
 license = "Apache-2.0"
-repository = "https://github.com/herdrdev/herdr"
-homepage = "https://herdr.dev"
+publish = false
 keywords = ["terminal", "tui", "ai", "agents", "multiplexer"]
 categories = ["command-line-utilities"]
 include = [

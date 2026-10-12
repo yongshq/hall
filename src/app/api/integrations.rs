@@ -35,6 +35,14 @@ impl App {
         params: crate::api::schema::IntegrationInstallParams,
     ) -> String {
         let target = params.target;
+        // hall: refused, as the CLI's `integration install` is.
+        if crate::integration::HALL_REFUSES_INSTALL {
+            return encode_error(
+                id,
+                "integration_install_failed",
+                "integration install is disabled in hall".to_string(),
+            );
+        }
         let messages = match crate::integration::install_target(target) {
             Ok(messages) => messages,
             Err(err) => return encode_error(id, "integration_install_failed", err.to_string()),
@@ -56,6 +64,14 @@ impl App {
         params: crate::api::schema::IntegrationUninstallParams,
     ) -> String {
         let target = params.target;
+        // hall: refused, as the CLI's `integration uninstall` is.
+        if crate::integration::HALL_REFUSES_INSTALL {
+            return encode_error(
+                id,
+                "integration_uninstall_failed",
+                "integration uninstall is disabled in hall".to_string(),
+            );
+        }
         let messages = match crate::integration::uninstall_target(target) {
             Ok(messages) => messages,
             Err(err) => return encode_error(id, "integration_uninstall_failed", err.to_string()),

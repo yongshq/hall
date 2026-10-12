@@ -250,7 +250,7 @@ impl App {
         env.retain(|(key, _)| !plugin_pane_protected_env_key(key));
         env.extend(super::env::plugin_path_env(plugin));
         env.push((
-            crate::api::SOCKET_PATH_ENV_VAR.to_string(),
+            crate::api::PANE_SOCKET_PATH_ENV_VAR.to_string(),
             crate::api::socket_path().display().to_string(),
         ));
         env.push(("HERDR_ENV".to_string(), "1".to_string()));
@@ -346,7 +346,7 @@ impl App {
 fn plugin_pane_protected_env_key(key: &str) -> bool {
     matches!(
         key,
-        crate::api::SOCKET_PATH_ENV_VAR
+        crate::api::PANE_SOCKET_PATH_ENV_VAR
             | "HERDR_ENV"
             | "HERDR_PLUGIN_ID"
             | "HERDR_PLUGIN_ROOT"

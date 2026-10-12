@@ -60,7 +60,7 @@ fn setup(installed: &str, answer: &str, handoff: bool) -> SetupResult {
         handoff
     ));
     let app = if cfg!(debug_assertions) {
-        "herdr-dev"
+        "hall-dev"
     } else {
         "herdr"
     };
@@ -73,14 +73,14 @@ fn setup(installed: &str, answer: &str, handoff: bool) -> SetupResult {
         "onboarding = false\n[remote]\nmanage_ssh_config = false\n",
     )
     .unwrap();
-    let status = Command::new(env!("CARGO_BIN_EXE_herdr"))
+    let status = Command::new(env!("CARGO_BIN_EXE_hall"))
         .args(["status", "client", "--json"])
         .output()
         .unwrap();
     assert!(status.status.success());
 
     let pair = native_pty_system().openpty(PtySize::default()).unwrap();
-    let mut command = CommandBuilder::new(env!("CARGO_BIN_EXE_herdr"));
+    let mut command = CommandBuilder::new(env!("CARGO_BIN_EXE_hall"));
     if handoff {
         command.args(["--remote", "fake-host", "--handoff"]);
     } else {
@@ -101,12 +101,12 @@ fn setup(installed: &str, answer: &str, handoff: bool) -> SetupResult {
         String::from_utf8(status.stdout).unwrap(),
     );
     for name in [
-        "HERDR_ENV",
-        "HERDR_SESSION",
-        "HERDR_SOCKET_PATH",
-        "HERDR_CLIENT_SOCKET_PATH",
+        "HALL_ENV",
+        "HALL_SESSION",
+        "HALL_SOCKET_PATH",
+        "HALL_CLIENT_SOCKET_PATH",
         "HERDR_REMOTE_BINARY",
-        "HERDR_CONFIG_PATH",
+        "HALL_CONFIG_PATH",
     ] {
         command.env_remove(name);
     }
@@ -224,14 +224,14 @@ fn machine_setup_new_install_old_server_approval_stops_then_starts_without_insta
     assert_eq!(result.actions, "stop\nstart\n", "{}", result.output);
 }
 
+// hall: `--remote` is refused (decision 33), so herdr's explicit remote
+// handoff never starts and nothing is done on the remote host.
 #[test]
-fn machine_setup_explicit_remote_handoff_remains_available_but_restart_fallback_defaults_to_no() {
+fn machine_setup_explicit_remote_launch_is_refused() {
     let result = setup("new", "\n", true);
-    assert_eq!(result.actions, "handoff\n", "{}", result.output);
+    assert_eq!(result.actions, "", "{}", result.output);
     assert!(
-        result
-            .output
-            .contains("This stops active remote pane processes"),
+        result.output.contains("--remote is disabled in hall"),
         "{}",
         result.output
     );

@@ -7,6 +7,11 @@ pub(super) fn run_integration_command(args: &[String]) -> std::io::Result<i32> {
     };
 
     match subcommand {
+        // hall: refused; herdr's hooks under ~/.claude and the rest belong to the live herdr.
+        "install" | "uninstall" if crate::integration::HALL_REFUSES_INSTALL => {
+            eprintln!("hall integration {subcommand} is disabled: it would write herdr's agent hooks (e.g. ~/.claude/hooks/herdr-agent-state.sh), which belong to the installed herdr");
+            Ok(1)
+        }
         "install" => integration_install(&args[1..]),
         "uninstall" => integration_uninstall(&args[1..]),
         "status" => integration_status(&args[1..]),

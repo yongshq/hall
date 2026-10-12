@@ -2109,8 +2109,17 @@ fn homebrew_cellar_keg_root(path: &Path) -> Option<PathBuf> {
 // Public API
 // ---------------------------------------------------------------------------
 
+/// hall: every self-update and background check is refused (decision 33).
+pub(crate) const HALL_REFUSES_UPDATE: bool = true;
+/// Why hall refuses every self-update: herdr's release would replace hall.
+pub const HALL_SELF_UPDATE_REFUSED: &str = "self-update is disabled in hall: hall is a modified herdr v0.9.0, updated only from its own repository, and herdr's update would replace hall with herdr";
+
 /// Manual self-update command (`herdr update`).
 pub fn self_update(options: SelfUpdateOptions) -> Result<Version, String> {
+    // hall: refused before anything is read, fetched or replaced.
+    if HALL_REFUSES_UPDATE {
+        return Err(HALL_SELF_UPDATE_REFUSED.into());
+    }
     let channel = UpdateChannel::configured();
 
     if is_homebrew_managed_install() {
@@ -2262,6 +2271,12 @@ pub fn auto_update(events: tokio::sync::mpsc::Sender<crate::events::AppEvent>) {
                 install_command: update_install_command().to_string(),
             });
         }
+        return;
+    }
+
+    // hall: no background check reaches herdr.dev or Homebrew.
+    if HALL_REFUSES_UPDATE {
+        crate::logging::update_check_failed("update checks are disabled in hall");
         return;
     }
 

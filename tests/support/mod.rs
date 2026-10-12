@@ -13,7 +13,7 @@ static INIT: Once = Once::new();
 static CLEANUP_GUARD: OnceLock<CleanupGuard> = OnceLock::new();
 const WATCHDOG_SCAN_INTERVAL: Duration = Duration::from_secs(1);
 const RUNTIME_OWNER_MARKER: &str = ".herdr-test-owner-pid";
-pub const CURRENT_PROTOCOL: u32 = 22;
+pub const CURRENT_PROTOCOL: u32 = 1022;
 pub const CURRENT_ENDPOINT_PROTOCOL_GENERATION: u32 = 1;
 pub const SERVER_MESSAGE_SERVER_SHUTDOWN: u32 = 3;
 pub const SERVER_MESSAGE_ENDPOINT_CONTROL: u32 = 20;
@@ -728,7 +728,7 @@ fn process_runtime_dir(pid: u32) -> std::io::Result<Option<PathBuf>> {
             return Ok(Some(PathBuf::from(value)));
         }
 
-        if let Some(value) = kv.strip_prefix("HERDR_SOCKET_PATH=") {
+        if let Some(value) = kv.strip_prefix("HALL_SOCKET_PATH=") {
             socket_path = Some(PathBuf::from(value));
         }
     }

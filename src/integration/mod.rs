@@ -297,5 +297,10 @@ const GROK_INTEGRATION_VERSION: u32 = 1;
 
 pub(crate) const INSTALL_WARNING_PREFIX: &str = "warning:";
 
+/// hall: integration install and uninstall are refused at the CLI and the API,
+/// since they write herdr's hooks (`~/.claude/hooks/herdr-agent-state.sh` and
+/// the rest), which belong to the installed herdr (decision 33).
+pub(crate) const HALL_REFUSES_INSTALL: bool = true;
+
 #[cfg(test)]
 mod tests;

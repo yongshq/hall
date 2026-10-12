@@ -507,6 +507,10 @@ fn catalog_url() -> String {
 }
 
 fn fetch_text(url: &str) -> Result<String, String> {
+    // hall: agent-detection manifests are never fetched from herdr.dev.
+    if !url.starts_with("file://") {
+        return Err("agent manifest updates are disabled in hall".into());
+    }
     let max_fetch_bytes = MAX_FETCH_BYTES.to_string();
     let mut child = crate::noninteractive_process::curl_command()
         .args([

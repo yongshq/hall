@@ -39,7 +39,7 @@ impl App {
         let mut env = super::env::plugin_path_env(plugin);
         env.extend([
             (
-                crate::api::SOCKET_PATH_ENV_VAR.to_string(),
+                crate::api::PANE_SOCKET_PATH_ENV_VAR.to_string(),
                 crate::api::socket_path().display().to_string(),
             ),
             ("HERDR_ENV".to_string(), "1".to_string()),

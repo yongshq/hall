@@ -20,10 +20,11 @@ const KNOWN_TOP_LEVEL_CONFIG_KEYS: &[&str] = &[
 ];
 
 pub fn app_dir_name() -> &'static str {
+    // hall: its own folders, never the installed herdr's (decision 33).
     if cfg!(debug_assertions) {
-        "herdr-dev"
+        "hall-dev"
     } else {
-        "herdr"
+        "hall"
     }
 }
 

@@ -40,8 +40,9 @@ impl Default for UpdateConfig {
     fn default() -> Self {
         Self {
             channel: default_update_channel(),
-            version_check: true,
-            manifest_check: true,
+            // hall: off, and off at the source too (`auto_updates_enabled`).
+            version_check: false,
+            manifest_check: false,
         }
     }
 }
@@ -1150,7 +1151,8 @@ impl Default for KeysConfig {
 impl Default for WorktreesConfig {
     fn default() -> Self {
         Self {
-            directory: "~/.herdr/worktrees".into(),
+            // hall: ~/.hall/worktrees, or ~/.hall-dev/worktrees for a debug build.
+            directory: format!("~/.{}/worktrees", crate::config::io::app_dir_name()),
         }
     }
 }
@@ -1296,8 +1298,9 @@ mod tests {
     fn update_config_defaults_and_parses() {
         let default_config = Config::default();
         assert_eq!(default_config.update.channel, default_update_channel());
-        assert!(default_config.update.version_check);
-        assert!(default_config.update.manifest_check);
+        // hall: both off by default (decision 33).
+        assert!(!default_config.update.version_check);
+        assert!(!default_config.update.manifest_check);
 
         let toml = r#"
 [update]
@@ -1525,7 +1528,7 @@ tab_bar_right_separator = " · "
     #[test]
     fn worktrees_directory_defaults_and_parses() {
         let default_config = Config::default();
-        assert_eq!(default_config.worktrees.directory, "~/.herdr/worktrees");
+        assert_eq!(default_config.worktrees.directory, "~/.hall-dev/worktrees");
 
         let toml = r#"
 [worktrees]

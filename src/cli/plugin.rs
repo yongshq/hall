@@ -1502,8 +1502,10 @@ fn read_tail_capped_output(mut reader: impl Read, cap: usize) -> CappedOutput {
 fn scrub_herdr_runtime_env(command: &mut Command) {
     for key in [
         crate::api::SOCKET_PATH_ENV_VAR,
+        crate::api::PANE_SOCKET_PATH_ENV_VAR,
         crate::server::socket_paths::CLIENT_SOCKET_PATH_ENV_VAR,
         crate::session::SESSION_ENV_VAR,
+        crate::NESTED_GUARD_ENV_VAR,
         "HERDR_BIN_PATH",
         "HERDR_ENV",
         "HERDR_WORKSPACE_ID",
