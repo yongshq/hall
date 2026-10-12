@@ -27,15 +27,15 @@ One running reeve or hand, together with the terminal it lives in. Picking a ree
 _Avoid_: pane, tab, endpoint, window
 
 **Hall session**:
-One hall server with its own socket, holding many sessions: `hall-dev` and `hall-dev-2` for the test setup. Kept under hall's own config folder, never in herdr's.
+One hall server with its own socket, holding many sessions. Once hall is in use every reeve lives in one hall session; the test setup's is `hall-dev`, run by the debug build and kept at `~/.config/hall-dev/sessions/hall-dev/`. Kept under hall's own config folder, never in herdr's.
 _Avoid_: server, instance, session (alone)
 
 **Herdr session**:
-One server of the liege's installed herdr, with its own socket: `default` holds the live setup. Until plan step 2, the test setup's `hall-dev` and `hall-dev-2` are herdr sessions too.
+One server of the liege's installed herdr, with its own socket: `default` holds the live setup. Until plan step 2, the test setup is written for herdr sessions `hall-dev` and `hall-dev-2`; from step 2 on it creates no herdr session.
 _Avoid_: server, instance, session (alone)
 
 **Backend**:
-The terminal manager a reeve dispatches its hands through. The live setup's is herdr; hall becomes one at go-live.
+The terminal manager a reeve dispatches its hands through. The live setup's is herdr; reeve reaches hall at go-live by a route the liege decides (decision 36).
 _Avoid_: engine, multiplexer, server
 
 **Fork**:
@@ -57,7 +57,7 @@ The liege's real reeves, reeve home and herdr session, doing the household's act
 _Avoid_: production, prod, real setup
 
 **Test setup**:
-Two hall sessions and a reeve home of its own, holding test reeves and test hands, that hall is built and tested against.
+One hall session and a reeve home of its own, holding test reeves and test hands, that hall is built and tested against.
 _Avoid_: sandbox, staging, dev env
 
 **Test reeve**:

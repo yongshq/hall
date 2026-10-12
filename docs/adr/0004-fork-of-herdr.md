@@ -12,7 +12,8 @@ Hall is herdr v0.9.0, forked and renamed: its own program `hall`, its own sessio
 ## Consequences
 
 - Hall owns about 241k lines of Rust it did not write. Herdr's undocumented internals are now hall's own code; the "documented API only" rule of 0001 lapses with it.
-- Upstream changes come in only when chosen and ported by hand. Herdr moves fast: 229 commits between v0.9.0 and v0.9.3, most in `vendor/` and the client shell, where the reeve tree goes ([fork-map](../research/fork-map.md) section 7). Hall's own sidebar work stays in few, new functions to keep ports cheap.
+- Upstream changes come in only when chosen and ported by hand. Herdr moves fast: 229 commits between v0.9.0 and v0.9.3, with most lines changed in `vendor/` and, in `src/`, most in the client shell, where the reeve tree goes ([fork-map](../research/fork-map.md) section 7). Hall's own sidebar work stays in few, new functions to keep ports cheap.
 - Separation from the live herdr comes from hall's own config and state folders, binary name, inbound `HALL_*` environment names and protocol number, so herdr and hall refuse each other loudly (decision 33, [0003](0003-separate-from-live-setup.md)).
+- The reeve tree shows one hall session, since every reeve lives in hall's own session once it is in use; herdr's client has one local endpoint (`src/client/endpoint.rs:72-75` at v0.9.0), so nothing needs combining (decision 38).
 - Herdr's own request and done sounds play in the hall window, so hall reuses them and adds only the triggers herdr cannot see (decision 35).
 - Apache-2.0 duties: herdr's `LICENSE` and both vendored MIT licences kept, a `NOTICE` line naming hall as a modified herdr, modified files listed in `MODIFICATIONS.md`, no herdr branding (decision 32). They bind on redistribution; doing them from the first commit costs nothing.

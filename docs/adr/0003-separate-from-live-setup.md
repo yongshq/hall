@@ -2,7 +2,7 @@
 
 While hall is developed, the liege's live reeves and herdr session keep running the household's real work, so hall never touches them: it is built and tested against its own herdr sessions (`hall-dev` and `hall-dev-2`, separate servers with their own sockets) and its own reeve home (`~/.reeve-hall-dev`) holding test reeves and test hands. A stand-in serves the reeve listing format hall needs, so reeve itself does not change until the liege approves that change at the point hall is ready for the live setup.
 
-In the fork ([0004](0004-fork-of-herdr.md)) the rule is unchanged; its mechanism is now decision 33: hall's own folders, binary, environment names and protocol.
+In the fork ([0004](0004-fork-of-herdr.md)) the rule is unchanged; its mechanism is now decision 33: hall's own folders, binary, environment names and protocol. The test setup there has one hall session, `hall-dev`, and drops `hall-dev-2` (decision 38).
 
 ## Consequences
 
