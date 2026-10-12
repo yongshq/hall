@@ -143,12 +143,20 @@ fn client_protocol_accepts_hello(socket_path: &Path) -> io::Result<bool> {
 }
 
 fn validate_running_server_compatibility(saved_federation: bool) -> io::Result<()> {
+    // hall: a server hall cannot confirm as its own gets no stop command
+    // (decision 45); `hall server stop` would refuse it anyway.
     let Some(status) = read_server_status()? else {
         return Err(io::Error::other(format!(
-            "a hall server is listening, but its status API is unavailable.\n\n{}\nIf that fails, stop the old server process manually.",
-            crate::session::active_restart_after_update_guidance()
+            "a server is listening at {}, but its status API is unavailable, so hall cannot confirm it is a hall server.\nHall will not attach to it, stop it or hand it off.",
+            crate::api::socket_path().display()
         )));
     };
+    if !status.is_hall_server() {
+        return Err(io::Error::other(crate::session::not_hall_server_message(
+            &crate::api::socket_path(),
+            &status,
+        )));
+    }
 
     let capabilities = status.capabilities.as_ref();
     let endpoint_generation =
@@ -570,9 +578,11 @@ test "$sid" = "$$"
                 .read_line(&mut request)
                 .unwrap();
             assert!(request.contains("ping"));
+            // A newer hall server: protocol and generation in hall's range.
             let body = format!(
-                "{{\"id\":\"autodetect:server:status\",\"result\":{{\"type\":\"pong\",\"version\":\"0.5.5\",\"protocol\":{}}}}}\n",
-                crate::protocol::PROTOCOL_VERSION + 1
+                "{{\"id\":\"autodetect:server:status\",\"result\":{{\"type\":\"pong\",\"version\":\"0.5.5\",\"protocol\":{},\"capabilities\":{{\"live_handoff\":true,\"endpoint_protocol_generation\":{}}}}}}}\n",
+                crate::protocol::PROTOCOL_VERSION + 1,
+                crate::protocol::endpoint::ENDPOINT_PROTOCOL_GENERATION + 1
             );
             stream.write_all(body.as_bytes()).unwrap();
             stream.flush().unwrap();
@@ -598,6 +608,50 @@ test "$sid" = "$$"
         std::env::remove_var(crate::session::SESSION_ENV_VAR);
         std::env::remove_var(crate::api::SOCKET_PATH_ENV_VAR);
         crate::session::clear_explicit_session_for_test();
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn validate_running_server_compatibility_gives_no_stop_command_for_a_server_that_is_not_hall() {
+        let _guard = env_lock().lock().unwrap();
+        let dir = unique_test_dir("not-hall");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("api.sock");
+        std::env::set_var(crate::api::SOCKET_PATH_ENV_VAR, &path);
+        crate::session::clear_explicit_session_for_test();
+        let listener = UnixListener::bind(&path).unwrap();
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = String::new();
+            BufReader::new(stream.try_clone().unwrap())
+                .read_line(&mut request)
+                .unwrap();
+            assert!(request.contains("ping"));
+            // herdr v0.9.0's numbers.
+            stream
+                .write_all(b"{\"id\":\"runtime:status\",\"result\":{\"type\":\"pong\",\"version\":\"0.9.0\",\"protocol\":22,\"capabilities\":{\"live_handoff\":true,\"endpoint_protocol_generation\":1}}}\n")
+                .unwrap();
+            stream.flush().unwrap();
+        });
+
+        let message = validate_running_server_compatibility(false)
+            .unwrap_err()
+            .to_string();
+
+        let _ = handle.join();
+        assert!(
+            message.contains("this socket is not a hall server"),
+            "unexpected error: {message}"
+        );
+        assert!(
+            !message.contains("server stop"),
+            "unexpected error: {message}"
+        );
+        assert!(
+            !message.contains("session stop"),
+            "unexpected error: {message}"
+        );
+        std::env::remove_var(crate::api::SOCKET_PATH_ENV_VAR);
         let _ = std::fs::remove_dir_all(dir);
     }
 }

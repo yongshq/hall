@@ -14,6 +14,7 @@ const MAX_SESSION_NAME_LEN: usize = 64;
 const STOP_WAIT_TIMEOUT: Duration = Duration::from_secs(15);
 const STOP_WAIT_POLL: Duration = Duration::from_millis(25);
 const MIN_SOCKET_TIMEOUT: Duration = Duration::from_millis(1);
+const HALL_SERVER_CHECK_TIMEOUT: Duration = Duration::from_secs(2);
 
 static EXPLICIT_SESSION_REQUESTED: AtomicBool = AtomicBool::new(false);
 
@@ -145,6 +146,42 @@ pub fn active_restart_after_update_guidance() -> String {
     restart_after_update_guidance(&local_stop_command(), Some(&local_attach_command()))
 }
 
+/// hall: what hall says about a server that is not hall's (decision 45). It
+/// gives no stop command: hall refuses to stop or hand off such a server.
+pub fn not_hall_server_message(socket_path: &Path, status: &crate::api::RuntimeStatus) -> String {
+    let number = |value: Option<u32>| {
+        value
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "unavailable".to_string())
+    };
+    format!(
+        "this socket is not a hall server: {} answers with protocol {} and endpoint generation {}, and hall's are {} and above.\nHall will not attach to it, stop it or hand it off. Point hall at a hall socket, or unset {}.",
+        socket_path.display(),
+        number(status.protocol),
+        number(status.endpoint_protocol_generation()),
+        crate::api::HALL_NUMBER_FLOOR,
+        crate::api::SOCKET_PATH_ENV_VAR
+    )
+}
+
+/// hall: pings the server at `socket_path` and refuses unless it is hall's
+/// (decision 45). Every request that can stop or hand off a server calls this
+/// first; there is no override.
+pub(crate) fn ensure_hall_server_at(socket_path: &Path, label: &str) -> Result<(), String> {
+    match crate::api::read_runtime_status_at(socket_path, HALL_SERVER_CHECK_TIMEOUT) {
+        Ok(Some(status)) if status.is_hall_server() => Ok(()),
+        Ok(Some(status)) => Err(not_hall_server_message(socket_path, &status)),
+        Ok(None) => Err(format!(
+            "{label} is not running or cannot be reached at {}",
+            socket_path.display()
+        )),
+        Err(err) => Err(format!(
+            "{label} at {} did not answer a status check, so hall cannot confirm it is a hall server and will not send it anything: {err}",
+            socket_path.display()
+        )),
+    }
+}
+
 pub fn explicit_session_requested() -> bool {
     EXPLICIT_SESSION_REQUESTED.load(Ordering::Relaxed)
 }
@@ -269,6 +306,7 @@ fn stop_socket_with_timeout(
         "method": "server.stop",
         "params": {}
     });
+    ensure_hall_server_at(&socket_path, label)?;
     let stream = crate::ipc::connect_local_stream(&socket_path).map_err(|err| {
         format!(
             "{label} is not running or cannot be reached at {}: {err}",
@@ -485,6 +523,17 @@ mod tests {
         std::env::temp_dir().join(format!("herdr-{name}-{}-{nanos}", std::process::id()))
     }
 
+    /// A pong as a hall server answers it: protocol and endpoint generation
+    /// in hall's range.
+    #[cfg(unix)]
+    fn hall_pong_line() -> String {
+        format!(
+            "{{\"id\":\"runtime:status\",\"result\":{{\"type\":\"pong\",\"version\":\"0.9.0\",\"protocol\":{},\"capabilities\":{{\"live_handoff\":true,\"endpoint_protocol_generation\":{}}}}}}}\n",
+            crate::protocol::PROTOCOL_VERSION,
+            crate::protocol::endpoint::ENDPOINT_PROTOCOL_GENERATION
+        )
+    }
+
     #[cfg(unix)]
     fn local_stream_pair(name: &str) -> (LocalStream, LocalStream, std::path::PathBuf) {
         let path = unique_test_path(name);
@@ -586,11 +635,14 @@ mod tests {
             let mut held_streams = Vec::new();
             while keep_running_for_thread.load(Ordering::Relaxed) {
                 match listener.accept() {
-                    Ok((stream, _)) => {
+                    Ok((mut stream, _)) => {
                         if let Ok(reader_stream) = stream.try_clone() {
                             let mut request = String::new();
                             match BufReader::new(reader_stream).read_line(&mut request) {
                                 Ok(0) => continue,
+                                Ok(_) if request.contains("\"ping\"") => {
+                                    let _ = stream.write_all(hall_pong_line().as_bytes());
+                                }
                                 Ok(_) if request.contains("server.stop") => {
                                     held_streams.push(stream)
                                 }
@@ -985,6 +1037,11 @@ mod tests {
                             match BufReader::new(reader_stream).read_line(&mut request) {
                                 Ok(0) => continue,
                                 Ok(_) if request.trim().is_empty() => continue,
+                                Ok(_) if request.contains("\"ping\"") => {
+                                    let _ = stream.write_all(hall_pong_line().as_bytes());
+                                    let _ = stream.flush();
+                                    continue;
+                                }
                                 Ok(_) => {}
                                 Err(_) => continue,
                             }

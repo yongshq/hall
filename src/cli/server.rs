@@ -208,6 +208,14 @@ fn server_live_handoff(args: &[String]) -> std::io::Result<i32> {
         return Ok(2);
     };
 
+    // hall: a handoff may cross hall versions, but never reaches a server
+    // that is not hall's (decision 45).
+    let socket_path = crate::session::active_api_socket_path();
+    if let Err(err) = crate::session::ensure_hall_server_at(&socket_path, "server") {
+        eprintln!("{err}");
+        return Ok(1);
+    }
+
     // Live handoff is itself a protocol-mismatch recovery path, so it must
     // reach the running server without the normal CLI compatibility guard.
     let response = super::send_request_unchecked(&Request {

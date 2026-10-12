@@ -42,6 +42,17 @@ pub(super) fn mismatch_response(
     })
 }
 
+/// hall: the error for a server that is not hall's (decision 45).
+pub(super) fn not_hall_server_response(request_id: &str, message: &str) -> ErrorResponse {
+    ErrorResponse {
+        id: request_id.to_string(),
+        error: ErrorBody {
+            code: "not_hall_server".into(),
+            message: message.to_string(),
+        },
+    }
+}
+
 pub(super) fn reported_error() -> std::io::Error {
     std::io::Error::other(ProtocolMismatchReported)
 }

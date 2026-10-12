@@ -1353,6 +1353,8 @@ fn live_handoff_running_server_for_update(
     release: &ReleaseInfo,
     updated_exe: &Path,
 ) -> Result<(), String> {
+    // hall: never hands off a server that is not hall's (decision 45).
+    crate::session::ensure_hall_server_at(plan.socket_path(), "server")?;
     eprintln!(
         "asking {} {} to hand off live panes to the updated server...",
         plan.target_noun(),
@@ -1678,6 +1680,8 @@ fn wait_for_server_shutdown_at(socket_path: &Path, timeout: Duration) -> Result<
 
 #[cfg(not(windows))]
 fn stop_running_server_for_update(plan: &RunningServerUpdatePlan) -> Result<(), String> {
+    // hall: never stops a server that is not hall's (decision 45).
+    crate::session::ensure_hall_server_at(plan.socket_path(), "server")?;
     eprintln!("stopping herdr {} {}...", plan.target_noun(), plan.label());
     stop_server_via_api_at(plan.socket_path(), SERVER_STOP_RESPONSE_TIMEOUT)?;
     wait_for_server_shutdown_at(plan.socket_path(), SERVER_HANDOFF_CONFIRM_TIMEOUT)?;

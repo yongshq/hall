@@ -11,6 +11,27 @@ pub struct RuntimeStatus {
     pub capabilities: Option<crate::api::schema::ServerCapabilities>,
 }
 
+/// hall: hall's protocol numbers and endpoint generations are all at or above
+/// this floor (decision 33); herdr's are below it.
+pub const HALL_NUMBER_FLOOR: u32 = 1000;
+
+impl RuntimeStatus {
+    /// hall: the server is hall's only when both its protocol and its endpoint
+    /// generation are in hall's range (decision 45). A missing number fails.
+    pub fn is_hall_server(&self) -> bool {
+        let generation = self.endpoint_protocol_generation();
+        self.protocol
+            .is_some_and(|protocol| protocol >= HALL_NUMBER_FLOOR)
+            && generation.is_some_and(|generation| generation >= HALL_NUMBER_FLOOR)
+    }
+
+    pub fn endpoint_protocol_generation(&self) -> Option<u32> {
+        self.capabilities
+            .as_ref()
+            .and_then(|capabilities| capabilities.endpoint_protocol_generation)
+    }
+}
+
 pub fn read_runtime_status_at(
     socket_path: &Path,
     timeout: Duration,
@@ -56,5 +77,41 @@ pub fn read_runtime_status_at(
         result => Err(io::Error::other(format!(
             "server status request returned unexpected result: {result:?}"
         ))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn status(protocol: Option<u32>, generation: Option<u32>) -> RuntimeStatus {
+        RuntimeStatus {
+            version: Some("0.9.0".into()),
+            protocol,
+            capabilities: Some(crate::api::schema::ServerCapabilities {
+                live_handoff: true,
+                detached_server_daemon: false,
+                endpoint_protocol_generation: generation,
+                surface_interest: false,
+                health_check: false,
+            }),
+        }
+    }
+
+    #[test]
+    fn hall_server_needs_both_numbers_in_hall_range() {
+        assert!(status(Some(1022), Some(1001)).is_hall_server());
+        assert!(status(Some(1000), Some(1000)).is_hall_server());
+        assert!(!status(Some(22), Some(1)).is_hall_server());
+        assert!(!status(Some(1022), Some(1)).is_hall_server());
+        assert!(!status(Some(22), Some(1001)).is_hall_server());
+        assert!(!status(Some(999), Some(1001)).is_hall_server());
+        assert!(!status(None, Some(1001)).is_hall_server());
+        assert!(!status(Some(1022), None).is_hall_server());
+        let no_capabilities = RuntimeStatus {
+            capabilities: None,
+            ..status(Some(1022), Some(1001))
+        };
+        assert!(!no_capabilities.is_hall_server());
     }
 }

@@ -783,6 +783,19 @@ fn ensure_server_protocol_compatible(client: &ApiClient, request_id: &str) -> st
     let server_protocol = status
         .protocol
         .ok_or_else(|| std::io::Error::other("server ping did not include a protocol version"))?;
+    // hall: a server that is not hall's gets no restart guidance, so no stop
+    // command (decision 45).
+    if !status.is_hall_server() {
+        let response = protocol_guard::not_hall_server_response(
+            request_id,
+            &crate::session::not_hall_server_message(&client.socket_path(), &status),
+        );
+        eprintln!(
+            "{}",
+            serde_json::to_string(&response).map_err(std::io::Error::other)?
+        );
+        return Err(protocol_guard::reported_error());
+    }
     let Some(response) = protocol_guard::mismatch_response(
         request_id,
         server_protocol,

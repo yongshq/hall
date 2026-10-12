@@ -1,6 +1,6 @@
 # Modifications to herdr
 
-Hall is a modified version of herdr v0.9.0 (commit b99002ac99b09e00b4ca692436cb15a6b0d676f1), Apache-2.0; see [NOTICE](NOTICE). Every herdr file hall changes is listed here, kept current with each change. Files hall adds (`crates/`, `scripts/`, hall's own `docs/*.md`, `docs/adr/`, `docs/research/`, `GLOSSARY.md`, `NOTICE`, this file, `tests/hall_separation.rs` and `tests/fixtures/hall-endpoint-welcome-1001.json`) are hall's own and not listed.
+Hall is a modified version of herdr v0.9.0 (commit b99002ac99b09e00b4ca692436cb15a6b0d676f1), Apache-2.0; see [NOTICE](NOTICE). Every herdr file hall changes is listed here, kept current with each change. Files hall adds (`crates/`, `scripts/`, hall's own `docs/*.md`, `docs/adr/`, `docs/research/`, `GLOSSARY.md`, `NOTICE`, this file, `tests/hall_separation.rs`, `tests/hall_stop_guard.rs` and `tests/fixtures/hall-endpoint-welcome-1001.json`) are hall's own and not listed.
 
 ## Repository and build
 
@@ -80,3 +80,14 @@ Hall is a modified version of herdr v0.9.0 (commit b99002ac99b09e00b4ca692436cb1
 | `src/client/shell/tests/mod.rs`, `src/client/tests/mod.rs`, `src/server/headless/tests/mod.rs`, `src/server/headless/tests/pane_graphics.rs` | Expected command text as 44a. |
 | `skills/herdr/SKILL.md` | 44a and 44b: the skill `hall --skill` prints gives `hall` commands and the `HALL_*` pane names. |
 | `tests/support/mod.rs` | Server cleanup works on macOS (process list, argv and environment from `proc_listallpids` and `KERN_PROCARGS2`, as `/proc` gives them on Linux) and matches the `hall` binary, so no test server or `server --handoff-import` outlives a test or writes back into a removed `/tmp/hlh-*` folder; tests. |
+
+## Step 1 second repair (decision 45)
+
+| File | Change |
+|---|---|
+| `src/api/status.rs`, `src/api/mod.rs` | `HALL_NUMBER_FLOOR` (1000) and `RuntimeStatus::is_hall_server`: a server is hall's only when its protocol and endpoint generation are both at or above the floor; a test. |
+| `src/session.rs` | `ensure_hall_server_at` pings first and refuses a server that is not hall's; `hall server stop` and `hall session stop` call it before `server.stop`; `not_hall_server_message`, which gives no stop command; stop tests answer ping as a hall server. |
+| `src/cli/server.rs` | `hall server live-handoff` refuses a server that is not hall's before sending the handoff. |
+| `src/cli.rs`, `src/cli/protocol_guard.rs` | A CLI request to a server that is not hall's prints `not_hall_server` instead of restart guidance. |
+| `src/server/autodetect.rs` | The client launch says a server that is not hall's, or whose status is unavailable, is not one hall will attach to, stop or hand off, with no stop command; tests. |
+| `src/update.rs` | The (refused) update flow's stop and handoff also refuse a server that is not hall's. |
