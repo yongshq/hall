@@ -1,3 +1,5 @@
+**Superseded by [0004](0004-fork-of-herdr.md).**
+
 # Hall is its own app, with herdr as the backend
 
 Hall is a full-screen app of its own whose top level is a reeve. Herdr keeps running every session unseen underneath; hall draws the reeve tree itself and shows the chosen session through herdr's live terminal stream, sending keys back through the same route. Chosen because the liege wants reeves, not herdr workspaces, at the top level, and herdr's documented socket API (events pushed, live frames to any external client, input with one controller at a time) makes that possible without writing terminal handling of our own.
