@@ -659,19 +659,7 @@ fn iter_worktree_server_pids() -> std::io::Result<Vec<u32>> {
     let own_pid = std::process::id();
     let mut pids = Vec::new();
 
-    let proc_entries = match fs::read_dir("/proc") {
-        Ok(entries) => entries,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(err) => return Err(err),
-    };
-
-    for entry in proc_entries {
-        let entry = entry?;
-        let file_name = entry.file_name();
-        let Some(pid) = file_name.to_str().and_then(|name| name.parse::<u32>().ok()) else {
-            continue;
-        };
-
+    for pid in all_pids()? {
         if pid == own_pid {
             continue;
         }
@@ -682,6 +670,102 @@ fn iter_worktree_server_pids() -> std::io::Result<Vec<u32>> {
     }
 
     Ok(pids)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn all_pids() -> std::io::Result<Vec<u32>> {
+    let proc_entries = match fs::read_dir("/proc") {
+        Ok(entries) => entries,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(err) => return Err(err),
+    };
+
+    let mut pids = Vec::new();
+    for entry in proc_entries {
+        let entry = entry?;
+        let file_name = entry.file_name();
+        if let Some(pid) = file_name.to_str().and_then(|name| name.parse::<u32>().ok()) {
+            pids.push(pid);
+        }
+    }
+    Ok(pids)
+}
+
+// hall: macOS has no /proc, so without these the scan found no server and a
+// test's servers (and the `server --handoff-import` servers they spawn)
+// outlived it, writing session.json back into the removed /tmp/hlh-* folders.
+#[cfg(target_os = "macos")]
+fn all_pids() -> std::io::Result<Vec<u32>> {
+    let count = unsafe { libc::proc_listallpids(std::ptr::null_mut(), 0) };
+    if count < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    // Room for processes started between the two calls.
+    let mut buffer = vec![0 as libc::pid_t; count as usize + 64];
+    let bytes = (buffer.len() * std::mem::size_of::<libc::pid_t>()) as libc::c_int;
+    let count = unsafe { libc::proc_listallpids(buffer.as_mut_ptr().cast(), bytes) };
+    if count < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    buffer.truncate(count as usize);
+    Ok(buffer
+        .into_iter()
+        .filter(|pid| *pid > 0)
+        .map(|pid| pid as u32)
+        .collect())
+}
+
+/// The executable path, arguments and environment of a process of this user,
+/// from `sysctl(KERN_PROCARGS2)`: argc, the exec path, padding, argv, envp.
+#[cfg(target_os = "macos")]
+fn macos_procargs(pid: u32) -> std::io::Result<(PathBuf, Vec<String>, Vec<String>)> {
+    let mut mib = [libc::CTL_KERN, libc::KERN_PROCARGS2, pid as libc::c_int];
+    let mut size: libc::size_t = 0;
+    let rc = unsafe {
+        libc::sysctl(
+            mib.as_mut_ptr(),
+            3,
+            std::ptr::null_mut(),
+            &mut size,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if rc != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let mut buffer = vec![0u8; size];
+    let rc = unsafe {
+        libc::sysctl(
+            mib.as_mut_ptr(),
+            3,
+            buffer.as_mut_ptr().cast(),
+            &mut size,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if rc != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    buffer.truncate(size);
+    if buffer.len() < 4 {
+        return Err(std::io::Error::other("short KERN_PROCARGS2 buffer"));
+    }
+    let argc = i32::from_ne_bytes(buffer[..4].try_into().unwrap()).max(0) as usize;
+    let rest = &buffer[4..];
+    let exe_end = rest
+        .iter()
+        .position(|byte| *byte == 0)
+        .unwrap_or(rest.len());
+    let exe = PathBuf::from(String::from_utf8_lossy(&rest[..exe_end]).into_owned());
+    let mut strings = rest[exe_end..]
+        .split(|byte| *byte == 0)
+        .filter(|chunk| !chunk.is_empty())
+        .map(|chunk| String::from_utf8_lossy(chunk).into_owned());
+    let argv: Vec<String> = strings.by_ref().take(argc).collect();
+    let env: Vec<String> = strings.collect();
+    Ok((exe, argv, env))
 }
 
 fn is_test_herdr_server_process(pid: u32) -> bool {
@@ -700,10 +784,17 @@ fn is_test_herdr_server_process(pid: u32) -> bool {
     cmdline.iter().any(|arg| arg == "server")
 }
 
+#[cfg(not(target_os = "macos"))]
 fn proc_link_target(pid: u32, link: &str) -> Option<PathBuf> {
     fs::read_link(format!("/proc/{pid}/{link}")).ok()
 }
 
+#[cfg(target_os = "macos")]
+fn proc_link_target(pid: u32, _link: &str) -> Option<PathBuf> {
+    macos_procargs(pid).ok().map(|(exe, _, _)| exe)
+}
+
+#[cfg(not(target_os = "macos"))]
 fn read_cmdline(pid: u32) -> std::io::Result<Vec<String>> {
     let cmdline = fs::read(format!("/proc/{pid}/cmdline"))?;
     Ok(cmdline
@@ -713,17 +804,30 @@ fn read_cmdline(pid: u32) -> std::io::Result<Vec<String>> {
         .collect())
 }
 
-fn process_runtime_dir(pid: u32) -> std::io::Result<Option<PathBuf>> {
-    let environ = fs::read(format!("/proc/{pid}/environ"))?;
+#[cfg(target_os = "macos")]
+fn read_cmdline(pid: u32) -> std::io::Result<Vec<String>> {
+    macos_procargs(pid).map(|(_, argv, _)| argv)
+}
 
+#[cfg(not(target_os = "macos"))]
+fn read_environ(pid: u32) -> std::io::Result<Vec<String>> {
+    let environ = fs::read(format!("/proc/{pid}/environ"))?;
+    Ok(environ
+        .split(|byte| *byte == 0)
+        .filter(|chunk| !chunk.is_empty())
+        .map(|chunk| String::from_utf8_lossy(chunk).to_string())
+        .collect())
+}
+
+#[cfg(target_os = "macos")]
+fn read_environ(pid: u32) -> std::io::Result<Vec<String>> {
+    macos_procargs(pid).map(|(_, _, env)| env)
+}
+
+fn process_runtime_dir(pid: u32) -> std::io::Result<Option<PathBuf>> {
     let mut socket_path: Option<PathBuf> = None;
 
-    for entry in environ.split(|byte| *byte == 0) {
-        if entry.is_empty() {
-            continue;
-        }
-
-        let kv = String::from_utf8_lossy(entry);
+    for kv in read_environ(pid)? {
         if let Some(value) = kv.strip_prefix("XDG_RUNTIME_DIR=") {
             return Ok(Some(PathBuf::from(value)));
         }
@@ -754,7 +858,8 @@ fn current_checkout_root() -> &'static Path {
 }
 
 fn is_test_herdr_binary(path: &Path) -> bool {
-    path.ends_with("target/debug/herdr") && path.starts_with(current_checkout_root())
+    (path.ends_with("target/debug/hall") || path.ends_with("target/release/hall"))
+        && path.starts_with(current_checkout_root())
 }
 
 extern "C" fn run_atexit_cleanup() {
@@ -878,10 +983,44 @@ mod tests {
 
     #[test]
     fn test_binary_matcher_accepts_current_checkout_debug_binary() {
-        let binary = current_checkout_root().join("target/debug/herdr");
+        let binary = current_checkout_root().join("target/debug/hall");
         assert!(
             is_test_herdr_binary(&binary),
             "current checkout debug binary should be considered test-owned"
+        );
+    }
+
+    #[test]
+    fn process_scan_reads_pid_list_and_argv() {
+        let mut child = std::process::Command::new("/bin/sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+
+        let listed = all_pids().unwrap().contains(&pid);
+        let argv = read_cmdline(pid).unwrap();
+        let _ = child.kill();
+        let _ = child.wait();
+
+        assert!(listed, "the process list should include a live child");
+        assert_eq!(argv, ["/bin/sleep", "30"]);
+    }
+
+    /// macOS hides a platform binary's environment (e.g. /bin/sleep), so this
+    /// reads the test binary's own, which is not one, like hall's servers.
+    #[test]
+    fn process_scan_reads_executable_and_environment() {
+        let pid = std::process::id();
+        let path = std::env::var("PATH").unwrap_or_default();
+
+        let environ = read_environ(pid).unwrap();
+        let exe = proc_link_target(pid, "exe").unwrap();
+
+        assert!(environ.contains(&format!("PATH={path}")), "{environ:?}");
+        assert_eq!(
+            exe.canonicalize().unwrap(),
+            std::env::current_exe().unwrap().canonicalize().unwrap()
         );
     }
 
