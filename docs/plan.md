@@ -78,6 +78,8 @@ Hall is built and tested only against the test setup (decisions 10 and 23, ADR 0
 
 **Hard rule: never the herdr session `default`, never `~/.reeve`.** Those belong to the live setup, which the liege uses for the household's real work and which stays untouched while hall is developed (decision 9). Hall takes the herdr sessions and the reeve home it works against explicitly, and has no built-in fallback to either live one.
 
+**The "live setup unchanged" check** (decision 28). The rule holds even for reads, so which panes `default` holds is never looked at. What is checked instead: every pane the test setup made is recorded with its `hall-dev*` session and confirmed there; `default`'s entry in `herdr session list --json` is unchanged against the baseline taken at setup; and `~/.reeve`, including `~/.reeve/state`, is unchanged.
+
 How "explicitly" is met (decision 24, ADR 0003 consequences):
 
 - **Every test reeve and test hand session names its reeve home.** Each one starts with `REEVE_HOME=~/.reeve-hall-dev` set on its own command line, never relying on the default (decision 26). The liege's reeve plugin hooks run in every claude session and resolve the home as `${REEVE_HOME:-$HOME/.reeve}`, so a test reeve started without it writes its session records into `~/.reeve` and the live setup gains a phantom reeve.
@@ -91,26 +93,26 @@ Each step works end to end and can be shown to the liege on its own. Every step 
 ### 1. Test setup and stand-in
 
 - **Outcome:** the `hall-dev` and `hall-dev-2` herdr sessions running, with test reeves and test hands in both; `~/.reeve-hall-dev`; and the stand-in printing the draft listing for them. Any hand state, question, or waiting, idle or wedged flag can be set by changing `~/.reeve-hall-dev`, and any test reeve can be driven to a dialog or to the end of a turn, so later steps can show every state and every alert on demand.
-- **Shown working:** the stand-in's listing names every test reeve and errand, with session locations that match the sessions in `hall-dev` and `hall-dev-2`; a test reeve driven to a dialog reads as blocked in herdr, and after a turn reads as ready for input (`herdr agent explain`, with `--session`); the live setup is unchanged (the `default` session and `~/.reeve` as they were, `~/.reeve/state` unchanged).
+- **Shown working:** the stand-in's listing names every test reeve and errand, with session locations that match the sessions in `hall-dev` and `hall-dev-2`; a test reeve driven to a dialog reads as blocked in herdr, and after a turn reads as ready for input (`herdr agent explain`, with `--session`); the "live setup unchanged" check passes.
 - **Needs:** nothing earlier.
 - **Built:** the stand-in and the test setup scripts ([test-setup.md](test-setup.md), [listing-draft.md](listing-draft.md)); the live run is still to come.
 
 ### 2. Reeve tree from the stand-in
 
 - **Outcome:** hall starts against `hall-dev`, `hall-dev-2` and `~/.reeve-hall-dev`, each named explicitly, reads the stand-in's listing and draws the reeve tree: every test reeve from both herdr sessions, its hands in flight beneath it, a hand state mark per hand. Moving through the tree with keys works; the key help line shows at the bottom.
-- **Shown working:** test reeves in `hall-dev` and in `hall-dev-2` appear side by side in one reeve tree; changing a test hand's state in `~/.reeve-hall-dev` changes its mark in hall; finishing and cleaning up an errand drops the hand from the tree; the `default` session and `~/.reeve` as they were.
+- **Shown working:** test reeves in `hall-dev` and in `hall-dev-2` appear side by side in one reeve tree; changing a test hand's state in `~/.reeve-hall-dev` changes its mark in hall; finishing and cleaning up an errand drops the hand from the tree; the "live setup unchanged" check passes.
 - **Needs:** step 1.
 
 ### 3. Watching a session live
 
 - **Outcome:** picking a reeve or a hand shows its session in the right of the screen, live, read-only, through `herdr terminal session observe` with `--session` naming the herdr session the listing gives, sized to the part of the screen hall gives it, with the listing from `~/.reeve-hall-dev`.
-- **Shown working:** output in a test reeve's session in `hall-dev` appears in hall as it happens; resizing hall's terminal redraws the session at the new size; moving to a test hand in `hall-dev-2` switches the view to it; the `default` session and `~/.reeve` as they were.
+- **Shown working:** output in a test reeve's session in `hall-dev` appears in hall as it happens; resizing hall's terminal redraws the session at the new size; moving to a test hand in `hall-dev-2` switches the view to it; the "live setup unchanged" check passes.
 - **Needs:** step 2 for picking, step 1 for sessions to watch.
 
 ### 4. Typing into it
 
 - **Outcome:** with a session shown and focused, keys go to it through `herdr terminal session control` with `--session` naming its herdr session; ctrl+b (or the configured prefix) then a key runs hall's own commands instead. Moving away releases control. All with the listing from `~/.reeve-hall-dev`.
-- **Shown working:** typing a command into a test hand's session in `hall-dev` from hall runs it there, and the same in `hall-dev-2`; the prefix moves focus back to the reeve tree without sending anything to the session; after moving away, the session takes input from elsewhere again; the `default` session and `~/.reeve` as they were, with nothing typed into any session there.
+- **Shown working:** typing a command into a test hand's session in `hall-dev` from hall runs it there, and the same in `hall-dev-2`; the prefix moves focus back to the reeve tree without sending anything to the session; after moving away, the session takes input from elsewhere again; the "live setup unchanged" check passes, and nothing is typed into any session outside `hall-dev*`.
 - **Needs:** step 3.
 
 ### 5. Badges, highlight and alert sound
@@ -125,7 +127,7 @@ Each step works end to end and can be shown to the liege on its own. Every step 
   - a test reeve driven to a dialog;
   - a test reeve ending a turn, alerting on every reply.
 
-  The hand triggers also raise their reeve's badge count; the reeve triggers come from a test reeve in `hall-dev` and from one in `hall-dev-2`. With the sound muted, a repeat of any trigger shows only the highlight. The `default` session, `~/.reeve` and herdr's global config as they were.
+  The hand triggers also raise their reeve's badge count; the reeve triggers come from a test reeve in `hall-dev` and from one in `hall-dev-2`. With the sound muted, a repeat of any trigger shows only the highlight. The "live setup unchanged" check passes, and herdr's global config is unchanged.
 - **Needs:** step 2 for the listing and the tree; step 1 for setting states and driving test reeves on demand; the herdr agent-state reading the turn-end question settles on (for example `session.snapshot` plus `pane.agent_status_changed` per reeve session), built in this step. The question of how a reeve's turn ending is read (below) is settled before this step starts. Independent of steps 3 and 4.
 
 ## Questions left for build time
@@ -138,7 +140,7 @@ Each step works end to end and can be shown to the liege on its own. Every step 
 - **Sending a literal ctrl+b.** Every key but the prefix goes to the session (decision 14), so ctrl+b itself can never reach one, and a session running readline or vim may need it. Herdr's own answer for direct attach is ctrl+b twice ([CLI reference][cli], Direct terminal attach); hall's is not chosen.
 - **Synchronised output.** Frames start with `ESC[?2026h` (research section 2). Whether each candidate emulator handles it is to be checked when choosing one.
 - **How the sound is played.** No mechanism has been looked at yet.
-- **Herdr version.** Build and verify against the installed herdr 0.9.0, though the docs read are for 0.9.3. Upgrading is a Homebrew upgrade of the live setup's backend, after which the `default` herdr session keeps running the old version until it restarts (research section 6), and decision 9 keeps the live setup untouched. So an upgrade is the liege's call, still open (the note after decision 25).
+- **Herdr version.** Settled: herdr stays at the installed 0.9.0 for all of hall's development (decision 27), though the docs read are for 0.9.3. Upgrading would be a Homebrew upgrade of the live setup's backend, after which the `default` herdr session keeps running the old version until it restarts (research section 6), and decision 9 keeps the live setup untouched.
 
 ## Risks
 

@@ -39,5 +39,12 @@ After the plan review (2026-10-12), reeve's calls under the decisions already ma
 23. Test setup gets a second herdr session, hall-dev-2, so decision 6 (reeves across herdr sessions) is shown before live use. Same separation rules.
 24. Every herdr call in hall's test setup names its herdr session on the command line (--session) or connects to that session's socket path directly; never relies on HERDR_SESSION or an inherited HERDR_SOCKET_PATH, which inside a live pane points at default. Herdr's global config and plugin registry are shared with the live setup: never edited for testing; a test config goes through HERDR_CONFIG_PATH.
 25. Glossary gains "Herdr session", "Test reeve" and "Test hand"; "Stand-in" stays the listing substitute only.
-Open with the liege: herdr upgrade 0.9.0 to 0.9.3 (would change the live backend). Until answered, build and verify against installed 0.9.0.
+Closed by decision 27 (was open with the liege: herdr upgrade 0.9.0 to 0.9.3, which would change the live backend).
 26. Every test reeve and test hand session starts with REEVE_HOME=~/.reeve-hall-dev on its own command line, never relying on the default: the liege's reeve plugin hooks run in every claude session and would otherwise write into ~/.reeve. (From the repair review.)
+
+After landing (2026-10-12):
+27. Herdr stays at the installed 0.9.0 for all of hall's development; no upgrade (liege: "yes to all"). Closes the open note after decision 25.
+
+After the step 1 review (2026-10-12), liege: "yes to both":
+28. The separation rule stays absolute: no herdr call ever names the session default, not even a read. Plan wording "the default session ... as they were" means what is checked: every pane the test setup made is recorded with its hall-dev* session and confirmed there, and default's entry in herdr session list is unchanged against the baseline. Which panes default holds is not checked.
+29. Step 1 lands with one low accepted as known: reeve's wake spool makes a hard link for an instant (ln then rm under state/sessions/<sid>/wake), so up or test-drive can refuse a test home once with HardLink and pass on rerun; a writer killed mid-write leaves a .new.* pair to remove by hand. Fail-safe only. Documented in docs/test-setup.md.
