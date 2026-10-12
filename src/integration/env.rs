@@ -8,6 +8,11 @@ use portable_pty::CommandBuilder;
 pub(crate) const HERDR_PANE_ID_ENV_VAR: &str = "HERDR_PANE_ID";
 pub(crate) const HERDR_TAB_ID_ENV_VAR: &str = "HERDR_TAB_ID";
 pub(crate) const HERDR_WORKSPACE_ID_ENV_VAR: &str = "HERDR_WORKSPACE_ID";
+// hall: set into panes beside the HERDR_ names above (decision 44b); hall's
+// own CLI reads only these.
+pub(crate) const HALL_PANE_ID_ENV_VAR: &str = "HALL_PANE_ID";
+pub(crate) const HALL_TAB_ID_ENV_VAR: &str = "HALL_TAB_ID";
+pub(crate) const HALL_WORKSPACE_ID_ENV_VAR: &str = "HALL_WORKSPACE_ID";
 
 pub(crate) const PI_CODING_AGENT_DIR_ENV_VAR: &str = "PI_CODING_AGENT_DIR";
 pub(crate) const OMP_CONFIG_DIR_ENV_VAR: &str = "PI_CONFIG_DIR";

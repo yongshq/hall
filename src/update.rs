@@ -25,7 +25,7 @@ use serde::{Deserialize, Deserializer};
 const STABLE_UPDATE_MANIFEST_URL: &str = "https://herdr.dev/latest.json";
 const PREVIEW_UPDATE_MANIFEST_URL: &str = "https://herdr.dev/preview.json";
 const HOMEBREW_FORMULA_API_URL: &str = "https://formulae.brew.sh/api/formula/herdr.json";
-const HERDR_UPDATE_COMMAND: &str = "herdr update";
+const HERDR_UPDATE_COMMAND: &str = "hall update";
 const HOMEBREW_UPDATE_COMMAND: &str = "brew update && brew upgrade herdr";
 const MISE_UPDATE_COMMAND: &str = "mise upgrade herdr";
 const NIX_UPDATE_COMMAND: &str = "update through Nix";
@@ -962,7 +962,7 @@ fn plan_running_server_updates(
         )
         .map_err(|err| {
             format!(
-                "failed to read status for herdr target {} at {}: {err}. stop it with `{}` and run `herdr update` again",
+                "failed to read status for herdr target {} at {}: {err}. stop it with `{}` and run `hall update` again",
                 target.label,
                 target.socket_path.display(),
                 target.stop_command
@@ -971,7 +971,7 @@ fn plan_running_server_updates(
             Some(server) => server,
             None if target.must_be_running => {
                 return Err(format!(
-                        "herdr target {} looked running, but its status API did not respond at {}. stop it with `{}` and run `herdr update` again",
+                        "herdr target {} looked running, but its status API did not respond at {}. stop it with `{}` and run `hall update` again",
                     target.label,
                     target.socket_path.display(),
                     target.stop_command
@@ -979,7 +979,7 @@ fn plan_running_server_updates(
             }
             None if client_protocol_server_is_running_at(&target.client_socket_path) => {
                 return Err(format!(
-                    "herdr target {} has a client socket, but its status API did not respond at {}. stop it with `{}` and run `herdr update` again",
+                    "herdr target {} has a client socket, but its status API did not respond at {}. stop it with `{}` and run `hall update` again",
                     target.label,
                     target.socket_path.display(),
                     target.stop_command
@@ -997,7 +997,7 @@ fn plan_running_server_updates(
 
     if plans.is_empty() && target_client_protocol_server_is_running()? {
         return Err(format!(
-            "a herdr server is listening, but its status API is unavailable; try `{}`, or stop the old server process manually, then run `herdr update` again",
+            "a hall server is listening, but its status API is unavailable; try `{}`, or stop the old server process manually, then run `hall update` again",
             crate::session::local_stop_command()
         ));
     }
@@ -1038,7 +1038,7 @@ fn running_update_targets() -> Result<Vec<RunningUpdateTarget>, String> {
             name: None,
             label: socket_path.display().to_string(),
             stop_command: format!(
-                "{}={} herdr server stop",
+                "{}={} hall server stop",
                 crate::api::SOCKET_PATH_ENV_VAR,
                 socket_path.display()
             ),
@@ -1070,7 +1070,7 @@ fn running_update_targets() -> Result<Vec<RunningUpdateTarget>, String> {
             attach_command: Some(if session.default {
                 "herdr".to_string()
             } else {
-                format!("herdr session attach {}", session.name)
+                format!("hall session attach {}", session.name)
             }),
             label: session.name.clone(),
             client_socket_path: crate::session::client_socket_path_for(if session.default {
@@ -1115,7 +1115,7 @@ pub(crate) fn parse_self_update_args(args: &[String]) -> Result<SelfUpdateOption
         match arg.as_str() {
             "--handoff" => options.live_handoff = true,
             "--help" | "-h" => {
-                return Err("usage: herdr update [--handoff]".to_string());
+                return Err("usage: hall update [--handoff]".to_string());
             }
             _ => return Err(format!("unknown update option: {arg}")),
         }
@@ -1130,7 +1130,7 @@ fn prompt_to_stop_old_servers_before_update(
 ) -> Result<bool, String> {
     if !io::stdin().is_terminal() {
         return Err(
-            "one or more Herdr sessions must stop for this update. Stop running Herdr sessions when ready, then run `herdr update` again from an interactive terminal."
+            "one or more Herdr sessions must stop for this update. Stop running Herdr sessions when ready, then run `hall update` again from an interactive terminal."
                 .to_string(),
         );
     }
@@ -1406,7 +1406,7 @@ fn prompt_to_stop_old_server_after_failed_handoff(
     eprintln!("  server: v{}", version_label(status.version.as_deref()));
     eprintln!("  installed: {}", release.label());
     eprintln!(
-        "you can keep using the old server, or stop it now so the next `herdr` start uses {}.",
+        "you can keep using the old server, or stop it now so the next `hall` start uses {}.",
         release.label()
     );
     eprintln!("stopping the old server will exit its pane processes.");
@@ -1473,13 +1473,13 @@ fn recover_failed_live_handoff_for_update(
         FailedHandoffServerState::NoServerResponding => {
             if let Some(command) = plan.attach_command() {
                 eprintln!(
-                    "no herdr server is responding for session {}. the binary was updated; run `{command}` to start {}.",
+                    "no hall server is responding for session {}. the binary was updated; run `{command}` to start {}.",
                     plan.label(),
                     release.label()
                 );
             } else {
                 eprintln!(
-                    "no herdr server is responding at {}. the binary was updated; restart with the same socket override to use {}.",
+                    "no hall server is responding at {}. the binary was updated; restart with the same socket override to use {}.",
                     plan.socket_path().display(),
                     release.label()
                 );
@@ -1778,7 +1778,7 @@ fn print_running_session_update_outcomes(
     release: &ReleaseInfo,
 ) {
     if outcomes.is_empty() {
-        eprintln!("run herdr again.");
+        eprintln!("run hall again.");
         return;
     }
 
@@ -1828,7 +1828,7 @@ fn print_running_session_update_outcomes(
                         release.label()
                     ),
                     None => eprintln!(
-                        "Run `{}`, then restart Herdr with the same socket override when ready to use {}.",
+                        "Run `{}`, then restart hall with the same socket override when ready to use {}.",
                         outcome.stop_command,
                         release.label()
                     ),
@@ -1900,19 +1900,19 @@ pub(crate) fn update_install_command() -> &'static str {
 pub(crate) fn update_install_instruction(install_command: &str) -> String {
     match install_command {
         HERDR_UPDATE_COMMAND => {
-            "detach, run `herdr update`, then run Herdr again to reconnect".to_string()
+            "detach, run `hall update`, then run hall again to reconnect".to_string()
         }
         HOMEBREW_UPDATE_COMMAND => {
-            "detach, run `brew update && brew upgrade herdr`, then run Herdr again to reconnect"
+            "detach, run `brew update && brew upgrade herdr`, then run hall again to reconnect"
                 .to_string()
         }
         MISE_UPDATE_COMMAND => {
-            "detach, run `mise upgrade herdr`, then run Herdr again to reconnect".to_string()
+            "detach, run `mise upgrade herdr`, then run hall again to reconnect".to_string()
         }
         NIX_UPDATE_COMMAND => {
-            "detach, update through Nix, then run Herdr again to reconnect".to_string()
+            "detach, update through Nix, then run hall again to reconnect".to_string()
         }
-        command => format!("detach, run `{command}`, then run Herdr again to reconnect"),
+        command => format!("detach, run `{command}`, then run hall again to reconnect"),
     }
 }
 
@@ -2156,7 +2156,7 @@ pub fn self_update(options: SelfUpdateOptions) -> Result<Version, String> {
     }
 
     if running_inside_herdr() {
-        return Err("run `herdr update` outside herdr after detaching from the session".into());
+        return Err("run `hall update` outside herdr after detaching from the session".into());
     }
 
     eprintln!("checking {} channel for updates...", channel.as_str());
@@ -2197,7 +2197,7 @@ pub fn self_update(options: SelfUpdateOptions) -> Result<Version, String> {
         eprintln!("installed {}", release.label());
         print_outdated_integration_notice_with_updated_binary(&updated_exe);
         eprintln!(
-            "Open a new terminal, or reconnect SSH, then start Herdr again to use the updated client. Running servers remain active; restart them later only if you need server-side changes from {}.",
+            "Open a new terminal, or reconnect SSH, then start hall again to use the updated client. Running servers remain active; restart them later only if you need server-side changes from {}.",
             release.label()
         );
     }
@@ -2216,7 +2216,7 @@ pub fn self_update(options: SelfUpdateOptions) -> Result<Version, String> {
             && !prompt_to_complete_plain_update(&server_update_decisions, &release)?
         {
             eprintln!("Herdr was not updated.");
-            eprintln!("Stop running Herdr sessions when ready, then run `herdr update` again.");
+            eprintln!("Stop running Herdr sessions when ready, then run `hall update` again.");
             return Ok(current);
         }
         install_downloaded_update(downloaded_update)?;
@@ -2771,15 +2771,15 @@ mod tests {
     fn update_install_instruction_distinguishes_install_from_restart() {
         assert_eq!(
             update_install_instruction(HERDR_UPDATE_COMMAND),
-            "detach, run `herdr update`, then run Herdr again to reconnect"
+            "detach, run `hall update`, then run hall again to reconnect"
         );
         assert_eq!(
             update_install_instruction(HOMEBREW_UPDATE_COMMAND),
-            "detach, run `brew update && brew upgrade herdr`, then run Herdr again to reconnect"
+            "detach, run `brew update && brew upgrade herdr`, then run hall again to reconnect"
         );
         assert_eq!(
             update_install_instruction(MISE_UPDATE_COMMAND),
-            "detach, run `mise upgrade herdr`, then run Herdr again to reconnect"
+            "detach, run `mise upgrade herdr`, then run hall again to reconnect"
         );
     }
 
@@ -2925,8 +2925,8 @@ mod tests {
             target: RunningUpdateTarget {
                 name: Some("work".to_string()),
                 label: "work".to_string(),
-                stop_command: "herdr session stop work".to_string(),
-                attach_command: Some("herdr session attach work".to_string()),
+                stop_command: "hall session stop work".to_string(),
+                attach_command: Some("hall session attach work".to_string()),
                 socket_path: crate::session::api_socket_path_for(Some("work")),
                 client_socket_path: crate::session::client_socket_path_for(Some("work")),
                 must_be_running: true,
@@ -3068,7 +3068,7 @@ mod tests {
             "unexpected error: {err}"
         );
         assert!(
-            err.contains("herdr session stop work"),
+            err.contains("hall session stop work"),
             "unexpected error: {err}"
         );
     }
@@ -3147,8 +3147,8 @@ mod tests {
             target: RunningUpdateTarget {
                 name: Some("work".to_string()),
                 label: "work".to_string(),
-                stop_command: "herdr session stop work".to_string(),
-                attach_command: Some("herdr session attach work".to_string()),
+                stop_command: "hall session stop work".to_string(),
+                attach_command: Some("hall session attach work".to_string()),
                 socket_path: crate::session::api_socket_path_for(Some("work")),
                 client_socket_path: crate::session::client_socket_path_for(Some("work")),
                 must_be_running: true,
@@ -3183,8 +3183,8 @@ mod tests {
             target: RunningUpdateTarget {
                 name: Some("work".to_string()),
                 label: "work".to_string(),
-                stop_command: "herdr session stop work".to_string(),
-                attach_command: Some("herdr session attach work".to_string()),
+                stop_command: "hall session stop work".to_string(),
+                attach_command: Some("hall session attach work".to_string()),
                 socket_path: crate::session::api_socket_path_for(Some("work")),
                 client_socket_path: crate::session::client_socket_path_for(Some("work")),
                 must_be_running: true,

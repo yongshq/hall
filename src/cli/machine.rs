@@ -3,12 +3,12 @@ use serde::Serialize;
 use crate::client::endpoint::{EndpointCatalog, ProfileId};
 
 const HELP: &str = "Usage:
-  herdr machine list [--json]
-  herdr machine add <ssh-target> --label <label> [--remote-session <name>]
-  herdr machine rename <profile-id> --label <label>
-  herdr machine remove <profile-id>
-  herdr machine enable <profile-id>
-  herdr machine disable <profile-id>
+  hall machine list [--json]
+  hall machine add <ssh-target> --label <label> [--remote-session <name>]
+  hall machine rename <profile-id> --label <label>
+  hall machine remove <profile-id>
+  hall machine enable <profile-id>
+  hall machine disable <profile-id>
 
 Add prepares the remote Herdr installation and starts its server before saving.
 Missing or incompatible installations require approval in an interactive terminal.
@@ -51,7 +51,7 @@ fn list(args: &[String]) -> std::io::Result<i32> {
         [] => false,
         [flag] if flag == "--json" => true,
         _ => {
-            eprintln!("usage: herdr machine list [--json]");
+            eprintln!("usage: hall machine list [--json]");
             return Ok(2);
         }
     };
@@ -92,9 +92,7 @@ fn list(args: &[String]) -> std::io::Result<i32> {
 fn add(args: &[String]) -> std::io::Result<i32> {
     let args = super::expand_equals_args(args, &["--label", "--remote-session"]);
     let Some(target) = args.first().filter(|value| !value.starts_with('-')) else {
-        eprintln!(
-            "usage: herdr machine add <ssh-target> --label <label> [--remote-session <name>]"
-        );
+        eprintln!("usage: hall machine add <ssh-target> --label <label> [--remote-session <name>]");
         return Ok(2);
     };
     let mut label = None;
@@ -173,11 +171,11 @@ fn add(args: &[String]) -> std::io::Result<i32> {
 fn rename(args: &[String]) -> std::io::Result<i32> {
     let args = super::expand_equals_args(args, &["--label"]);
     let [raw_id, flag, label] = args.as_slice() else {
-        eprintln!("usage: herdr machine rename <profile-id> --label <label>");
+        eprintln!("usage: hall machine rename <profile-id> --label <label>");
         return Ok(2);
     };
     if flag != "--label" {
-        eprintln!("usage: herdr machine rename <profile-id> --label <label>");
+        eprintln!("usage: hall machine rename <profile-id> --label <label>");
         return Ok(2);
     }
     let id = match ProfileId::parse(raw_id.clone()) {
@@ -205,7 +203,7 @@ fn rename(args: &[String]) -> std::io::Result<i32> {
 }
 
 fn remove(args: &[String]) -> std::io::Result<i32> {
-    let Some(id) = one_profile_id(args, "usage: herdr machine remove <profile-id>")? else {
+    let Some(id) = one_profile_id(args, "usage: hall machine remove <profile-id>")? else {
         return Ok(2);
     };
     let mut catalog = load_catalog()?;
@@ -224,7 +222,7 @@ fn remove(args: &[String]) -> std::io::Result<i32> {
 
 fn set_enabled(args: &[String], enabled: bool) -> std::io::Result<i32> {
     let action = if enabled { "enable" } else { "disable" };
-    let usage = format!("usage: herdr machine {action} <profile-id>");
+    let usage = format!("usage: hall machine {action} <profile-id>");
     let Some(id) = one_profile_id(args, &usage)? else {
         return Ok(2);
     };

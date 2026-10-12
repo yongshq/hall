@@ -3,7 +3,8 @@ use std::io;
 /// Outbound: set into every pane, unchanged from herdr for now.
 pub(crate) const HERDR_ENV_VAR: &str = "HERDR_ENV";
 /// Inbound: the nested guard's marker, renamed so hall typed in a live herdr
-/// pane is not refused as nested.
+/// pane is not refused as nested. Hall also sets it into its own panes
+/// (decision 44b), so hall typed in a hall pane is refused.
 pub(crate) const NESTED_GUARD_ENV_VAR: &str = "HALL_ENV";
 pub(crate) const HERDR_ENV_VALUE: &str = "1";
 const NESTED_HERDR_MESSAGES: [&str; 6] = [
@@ -65,8 +66,8 @@ mod update;
 mod workspace;
 mod worktree;
 
-const DEFAULT_CONFIG: &str = r##"# herdr configuration
-# Place this file at ~/.config/herdr/config.toml
+const DEFAULT_CONFIG: &str = r##"# hall configuration
+# Place this file at ~/.config/{app_dir}/config.toml
 
 # Show first-run notification setup on startup.
 # Missing also shows onboarding; set false after you've chosen.
@@ -122,7 +123,7 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # kitty_graphics = true
 
 [update]
-# Update channel used by background version checks and `herdr update`.
+# Update channel used by background version checks and `hall update`.
 # Stable builds default to "stable". Windows preview builds default to "preview"
 # so existing preview installs stay there until explicitly switched.
 # channel = "stable"
@@ -161,7 +162,7 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # previous_agent = ""     # optional, unset by default
 # next_agent = ""         # optional, unset by default
 # focus_agent = ""        # optional indexed binding, e.g. "prefix+alt+1..9"
-# remote_image_paste = "ctrl+v" # only active in herdr --remote; empty disables raw-key image paste
+# remote_image_paste = "ctrl+v" # only active in hall --remote; empty disables raw-key image paste
 # new_tab = "prefix+c"
 # rename_tab = "prefix+shift+t"
 # previous_tab = "prefix+p"
@@ -227,7 +228,7 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # headless_rows = 40
 
 # [worktrees]
-# directory = "~/.hall/worktrees"
+# directory = "~/.{app_dir}/worktrees"
 
 [ui]
 # Sidebar width (auto-scaled based on workspace names, this sets the default)
@@ -395,7 +396,7 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # resume_agents_on_restore = true
 
 [remote]
-# Whether herdr manages the ssh config used for `herdr --remote`.
+# Whether herdr manages the ssh config used for `hall --remote`.
 # When true (default), herdr runs remote ssh through a generated config that
 # includes your ~/.ssh/config first and adds ServerAliveInterval/
 # ServerAliveCountMax as fallbacks (so any keepalive values you set yourself
@@ -406,7 +407,7 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # manage_ssh_config = true
 
 [experimental]
-# Allow launching herdr from inside a herdr-managed pane.
+# Allow launching hall from inside a hall-managed pane.
 # allow_nested = false
 # Save recent pane screen history across full server restarts.
 pane_history = false
@@ -439,6 +440,11 @@ pane_history = false
 # scrollback_limit_bytes = 10000000
 "##;
 
+/// hall: the default config names this build's own folders (hall or hall-dev).
+fn default_config_text() -> String {
+    DEFAULT_CONFIG.replace("{app_dir}", config::app_dir_name())
+}
+
 // Bundled at build time so the printed skill always matches this binary's release.
 const SKILL: &str = include_str!("../skills/herdr/SKILL.md");
 
@@ -463,7 +469,7 @@ fn random_nested_message() -> &'static str {
 
 fn exit_if_nested_disabled(config: &config::Config) {
     if should_block_nested(config) {
-        eprintln!("\x1b[1merror:\x1b[0m nested herdr is disabled by default.");
+        eprintln!("\x1b[1merror:\x1b[0m nested hall is disabled by default.");
         eprintln!("see configuration if you want to enable it.");
         eprintln!();
         eprintln!("\x1b[2m\"{}\"\x1b[0m", random_nested_message());
@@ -489,7 +495,7 @@ fn main() -> io::Result<()> {
         Ok(args) => args,
         Err(err) => {
             eprintln!("error: {err}");
-            eprintln!("run 'herdr --help' for usage");
+            eprintln!("run 'hall --help' for usage");
             std::process::exit(2);
         }
     };
@@ -497,7 +503,7 @@ fn main() -> io::Result<()> {
         Ok(args) => args,
         Err(err) => {
             eprintln!("error: {err}");
-            eprintln!("run 'herdr --help' for usage");
+            eprintln!("run 'hall --help' for usage");
             std::process::exit(2);
         }
     };
@@ -505,7 +511,7 @@ fn main() -> io::Result<()> {
         Ok(parsed) => parsed,
         Err(err) => {
             eprintln!("error: {err}");
-            eprintln!("run 'herdr --help' for usage");
+            eprintln!("run 'hall --help' for usage");
             std::process::exit(2);
         }
     };
@@ -527,7 +533,7 @@ fn main() -> io::Result<()> {
         })
     {
         eprintln!("error: --remote can only be used with the default launch command");
-        eprintln!("run 'herdr --help' for usage");
+        eprintln!("run 'hall --help' for usage");
         std::process::exit(2);
     }
 
@@ -579,7 +585,7 @@ fn main() -> io::Result<()> {
             }
             Err(err) => {
                 eprintln!("{err}");
-                eprintln!("usage: herdr update [--handoff]");
+                eprintln!("usage: hall update [--handoff]");
                 std::process::exit(2);
             }
         };
@@ -600,90 +606,90 @@ fn main() -> io::Result<()> {
         platform::begin_cli_output();
         println!("hall: the liege's audience hall, a modified herdr v0.9.0");
         println!();
-        println!("Usage: herdr [options]");
-        println!("       herdr --session <name> [options]");
-        println!("       herdr --remote <ssh-target> [--session <name>]");
-        println!("       herdr session attach <name>");
-        println!("       herdr completion zsh");
-        println!("       herdr update [--handoff]");
-        println!("       herdr channel set <stable|preview>");
-        println!("       herdr machine <subcommand> ...");
-        println!("       herdr server stop");
-        println!("       herdr server reload-config");
-        println!("       herdr api <subcommand> ...");
-        println!("       herdr completion <shell>");
-        println!("       herdr config <subcommand> ...");
-        println!("       herdr channel <subcommand> ...");
-        println!("       herdr workspace <subcommand> ...");
-        println!("       herdr worktree <subcommand> ...");
-        println!("       herdr tab <subcommand> ...");
-        println!("       herdr notification <subcommand> ...");
-        println!("       herdr agent <subcommand> ...");
-        println!("       herdr pane <subcommand> ...");
-        println!("       herdr session <subcommand> ...");
-        println!("       herdr integration <subcommand> ...");
+        println!("Usage: hall [options]");
+        println!("       hall --session <name> [options]");
+        println!("       hall --remote <ssh-target> [--session <name>]");
+        println!("       hall session attach <name>");
+        println!("       hall completion zsh");
+        println!("       hall update [--handoff]");
+        println!("       hall channel set <stable|preview>");
+        println!("       hall machine <subcommand> ...");
+        println!("       hall server stop");
+        println!("       hall server reload-config");
+        println!("       hall api <subcommand> ...");
+        println!("       hall completion <shell>");
+        println!("       hall config <subcommand> ...");
+        println!("       hall channel <subcommand> ...");
+        println!("       hall workspace <subcommand> ...");
+        println!("       hall worktree <subcommand> ...");
+        println!("       hall tab <subcommand> ...");
+        println!("       hall notification <subcommand> ...");
+        println!("       hall agent <subcommand> ...");
+        println!("       hall pane <subcommand> ...");
+        println!("       hall session <subcommand> ...");
+        println!("       hall integration <subcommand> ...");
         println!();
         println!("Common commands:");
         for (command, description) in [
-            ("herdr", "Launch or attach to the persistent session"),
+            ("hall", "Launch or attach to the persistent session"),
             (
-                "herdr status [server|client]",
+                "hall status [server|client]",
                 "Show local client and running server status",
             ),
-            ("herdr update", "Download and install the latest version"),
-            ("herdr completion zsh", "Generate shell completions for zsh"),
+            ("hall update", "Download and install the latest version"),
+            ("hall completion zsh", "Generate shell completions for zsh"),
             (
-                "herdr server stop",
+                "hall server stop",
                 "Stop the running server via the API socket",
             ),
             (
-                "herdr channel set <stable|preview>",
+                "hall channel set <stable|preview>",
                 "Choose the stable or preview update channel",
             ),
             (
-                "herdr server reload-config",
+                "hall server reload-config",
                 "Reload config.toml in the running server",
             ),
             (
-                "herdr config reset-keys",
+                "hall config reset-keys",
                 "Back up config.toml and remove custom keybindings",
             ),
             (
-                "herdr channel <subcommand>",
+                "hall channel <subcommand>",
                 "Manage the stable or preview update channel",
             ),
-            ("herdr machine <subcommand>", "Manage saved SSH machines"),
+            ("hall machine <subcommand>", "Manage saved SSH machines"),
             (
-                "herdr api <subcommand>",
+                "hall api <subcommand>",
                 "Inspect socket API metadata and live runtime state",
             ),
             (
-                "herdr workspace <subcommand>",
+                "hall workspace <subcommand>",
                 "Workspace helpers over the socket API",
             ),
             (
-                "herdr worktree <subcommand>",
+                "hall worktree <subcommand>",
                 "Git worktree helpers over the socket API",
             ),
-            ("herdr tab <subcommand>", "Tab helpers over the socket API"),
+            ("hall tab <subcommand>", "Tab helpers over the socket API"),
             (
-                "herdr notification <subcommand>",
+                "hall notification <subcommand>",
                 "Notification helpers over the socket API",
             ),
             (
-                "herdr agent <subcommand>",
+                "hall agent <subcommand>",
                 "Agent/terminal helpers over the socket API",
             ),
             (
-                "herdr pane <subcommand>",
+                "hall pane <subcommand>",
                 "Pane control helpers over the socket API",
             ),
             (
-                "herdr session <subcommand>",
+                "hall session <subcommand>",
                 "Manage named persistent sessions",
             ),
             (
-                "herdr integration <subcommand>",
+                "hall integration <subcommand>",
                 "Manage built-in agent integrations",
             ),
         ] {
@@ -691,7 +697,7 @@ fn main() -> io::Result<()> {
         }
         println!();
         println!("Advanced commands:");
-        println!("  {:<32} Run as headless server", "herdr server");
+        println!("  {:<32} Run as headless server", "hall server");
         println!();
         println!("Options:");
         println!("  --session <name>    Use or create a named persistent session");
@@ -721,7 +727,7 @@ fn main() -> io::Result<()> {
 
     if args.iter().any(|a| a == "--default-config") {
         platform::begin_cli_output();
-        print!("{DEFAULT_CONFIG}");
+        print!("{}", default_config_text());
         return Ok(());
     }
 
@@ -747,7 +753,7 @@ fn main() -> io::Result<()> {
         let arg_name = arg.split_once('=').map(|(name, _)| name).unwrap_or(arg);
         if arg.starts_with('-') && !known_flags.contains(&arg_name) {
             eprintln!("unknown option: {arg}");
-            eprintln!("run 'herdr --help' for usage");
+            eprintln!("run 'hall --help' for usage");
             std::process::exit(2);
         }
         if !arg.starts_with('-')
@@ -769,7 +775,7 @@ fn main() -> io::Result<()> {
             .contains(&arg.as_str())
         {
             eprintln!("unknown command: {arg}");
-            eprintln!("run 'herdr --help' for usage");
+            eprintln!("run 'hall --help' for usage");
             std::process::exit(2);
         }
     }
@@ -790,7 +796,7 @@ fn main() -> io::Result<()> {
     let saved_federation =
         client::endpoint::EndpointCatalog::load().is_ok_and(|catalog| catalog.has_enabled_ssh());
     if let Err(err) = server::autodetect::auto_detect_launch(saved_federation) {
-        eprintln!("herdr: {err}");
+        eprintln!("hall: {err}");
         std::process::exit(1);
     }
     Ok(())
@@ -804,6 +810,32 @@ mod tests {
     fn nested_herdr_blocks_when_env_is_set() {
         let config = config::Config::default();
         assert!(should_block_nested_for_env(&config, Some(HERDR_ENV_VALUE)));
+    }
+
+    #[test]
+    fn nested_guard_refuses_inside_a_hall_pane_only() {
+        let _guard = crate::integration::integration_env_lock();
+        let config = config::Config::default();
+        let saved_hall = std::env::var_os(NESTED_GUARD_ENV_VAR);
+        let saved_herdr = std::env::var_os(HERDR_ENV_VAR);
+
+        // A hall pane sets both names: refused.
+        std::env::set_var(NESTED_GUARD_ENV_VAR, HERDR_ENV_VALUE);
+        std::env::set_var(HERDR_ENV_VAR, HERDR_ENV_VALUE);
+        assert!(should_block_nested(&config));
+
+        // A live herdr pane sets only HERDR_ENV: hall starts there.
+        std::env::remove_var(NESTED_GUARD_ENV_VAR);
+        assert!(!should_block_nested(&config));
+
+        match saved_hall {
+            Some(value) => std::env::set_var(NESTED_GUARD_ENV_VAR, value),
+            None => std::env::remove_var(NESTED_GUARD_ENV_VAR),
+        }
+        match saved_herdr {
+            Some(value) => std::env::set_var(HERDR_ENV_VAR, value),
+            None => std::env::remove_var(HERDR_ENV_VAR),
+        }
     }
 
     #[test]
@@ -830,6 +862,19 @@ mod tests {
         assert!(NESTED_HERDR_MESSAGES
             .iter()
             .all(|message| !message.starts_with("herdr:")));
+    }
+
+    #[test]
+    fn default_config_names_this_builds_own_folders() {
+        let text = default_config_text();
+        let app_dir = config::app_dir_name();
+        assert!(text.contains(&format!(
+            "# Place this file at ~/.config/{app_dir}/config.toml\n"
+        )));
+        assert!(text.contains(&format!("# directory = \"~/.{app_dir}/worktrees\"\n")));
+        assert!(!text.contains("{app_dir}"));
+        assert!(!text.contains("~/.config/herdr"));
+        assert!(!text.contains("~/.herdr"));
     }
 
     #[cfg(unix)]

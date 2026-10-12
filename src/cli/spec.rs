@@ -427,7 +427,7 @@ fn agent_command() -> Command {
                         .last(true),
                 )
                 .after_help(
-                    "The pane must be at its interactive shell prompt. Success means the expected agent was detected in the same terminal and is ready for input.\n\nnext: herdr agent prompt <TARGET> <TEXT> --wait",
+                    "The pane must be at its interactive shell prompt. Success means the expected agent was detected in the same terminal and is ready for input.\n\nnext: hall agent prompt <TARGET> <TEXT> --wait",
                 ),
         )
         .subcommand(
@@ -583,7 +583,7 @@ fn pane_command() -> Command {
                 .arg(required("pane_id", "PANE_ID"))
                 .arg(required("text", "TEXT"))
                 .after_help(
-                    "next: herdr pane run <PANE_ID> <COMMAND> sends text and Enter in one call",
+                    "next: hall pane run <PANE_ID> <COMMAND> sends text and Enter in one call",
                 ),
         )
         .subcommand(
@@ -1211,7 +1211,7 @@ mod tests {
             let worktree_command = command_path(&cmd, &["worktree", subcommand]);
             assert!(
                 !has_option(worktree_command, "json"),
-                "herdr worktree {subcommand} should not advertise --json"
+                "hall worktree {subcommand} should not advertise --json"
             );
         }
     }
@@ -1336,14 +1336,14 @@ mod tests {
             "agent start dropped its existing after_help: {agent_start}"
         );
         assert!(
-            agent_start.contains("next: herdr agent prompt <TARGET> <TEXT> --wait"),
+            agent_start.contains("next: hall agent prompt <TARGET> <TEXT> --wait"),
             "agent start is missing its next-step hint: {agent_start}"
         );
 
         let pane_send_text = long_help(&["pane", "send-text"]);
         assert!(
             pane_send_text.contains(
-                "next: herdr pane run <PANE_ID> <COMMAND> sends text and Enter in one call"
+                "next: hall pane run <PANE_ID> <COMMAND> sends text and Enter in one call"
             ),
             "pane send-text is missing its next-step hint: {pane_send_text}"
         );

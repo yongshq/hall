@@ -43,6 +43,10 @@ impl App {
                 crate::api::socket_path().display().to_string(),
             ),
             ("HERDR_ENV".to_string(), "1".to_string()),
+            (
+                crate::NESTED_GUARD_ENV_VAR.to_string(),
+                crate::HERDR_ENV_VALUE.to_string(),
+            ),
             ("HERDR_PLUGIN_ID".to_string(), plugin.plugin_id.clone()),
             ("HERDR_PLUGIN_CONTEXT_JSON".to_string(), context_json),
         ]);
@@ -63,12 +67,24 @@ impl App {
         }
         if let Some(workspace_id) = context.workspace_id.as_ref() {
             env.push(("HERDR_WORKSPACE_ID".to_string(), workspace_id.clone()));
+            env.push((
+                crate::integration::HALL_WORKSPACE_ID_ENV_VAR.to_string(),
+                workspace_id.clone(),
+            ));
         }
         if let Some(tab_id) = context.tab_id.as_ref() {
             env.push(("HERDR_TAB_ID".to_string(), tab_id.clone()));
+            env.push((
+                crate::integration::HALL_TAB_ID_ENV_VAR.to_string(),
+                tab_id.clone(),
+            ));
         }
         if let Some(pane_id) = context.focused_pane_id.as_ref() {
             env.push(("HERDR_PANE_ID".to_string(), pane_id.clone()));
+            env.push((
+                crate::integration::HALL_PANE_ID_ENV_VAR.to_string(),
+                pane_id.clone(),
+            ));
         }
         if let Some(clicked_url) = context.clicked_url.as_ref() {
             env.push(("HERDR_PLUGIN_CLICKED_URL".to_string(), clicked_url.clone()));

@@ -169,7 +169,7 @@ mod tests {
             config_diagnostic: None,
             product_announcement: None,
             update_available: None,
-            update_install_command: "herdr update".into(),
+            update_install_command: "hall update".into(),
             server_keybindings_toml: None,
             latest_release_notes_available: false,
             integration_updates_available: false,
@@ -219,6 +219,36 @@ mod tests {
         assert_eq!(welcome.input_codec, INPUT_CODEC_V1);
         assert_eq!(welcome.blob_codec, BLOB_CODEC_V1);
         assert!(welcome.capabilities.is_empty());
+    }
+
+    /// hall: its own frozen welcome, at generation 1001 beside herdr's 1
+    /// above. A port that resets ENDPOINT_PROTOCOL_GENERATION to herdr's fails
+    /// here, rather than silently reopening the client path (decision 44d).
+    #[test]
+    fn frozen_hall_generation_1001_welcome_decodes() {
+        let welcome: EndpointServerWelcome = serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/hall-endpoint-welcome-1001.json"
+        )))
+        .unwrap();
+        assert_eq!(welcome.generation, 1001);
+        assert_eq!(welcome.generation, ENDPOINT_PROTOCOL_GENERATION);
+
+        let herdr: EndpointServerWelcome = serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/endpoint-welcome-v1.json"
+        )))
+        .unwrap();
+        assert_ne!(welcome.generation, herdr.generation);
+
+        let current = EndpointServerWelcome::compatible(welcome.methods.clone());
+        assert_eq!(current.generation, welcome.generation);
+        assert_eq!(current.snapshot_codec, welcome.snapshot_codec);
+        assert_eq!(current.surface_codec, welcome.surface_codec);
+        assert_eq!(current.input_codec, welcome.input_codec);
+        assert_eq!(current.blob_codec, welcome.blob_codec);
+        assert_eq!(current.capabilities, welcome.capabilities);
+        assert!(welcome.error.is_none());
     }
 
     #[test]

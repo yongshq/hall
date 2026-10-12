@@ -100,22 +100,34 @@ impl Drop for Rig {
 
 /// Runs the child until it exits or `window` passes, then kills it, watching
 /// every listener the whole time; returns the listeners that saw a connection.
-fn run_watching<'a>(
-    mut child: Child,
-    listeners: &[&'a Listener],
-    window: Duration,
-) -> Vec<&'a Path> {
+fn run_watching<'a>(child: Child, listeners: &[&'a Listener], window: Duration) -> Vec<&'a Path> {
+    run_collecting(child, listeners, window).hit
+}
+
+struct Run<'a> {
+    hit: Vec<&'a Path>,
+    /// None when the child had to be killed.
+    code: Option<i32>,
+    stderr: String,
+}
+
+/// As `run_watching`, and also keeps the exit code and stderr.
+fn run_collecting<'a>(mut child: Child, listeners: &[&'a Listener], window: Duration) -> Run<'a> {
     let mut hit = Vec::new();
     let deadline = Instant::now() + window;
     let mut exited_at = None;
+    let mut code = None;
     loop {
         for l in listeners {
             if l.accepted() && !hit.contains(&l.path.as_path()) {
                 hit.push(l.path.as_path());
             }
         }
-        if exited_at.is_none() && child.try_wait().unwrap().is_some() {
-            exited_at = Some(Instant::now());
+        if exited_at.is_none() {
+            if let Some(status) = child.try_wait().unwrap() {
+                exited_at = Some(Instant::now());
+                code = status.code();
+            }
         }
         // Keep watching a little after the child is gone, for a late connect.
         let done = exited_at.is_some_and(|t| t.elapsed() > Duration::from_millis(300));
@@ -126,7 +138,11 @@ fn run_watching<'a>(
     }
     let _ = child.kill();
     let _ = child.wait();
-    hit
+    let mut stderr = String::new();
+    if let Some(mut pipe) = child.stderr.take() {
+        let _ = std::io::Read::read_to_string(&mut pipe, &mut stderr);
+    }
+    Run { hit, code, stderr }
 }
 
 const CLI: &[&str] = &["status", "server", "--json"];
@@ -216,5 +232,127 @@ fn hall_session_does_connect() {
         hit,
         [rig.session_client.path.as_path()],
         "the client did not reach HALL_SESSION's client socket"
+    );
+}
+
+/// Decision 44b: hall sets HALL_ENV=1 into its own panes, and the nested guard
+/// reads it, so hall started inside a hall pane is refused before it connects.
+/// HERDR_ENV=1 alone (a live herdr pane) is covered above: there hall runs.
+#[test]
+fn nested_guard_refuses_inside_a_hall_pane() {
+    let rig = Rig::new("nest");
+    let child = rig
+        .command(CLIENT)
+        .env("HALL_ENV", "1")
+        .env("HERDR_ENV", "1")
+        .env("HALL_SOCKET_PATH", &rig.herdr_api.path)
+        .spawn()
+        .unwrap();
+    let run = run_collecting(child, &rig.listeners(), Duration::from_secs(5));
+    assert!(
+        run.hit.is_empty(),
+        "nested hall client connected to {:?}",
+        run.hit
+    );
+    assert_eq!(run.code, Some(1), "stderr: {}", run.stderr);
+    assert!(
+        run.stderr.contains("nested hall is disabled"),
+        "stderr: {}",
+        run.stderr
+    );
+}
+
+/// Decision 44b: a pane command's default target comes from HALL_PANE_ID only.
+/// A live herdr pane's HERDR_PANE_ID is ignored, so `--current` there has no
+/// pane and is refused before any request; HALL_PANE_ID is the control.
+#[test]
+fn pane_target_default_reads_hall_pane_id_only() {
+    let rig = Rig::new("pane");
+    let split = &["pane", "split", "--direction", "down", "--current"];
+    let child = rig
+        .command(split)
+        .env("HERDR_PANE_ID", "w1:p1")
+        .env("HALL_SOCKET_PATH", &rig.herdr_api.path)
+        .spawn()
+        .unwrap();
+    let run = run_collecting(child, &[&rig.herdr_api], Duration::from_secs(5));
+    assert!(
+        run.hit.is_empty(),
+        "split with only HERDR_PANE_ID connected"
+    );
+    assert_eq!(run.code, Some(2), "stderr: {}", run.stderr);
+    assert!(
+        run.stderr.contains("--current requires HALL_PANE_ID"),
+        "stderr: {}",
+        run.stderr
+    );
+
+    let child = rig
+        .command(split)
+        .env("HALL_PANE_ID", "w1:p1")
+        .env("HALL_SOCKET_PATH", &rig.herdr_api.path)
+        .spawn()
+        .unwrap();
+    let hit = run_watching(child, &[&rig.herdr_api], Duration::from_secs(5));
+    assert_eq!(
+        hit,
+        [rig.herdr_api.path.as_path()],
+        "split with HALL_PANE_ID did not reach HALL_SOCKET_PATH"
+    );
+}
+
+/// HERDR_CONFIG_PATH is never followed: a config write (`hall channel set`,
+/// through the same config path as the onboarding write) lands in hall's own
+/// XDG config and leaves the HERDR_CONFIG_PATH file as it was.
+/// HALL_CONFIG_PATH is the control. The onboarding write itself is covered by
+/// `onboarding_write_ignores_herdr_config_path` in the client shell tests.
+#[test]
+fn config_writes_ignore_herdr_config_path() {
+    let rig = Rig::new("conf");
+    let herdr_config = rig.base.join("herdr-config.toml");
+    let herdr_content = "[terminal]\ndefault_shell = \"zsh\"\n";
+    std::fs::write(&herdr_config, herdr_content).unwrap();
+    let hall_xdg_config = rig.base.join("c/hall-dev/config.toml");
+
+    let help = rig
+        .command(&["--help"])
+        .env("HERDR_CONFIG_PATH", &herdr_config)
+        .stdout(Stdio::piped())
+        .output()
+        .unwrap();
+    let help = String::from_utf8_lossy(&help.stdout);
+    assert!(
+        help.contains(&format!("Config: {}", hall_xdg_config.display())),
+        "--help: {help}"
+    );
+
+    // The write happens before the (refused) self-update, which exits 1.
+    let child = rig
+        .command(&["channel", "set", "stable"])
+        .env("HERDR_CONFIG_PATH", &herdr_config)
+        .spawn()
+        .unwrap();
+    run_collecting(child, &[], Duration::from_secs(5));
+    let written = std::fs::read_to_string(&hall_xdg_config).unwrap();
+    assert!(written.contains("channel = \"stable\""), "{written}");
+    assert_eq!(
+        std::fs::read_to_string(&herdr_config).unwrap(),
+        herdr_content
+    );
+
+    // Control: HALL_CONFIG_PATH is followed.
+    let hall_config = rig.base.join("hall-config.toml");
+    let child = rig
+        .command(&["channel", "set", "stable"])
+        .env("HERDR_CONFIG_PATH", &herdr_config)
+        .env("HALL_CONFIG_PATH", &hall_config)
+        .spawn()
+        .unwrap();
+    run_collecting(child, &[], Duration::from_secs(5));
+    let written = std::fs::read_to_string(&hall_config).unwrap();
+    assert!(written.contains("channel = \"stable\""), "{written}");
+    assert_eq!(
+        std::fs::read_to_string(&herdr_config).unwrap(),
+        herdr_content
     );
 }

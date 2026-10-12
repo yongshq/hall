@@ -141,6 +141,7 @@ fn apply_pane_launch_env(cmd: &mut CommandBuilder, launch_env: &PaneLaunchEnv) {
         cmd.env(key, value);
     }
     cmd.env(crate::HERDR_ENV_VAR, crate::HERDR_ENV_VALUE);
+    cmd.env(crate::NESTED_GUARD_ENV_VAR, crate::HERDR_ENV_VALUE);
     crate::integration::apply_pane_base_env(cmd);
     crate::platform::apply_pane_runtime_marker(cmd);
     match &launch_env.identity {
@@ -153,9 +154,13 @@ fn apply_pane_launch_env(cmd: &mut CommandBuilder, launch_env: &PaneLaunchEnv) {
             cmd.env(crate::integration::HERDR_WORKSPACE_ID_ENV_VAR, workspace_id);
             cmd.env(crate::integration::HERDR_TAB_ID_ENV_VAR, tab_id);
             cmd.env(crate::integration::HERDR_PANE_ID_ENV_VAR, pane_id);
+            cmd.env(crate::integration::HALL_WORKSPACE_ID_ENV_VAR, workspace_id);
+            cmd.env(crate::integration::HALL_TAB_ID_ENV_VAR, tab_id);
+            cmd.env(crate::integration::HALL_PANE_ID_ENV_VAR, pane_id);
         }
         PaneLaunchIdentity::OmitPane => {
             cmd.env_remove(crate::integration::HERDR_PANE_ID_ENV_VAR);
+            cmd.env_remove(crate::integration::HALL_PANE_ID_ENV_VAR);
         }
     }
 }
@@ -3411,6 +3416,41 @@ mod tests {
     }
 
     #[test]
+    fn pane_launch_env_sets_hall_names_beside_herdr_names() {
+        let mut cmd = CommandBuilder::new("shell");
+        let launch_env =
+            PaneLaunchEnv::default().with_identity("w1".into(), "w1:t1".into(), "w1:p1".into());
+
+        apply_pane_launch_env(&mut cmd, &launch_env);
+
+        let get = |key: &str| cmd.get_env(key).and_then(std::ffi::OsStr::to_str);
+        assert_eq!(get("HALL_ENV"), Some("1"));
+        assert_eq!(get("HALL_WORKSPACE_ID"), Some("w1"));
+        assert_eq!(get("HALL_TAB_ID"), Some("w1:t1"));
+        assert_eq!(get("HALL_PANE_ID"), Some("w1:p1"));
+        assert_eq!(get("HERDR_ENV"), Some("1"));
+        assert_eq!(get("HERDR_WORKSPACE_ID"), Some("w1"));
+        assert_eq!(get("HERDR_TAB_ID"), Some("w1:t1"));
+        assert_eq!(get("HERDR_PANE_ID"), Some("w1:p1"));
+    }
+
+    #[test]
+    fn pane_launch_env_omit_pane_removes_both_pane_ids() {
+        let mut cmd = CommandBuilder::new("shell");
+        cmd.env("HALL_PANE_ID", "outer");
+        cmd.env("HERDR_PANE_ID", "outer");
+
+        apply_pane_launch_env(&mut cmd, &PaneLaunchEnv::default().without_pane_identity());
+
+        assert!(cmd.get_env("HALL_PANE_ID").is_none());
+        assert!(cmd.get_env("HERDR_PANE_ID").is_none());
+        assert_eq!(
+            cmd.get_env("HALL_ENV").and_then(std::ffi::OsStr::to_str),
+            Some("1")
+        );
+    }
+
+    #[test]
     fn pane_terminal_identity_removes_outer_windows_terminal_session() {
         let mut cmd = CommandBuilder::new("shell");
         cmd.env("WT_SESSION", "outer-session");
@@ -4896,7 +4936,7 @@ mod tests {
 
         tx.try_send(AppEvent::UpdateReady {
             version: "9.9.9".into(),
-            install_command: "herdr update".into(),
+            install_command: "hall update".into(),
         })
         .unwrap();
 

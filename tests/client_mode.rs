@@ -459,7 +459,7 @@ fn client_sees_headless_startup_config_diagnostic() {
     assert!(
         wait_until(Duration::from_secs(8), Duration::from_millis(20), || {
             let output = read_output(&output);
-            output.contains("config.toml") && output.contains("herdr config check")
+            output.contains("config.toml") && output.contains("hall config check")
         }),
         "client shell should render startup config diagnostic; output: {:?}",
         read_output(&output)
@@ -510,7 +510,7 @@ fn server_unreachable_shows_clear_error() {
         "stderr should mention connection failure: {stderr}"
     );
     assert!(
-        stderr.contains("Is herdr server running?"),
+        stderr.contains("Is hall server running?"),
         "stderr should include actionable guidance: {stderr}"
     );
     assert!(

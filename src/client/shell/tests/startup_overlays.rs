@@ -349,6 +349,73 @@ fn startup_onboarding_is_client_rendered_and_modal() {
     assert!(popup_paste.requests.is_empty());
 }
 
+/// hall: the onboarding write follows hall's own config path. HERDR_CONFIG_PATH,
+/// which a live herdr pane may carry, is never read, so the write cannot land
+/// in the live herdr's config (decision 33; step 1 review).
+#[test]
+fn onboarding_write_ignores_herdr_config_path() {
+    let _guard = crate::config::test_config_env_lock().lock().unwrap();
+    let base = std::env::temp_dir().join(format!(
+        "hall-onboarding-env-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&base).expect("create onboarding test dir");
+    let herdr_config = base.join("herdr-config.toml");
+    let herdr_content = "[terminal]\ndefault_shell = \"zsh\"\n";
+    std::fs::write(&herdr_config, herdr_content).expect("write herdr config");
+    let saved: Vec<_> = ["XDG_CONFIG_HOME", "HERDR_CONFIG_PATH", "HALL_CONFIG_PATH"]
+        .into_iter()
+        .map(|key| (key, std::env::var_os(key)))
+        .collect();
+    std::env::set_var("XDG_CONFIG_HOME", base.join("xdg"));
+    std::env::set_var("HERDR_CONFIG_PATH", &herdr_config);
+    std::env::remove_var("HALL_CONFIG_PATH");
+
+    let complete_onboarding = || {
+        let config =
+            ClientShellConfig::from_config(&Config::default()).with_startup_onboarding(true);
+        let mut state = ClientShellState::new(config);
+        state.set_snapshot(Box::new(snapshot()));
+        state.set_pane_surface(surface());
+        state.handle_input_bytes(b"\r");
+    };
+
+    complete_onboarding();
+    let hall_xdg_config = base
+        .join("xdg")
+        .join(crate::config::app_dir_name())
+        .join("config.toml");
+    let persisted = std::fs::read_to_string(&hall_xdg_config).expect("read hall config");
+    assert!(persisted.contains("onboarding = false"));
+    assert_eq!(
+        std::fs::read_to_string(&herdr_config).expect("read herdr config"),
+        herdr_content
+    );
+
+    // Control: HALL_CONFIG_PATH is followed.
+    let hall_config = base.join("hall-config.toml");
+    std::env::set_var("HALL_CONFIG_PATH", &hall_config);
+    complete_onboarding();
+    let persisted = std::fs::read_to_string(&hall_config).expect("read HALL_CONFIG_PATH file");
+    assert!(persisted.contains("onboarding = false"));
+    assert_eq!(
+        std::fs::read_to_string(&herdr_config).expect("read herdr config"),
+        herdr_content
+    );
+
+    for (key, value) in saved {
+        match value {
+            Some(value) => std::env::set_var(key, value),
+            None => std::env::remove_var(key),
+        }
+    }
+    std::fs::remove_dir_all(&base).expect("remove onboarding test dir");
+}
+
 #[test]
 fn onboarding_completion_persists_and_opens_endpoint_integrations() {
     let path = std::env::temp_dir().join(format!(
@@ -741,7 +808,7 @@ fn update_ready_menu_opens_client_owned_release_notes_and_dismisses_by_version()
         .join("\n");
     assert!(text.contains("v0.8.3"));
     assert!(text.contains("update ready"));
-    assert!(text.contains("detach, run herdr update"));
+    assert!(text.contains("detach, run hall update"));
     assert!(!state.hits.release_notes_scrollbar.is_empty());
     let outer = crate::ui::centered_popup_rect(
         Rect::new(0, 0, 106, 30),
@@ -958,7 +1025,7 @@ fn coalesced_release_notes_open_and_mouse_uses_current_geometry() {
     };
     let metrics = crate::ui::release_notes_scroll_metrics(
         &notes,
-        "herdr update",
+        "hall update",
         stack.content,
         &state.config.palette,
     );

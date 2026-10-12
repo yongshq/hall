@@ -1,46 +1,46 @@
 ---
 name: herdr
-description: "Control Herdr, a terminal multiplexer for coding agents. Use only when the user explicitly mentions Herdr or asks to use Herdr to inspect or control panes, tabs, workspaces, commands, or another agent. Do not use merely because a task could benefit from a background terminal, delegation, or parallel work. Requires HERDR_ENV=1."
+description: "Control Herdr, a terminal multiplexer for coding agents. Use only when the user explicitly mentions Herdr or asks to use Herdr to inspect or control panes, tabs, workspaces, commands, or another agent. Do not use merely because a task could benefit from a background terminal, delegation, or parallel work. Requires HALL_ENV=1."
 ---
 
 # Herdr
 
-Herdr organizes terminals into workspaces, tabs, and panes, recognizes coding agents running inside panes, and exposes the current session through the `herdr` CLI.
+Herdr organizes terminals into workspaces, tabs, and panes, recognizes coding agents running inside panes, and exposes the current session through the `hall` CLI.
 
 Before issuing any control command, verify that this agent is running inside a Herdr-managed pane:
 
 ```bash
-test "${HERDR_ENV:-}" = 1
+test "${HALL_ENV:-}" = 1
 ```
 
 If the check fails, say that you are not running inside Herdr and stop. Do not inspect or control the focused Herdr session from outside Herdr.
 
-When the check passes, the `herdr` binary in `PATH` talks to the current session. Use it to inspect neighboring work, create terminal layout, start agents and commands, read output, and wait for state changes.
+When the check passes, the `hall` binary in `PATH` talks to the current session. Use it to inspect neighboring work, create terminal layout, start agents and commands, read output, and wait for state changes.
 
 ## Learn the current CLI
 
 The installed binary is the authority for command syntax. Start with:
 
 ```bash
-herdr --help
+hall --help
 ```
 
 Then print the relevant command group by running the group without a subcommand:
 
 ```bash
-herdr agent
-herdr pane
-herdr workspace
-herdr tab
-herdr worktree
-herdr terminal
-herdr notification
-herdr integration
-herdr session
-herdr machine
+hall agent
+hall pane
+hall workspace
+hall tab
+hall worktree
+hall terminal
+hall notification
+hall integration
+hall session
+hall machine
 ```
 
-Do not run bare `herdr` for discovery; it launches or attaches the TUI. Do not probe a mutating nested command by omitting arguments. Commands such as `herdr workspace create` are valid with defaults and will execute.
+Do not run bare `hall` for discovery; it launches or attaches the TUI. Do not probe a mutating nested command by omitting arguments. Commands such as `hall workspace create` are valid with defaults and will execute.
 
 Most control commands return JSON. Read identifiers and state from those responses instead of predicting them.
 
@@ -71,7 +71,7 @@ Closed tab and pane IDs are not reused. A pane moved into another workspace rece
 Herdr injects the caller's context into each managed pane:
 
 ```bash
-printf '%s\n' "$HERDR_WORKSPACE_ID" "$HERDR_TAB_ID" "$HERDR_PANE_ID"
+printf '%s\n' "$HALL_WORKSPACE_ID" "$HALL_TAB_ID" "$HALL_PANE_ID"
 ```
 
 Prefer `--current` when a pane command should target the calling pane. Omitting a target may use the UI-focused pane, which can belong to the user or another client.
@@ -79,18 +79,18 @@ Prefer `--current` when a pane command should target the calling pane. Omitting 
 Discover live state with:
 
 ```bash
-herdr workspace list
-herdr tab list --workspace "$HERDR_WORKSPACE_ID"
-herdr pane current --current
-herdr pane list --workspace "$HERDR_WORKSPACE_ID"
-herdr agent list
+hall workspace list
+hall tab list --workspace "$HALL_WORKSPACE_ID"
+hall pane current --current
+hall pane list --workspace "$HALL_WORKSPACE_ID"
+hall agent list
 ```
 
 Creation responses expose the IDs to use next. `workspace create` returns `.result.workspace`, `.result.tab`, and `.result.root_pane`. `tab create` returns `.result.tab` and `.result.root_pane`. `pane split` returns the new pane as `.result.pane`.
 
 IDs and live agent names are scoped to one server. Two saved SSH machines can both have `w1:p1` or an agent named `reviewer`. Selecting a machine in the TUI does not retarget commands running in your pane: they still use the inherited session and socket context. Run remote control commands on the intended host with its explicit session, and rediscover IDs there.
 
-`herdr machine list` lists saved connection profiles, not a cross-machine pane inventory; add `--json` for scripts. Only add, remove, enable, or disable profiles when the user asks. Removing a profile disconnects the client but does not stop remote sessions. Adding a machine uses the remote default session unless `--remote-session` is explicitly supplied. Setup asks before stopping an incompatible server and defaults to No; do not approve replacement without the user's consent. Experimental handoff is not part of `machine add`.
+`hall machine list` lists saved connection profiles, not a cross-machine pane inventory; add `--json` for scripts. Only add, remove, enable, or disable profiles when the user asks. Removing a profile disconnects the client but does not stop remote sessions. Adding a machine uses the remote default session unless `--remote-session` is explicitly supplied. Setup asks before stopping an incompatible server and defaults to No; do not approve replacement without the user's consent. Experimental handoff is not part of `machine add`.
 
 ## Start and coordinate an agent
 
@@ -99,13 +99,13 @@ Default to a sibling pane in the current tab and the current working directory. 
 Honor a direction requested by the user. Otherwise inspect the caller pane:
 
 ```bash
-herdr pane layout --pane "$HERDR_PANE_ID"
+hall pane layout --pane "$HALL_PANE_ID"
 ```
 
 Split a wide pane to the right and a narrow or tall pane down. Avoid repeated same-direction splits that create unusably narrow columns or short rows. Keep the user's focus in the calling pane and explicitly preserve the caller's working directory:
 
 ```bash
-herdr pane split --current --direction right --cwd "$PWD" --no-focus
+hall pane split --current --direction right --cwd "$PWD" --no-focus
 ```
 
 Replace `right` with `down` when appropriate. Read the new pane ID from `.result.pane.pane_id`.
@@ -113,13 +113,13 @@ Replace `right` with `down` when appropriate. Read the new pane ID from `.result
 An available shell pane must be at its interactive prompt, with the shell itself in the foreground and no foreground command, editor, or agent running. Start a supported agent in that pane with a useful unique name:
 
 ```bash
-herdr agent start reviewer --kind codex --pane <returned-pane-id>
+hall agent start reviewer --kind codex --pane <returned-pane-id>
 ```
 
-Use the kind requested by the user. Run `herdr agent` to inspect the installed kind list and options. Pass native agent arguments only after `--`:
+Use the kind requested by the user. Run `hall agent` to inspect the installed kind list and options. Pass native agent arguments only after `--`:
 
 ```bash
-herdr agent start reviewer --kind codex --pane <returned-pane-id> -- <agent-args...>
+hall agent start reviewer --kind codex --pane <returned-pane-id> -- <agent-args...>
 ```
 
 A successful `agent start` returns only after Herdr detects the expected agent in the same pane and considers it ready for interactive input. If the agent is blocked during startup, the command returns `agent_not_ready` immediately but keeps the name available for `agent read` and `agent send-keys`. Wait until the agent becomes idle before prompting it. Startup defaults to a 30-second timeout.
@@ -127,7 +127,7 @@ A successful `agent start` returns only after Herdr detects the expected agent i
 Submit work through the agent surface:
 
 ```bash
-herdr agent prompt reviewer "Review the current diff and report only actionable findings." --wait --timeout 120000
+hall agent prompt reviewer "Review the current diff and report only actionable findings." --wait --timeout 120000
 ```
 
 `agent prompt` honors the pane's live bracketed-paste mode and sends text followed by encoded Enter as one ordered submission. It reports successful submission only after both have been written; that alone does not prove the agent started a turn. The submit delay grows with prompt size for Codex on Windows. It rejects an agent already waiting at an approval or question dialog with `agent_blocked` before sending any input. Inspect the blocked UI and ask the user before answering it. For normal agent work, `--wait` is enough: it waits for the first settled `idle`, `done`, or `blocked` state. Do not repeat those defaults with `--until`.
@@ -137,7 +137,7 @@ With `--wait`, a prompt sent from a non-working state must produce observed `wor
 Use `--until` only for a state-specific workflow, such as waiting for an already-running agent to request input:
 
 ```bash
-herdr agent wait reviewer --until blocked --timeout 120000
+hall agent wait reviewer --until blocked --timeout 120000
 ```
 
 Without `--until`, standalone `agent wait` uses the same settled-state defaults as `agent prompt --wait`.
@@ -145,15 +145,15 @@ Without `--until`, standalone `agent wait` uses the same settled-state defaults 
 Use logical keys for interactive agent UI controls:
 
 ```bash
-herdr agent send-keys reviewer esc
-herdr agent send-keys reviewer ctrl+c
+hall agent send-keys reviewer esc
+hall agent send-keys reviewer ctrl+c
 ```
 
 Herdr validates all keys before writing any bytes. Read the result through the resolved agent:
 
 ```bash
-herdr agent get reviewer
-herdr agent read reviewer --source recent-unwrapped --lines 120
+hall agent get reviewer
+hall agent read reviewer --source recent-unwrapped --lines 120
 ```
 
 If a wait fails or returns `blocked`, inspect `agent get` and `agent read` before deciding what input to send. A timeout or stalled response does not prove the prompt was never delivered; do not blindly submit it again. Use the pane surface only when raw terminal control is intentional.
@@ -163,15 +163,15 @@ If a wait fails or returns `blocked`, inspect `agent get` and `agent read` befor
 Create a sibling pane with the same geometry rule, preserve the caller's working directory, and keep user focus unchanged:
 
 ```bash
-herdr pane split --current --direction right --cwd "$PWD" --no-focus
+hall pane split --current --direction right --cwd "$PWD" --no-focus
 ```
 
 Read the new pane ID from `.result.pane.pane_id`, then run and inspect the command:
 
 ```bash
-herdr pane run <returned-pane-id> "just test"
-herdr pane wait-output <returned-pane-id> --match "test result" --timeout 120000
-herdr pane read <returned-pane-id> --source recent-unwrapped --lines 120
+hall pane run <returned-pane-id> "just test"
+hall pane wait-output <returned-pane-id> --match "test result" --timeout 120000
+hall pane read <returned-pane-id> --source recent-unwrapped --lines 120
 ```
 
 `pane run` atomically sends command text and Enter. `pane wait-output` searches the selected snapshot immediately, so output that already exists can match. Use `--match <text>` for a literal substring or `--regex <pattern>` for a Rust regular expression. Omitting `--timeout` allows an indefinite wait.
@@ -196,7 +196,7 @@ After that failed read, ask the agent to write its complete response as Markdown
 - Parse IDs from JSON responses. Do not derive them from sidebar order or examples.
 - Do not close workspaces, tabs, panes, or sessions you did not create unless the user explicitly asked. `workspace close --group` closes the primary workspace and its linked worktree workspaces; never add it merely to bypass `workspace_group_close_required`.
 - Use `--trust-repository` only after the user has verified the repository. It grants per-request Git trust; it is not a routine retry for a failed worktree command.
-- Client and server versions can differ after an update. Check `herdr status` before relying on new server features. A missing method is not permission to stop or upgrade a server.
-- Never run `herdr server stop` from an active session unless the user explicitly intends to stop the server and its pane processes.
+- Client and server versions can differ after an update. Check `hall status` before relying on new server features. A missing method is not permission to stop or upgrade a server.
+- Never run `hall server stop` from an active session unless the user explicitly intends to stop the server and its pane processes.
 - Never kill the main Herdr process. Use named test sessions for experiments that need an isolated server.
 - CLI server errors are JSON on stderr with exit status 1. CLI syntax errors exit with status 2.
