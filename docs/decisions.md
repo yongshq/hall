@@ -31,3 +31,12 @@ Round 5 (2026-10-12):
 19. Alerts: liege: "I would like for the sound to be kept, atleast for when a hand it stuck or for when a reeve needs anything from me." Version one plays a sound (configurable, can be muted) and highlights the reeve when: a hand becomes stuck (waiting, blocked, idle or wedged) or opens a question; or a reeve's own session stands at a dialog or ends its turn. Reeve's own session state is read from herdr, for alerting only, never as errand state (ADR 0002 unaffected). Hall plays the sound itself, because herdr's own sounds need a herdr window in the foreground.
 20. Shared understanding confirmed by the liege; grilling ended. (yes)
 21. Planning set committed into hall by a writer, plan document with five end-to-end steps, no code, reviewed after. (yes)
+
+After round 5 (2026-10-12):
+22. Alert sound stays at the end of every reeve reply plus every dialog, for version one. Narrow to replies that ask the liege something later, if noisy; that needs a signal reeve does not record today. Liege: "sure, keep it as is for now". Not yet in the hall repo's docs/decisions.md.
+
+After the plan review (2026-10-12), reeve's calls under the decisions already made:
+23. Test setup gets a second herdr session, hall-dev-2, so decision 6 (reeves across herdr sessions) is shown before live use. Same separation rules.
+24. Every herdr call in hall's test setup names its herdr session on the command line (--session) or connects to that session's socket path directly; never relies on HERDR_SESSION or an inherited HERDR_SOCKET_PATH, which inside a live pane points at default. Herdr's global config and plugin registry are shared with the live setup: never edited for testing; a test config goes through HERDR_CONFIG_PATH.
+25. Glossary gains "Herdr session", "Test reeve" and "Test hand"; "Stand-in" stays the listing substitute only.
+Open with the liege: herdr upgrade 0.9.0 to 0.9.3 (would change the live backend). Until answered, build and verify against installed 0.9.0.

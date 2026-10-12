@@ -26,6 +26,10 @@ _Avoid_: task, job, ticket
 One running reeve or hand, together with the terminal it lives in. Picking a reeve or a hand in hall shows its session.
 _Avoid_: pane, tab, endpoint, window
 
+**Herdr session**:
+One herdr server with its own socket, holding many sessions: `default` for the live setup, `hall-dev` and `hall-dev-2` for the test setup.
+_Avoid_: server, instance, session (alone)
+
 **Backend**:
 The terminal manager that keeps every session alive underneath hall. Today, herdr.
 _Avoid_: engine, multiplexer, server
@@ -43,6 +47,14 @@ _Avoid_: production, prod, real setup
 **Test setup**:
 A separate herdr session and reeve home, holding stand-in reeves, that hall is built and tested against.
 _Avoid_: sandbox, staging, dev env
+
+**Test reeve**:
+An agent session in the test setup that plays a reeve, so hall has something real to show and alert on.
+_Avoid_: fake reeve, mock reeve, stand-in
+
+**Test hand**:
+An agent session in the test setup that plays a hand under a test reeve.
+_Avoid_: fake hand, mock hand, stand-in
 
 **Stand-in**:
 A substitute for reeve's listing that serves the format hall needs from the test setup.
