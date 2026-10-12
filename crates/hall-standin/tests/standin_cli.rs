@@ -293,6 +293,100 @@ fn refuses_the_live_reeve_home() {
 }
 
 #[test]
+fn refuses_the_live_reeve_home_in_any_letter_case() {
+    let real = std::env::var("HOME").unwrap();
+    for h in [
+        format!("{real}/.REEVE"),
+        format!("{real}/.Reeve/.reeve-hall-dev"),
+    ] {
+        refused(
+            &standin(&["--home", &h, "check-home"]),
+            1,
+            "live reeve home",
+        );
+    }
+
+    // A fake HOME whose .reeve exists, and one whose .reeve does not.
+    for with_reeve in [true, false] {
+        let fake = Path::new(env!("CARGO_TARGET_TMPDIR"))
+            .join(format!("standin-cli/case-user-{with_reeve}"));
+        let _ = std::fs::remove_dir_all(&fake);
+        std::fs::create_dir_all(&fake).unwrap();
+        if with_reeve {
+            std::fs::create_dir_all(fake.join(".reeve")).unwrap();
+        }
+        for arg in [fake.join(".REEVE/.reeve-hall-dev"), fake.join(".ReEvE")] {
+            let out = Command::new(env!("CARGO_BIN_EXE_hall-standin"))
+                .env("HOME", &fake)
+                .args(["--home", arg.to_str().unwrap(), "check-home"])
+                .output()
+                .unwrap();
+            refused(&out, 1, "live reeve home");
+        }
+    }
+}
+
+#[test]
+fn refuses_the_user_database_home_under_a_wrong_home() {
+    let passwd = hall_standin::home::passwd_home().unwrap();
+    let fake = Path::new(env!("CARGO_TARGET_TMPDIR")).join("standin-cli/wrong-home");
+    std::fs::create_dir_all(&fake).unwrap();
+    for arg in [passwd.join(".reeve"), passwd.join(".reeve/.reeve-hall-dev")] {
+        let out = Command::new(env!("CARGO_BIN_EXE_hall-standin"))
+            .env("HOME", &fake)
+            .args(["--home", arg.to_str().unwrap(), "check-home"])
+            .output()
+            .unwrap();
+        refused(&out, 1, "live reeve home");
+    }
+}
+
+#[test]
+fn check_home_prints_the_home_as_resolved() {
+    let h = home("check-home", WORLD);
+    let parent = h.parent().unwrap();
+    let link = parent.join(".reeve-hall-dev-link");
+    let _ = std::fs::remove_file(&link);
+    std::os::unix::fs::symlink(&h, &link).unwrap();
+    let want = format!("{}\n", h.canonicalize().unwrap().display());
+    assert_eq!(ok(&["--home", h.to_str().unwrap(), "check-home"]), want);
+    assert_eq!(ok(&["check-home", "--home", link.to_str().unwrap()]), want);
+    // A home that does not exist yet is checked all the same.
+    let new = parent.join("new/.reeve-hall-dev");
+    assert_eq!(
+        ok(&["--home", new.to_str().unwrap(), "check-home"]),
+        format!(
+            "{}\n",
+            parent
+                .canonicalize()
+                .unwrap()
+                .join("new/.reeve-hall-dev")
+                .display()
+        )
+    );
+}
+
+#[test]
+fn refuses_pane_ids_that_read_as_options() {
+    let h = home(
+        "bad-pane",
+        &WORLD.replace("pane_id = \"w1:p1\"", "pane_id = \"--session=default\""),
+    );
+    refused(&standin(&["--home", h.to_str().unwrap()]), 1, "pane id");
+
+    let h = home("bad-place", WORLD);
+    let hs = h.to_str().unwrap();
+    for bad in ["-w1", "w1 p1", "w1;p1"] {
+        refused(
+            &standin(&["--home", hs, "place", "ansel", "hall-dev", bad]),
+            1,
+            "pane id",
+        );
+    }
+    assert_eq!(ok(&["--home", hs, "locate", "ansel"]), "hall-dev w1:p1\n");
+}
+
+#[test]
 fn refuses_a_home_not_named_as_a_test_home() {
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("standin-cli/other-home");
     refused(

@@ -138,7 +138,11 @@ impl World {
             if !names.insert(r.name.as_str()) {
                 return err(format!("reeve {} is named twice", r.name));
             }
-            check_location(&format!("reeve {}", r.name), &r.herdr_session)?;
+            check_location(
+                &format!("reeve {}", r.name),
+                &r.herdr_session,
+                r.pane_id.as_deref(),
+            )?;
         }
         let mut ids = HashSet::new();
         for e in &self.errand {
@@ -157,13 +161,17 @@ impl World {
                     e.id, e.owner
                 ));
             }
-            check_location(&format!("errand {}", e.id), &e.herdr_session)?;
+            check_location(
+                &format!("errand {}", e.id),
+                &e.herdr_session,
+                e.pane_id.as_deref(),
+            )?;
         }
         Ok(())
     }
 }
 
-fn check_location(who: &str, herdr_session: &str) -> Result<(), WorldError> {
+fn check_location(who: &str, herdr_session: &str, pane_id: Option<&str>) -> Result<(), WorldError> {
     if herdr_session.is_empty() {
         return err(format!("{who} has an empty herdr_session"));
     }
@@ -172,7 +180,22 @@ fn check_location(who: &str, herdr_session: &str) -> Result<(), WorldError> {
             "refusing {who}: herdr session {herdr_session} belongs to the live setup"
         ));
     }
+    if let Some(pane) = pane_id.filter(|p| !is_pane_id(p)) {
+        return err(format!(
+            "refusing {who}: pane id {pane:?} is not letters, digits, ':', '_' and '-', starting with no '-'"
+        ));
+    }
     Ok(())
+}
+
+/// True when `id` can only be read as a herdr pane id, never as an option or
+/// as two arguments: `^[A-Za-z0-9:_-]+$`, not starting with `-`.
+pub fn is_pane_id(id: &str) -> bool {
+    !id.is_empty()
+        && !id.starts_with('-')
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b":_-".contains(&b))
 }
 
 /// The keys `set` may change on a reeve.
@@ -251,7 +274,7 @@ impl WorldEdit {
         herdr_session: &str,
         pane_id: Option<&str>,
     ) -> Result<(), WorldError> {
-        check_location(target, herdr_session)?;
+        check_location(target, herdr_session, pane_id.filter(|p| !p.is_empty()))?;
         let (_, table) = self.find(target)?;
         table.insert("herdr_session", value(herdr_session));
         match pane_id {
@@ -403,5 +426,30 @@ herdr_session = "hall-dev-2"
         assert_eq!(locate(&w, "ansel"), Some(("hall-dev", Some("w1:p1"))));
         assert_eq!(locate(&w, "ansel-fix"), Some(("hall-dev-2", None)));
         assert_eq!(locate(&w, "nobody"), None);
+    }
+
+    #[test]
+    fn refuses_pane_ids_that_read_as_options() {
+        for bad in [
+            "--session=default",
+            "-p",
+            "w1 p1",
+            "w1;p1",
+            "w1/p1",
+            "w1:p1\n",
+        ] {
+            assert!(!is_pane_id(bad), "{bad:?}");
+            let text = WORLD.replace(
+                "herdr_session = \"hall-dev\"\n",
+                &format!("herdr_session = \"hall-dev\"\npane_id = {bad:?}\n"),
+            );
+            let e = World::parse(&text).unwrap_err();
+            assert!(e.0.contains("pane id"), "{bad:?}: {e}");
+            let mut ed = WorldEdit::parse(WORLD).unwrap();
+            assert!(ed.place("ansel", "hall-dev", Some(bad)).is_err(), "{bad:?}");
+        }
+        for good in ["w1:p1", "w_2:p-3", "p1"] {
+            assert!(is_pane_id(good), "{good:?}");
+        }
     }
 }

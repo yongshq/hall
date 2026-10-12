@@ -4,7 +4,7 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use crate::home::resolve_test_home;
+use crate::home::{HomeError, resolve_test_home};
 use crate::listing::Listing;
 use crate::world::{World, WorldEdit, locate, world_path};
 
@@ -21,9 +21,12 @@ usage: hall-standin --home <test reeve home> [command]
   locate <name>                        print `<herdr-session> <pane-id>` for a reeve or errand
   sessions                             print `<kind> <name> <herdr-session> <pane-id|->` per
                                          reeve and errand in flight
+  check-home                           print the test reeve home as resolved on disk, or
+                                         refuse it; reads nothing inside it
 
 The world file is <home>/standin/world.toml. --home must be a directory whose
-name starts with .reeve-hall-dev, and never ~/.reeve.";
+name starts with .reeve-hall-dev, and never ~/.reeve (for HOME or for the
+home in the user database), in any letter case or through any symlink.";
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum CliError {
@@ -52,9 +55,14 @@ fn failed(e: impl ToString) -> CliError {
     CliError::Failed(e.to_string())
 }
 
-/// Runs the stand-in with `args` (without the program name). `user_home` is the
-/// liege's home directory, used only to rule out the live reeve home.
-pub fn run(args: &[String], user_home: Option<&Path>, out: &mut dyn Write) -> Result<(), CliError> {
+/// Runs the stand-in with `args` (without the program name). `user_homes` are the
+/// liege's home directories ([`crate::home::live_user_homes`]), used only to rule
+/// out the live reeve home.
+pub fn run(
+    args: &[String],
+    user_homes: Result<Vec<PathBuf>, HomeError>,
+    out: &mut dyn Write,
+) -> Result<(), CliError> {
     let mut home: Option<PathBuf> = None;
     let mut rest: Vec<&str> = Vec::new();
     let mut it = args.iter();
@@ -86,9 +94,11 @@ pub fn run(args: &[String], user_home: Option<&Path>, out: &mut dyn Write) -> Re
     if home.as_os_str().is_empty() {
         return Err(CliError::Usage("--home is empty".into()));
     }
-    let home = resolve_test_home(&home, user_home).map_err(failed)?;
+    let user_homes = user_homes.map_err(failed)?;
+    let home = resolve_test_home(&home, &user_homes).map_err(failed)?;
 
     match rest.as_slice() {
+        ["check-home"] => writeln!(out, "{}", home.display()).map_err(failed),
         [] | ["listing"] => {
             let world = World::load(&home).map_err(failed)?;
             writeln!(out, "{}", Listing::from_world(&world).to_json()).map_err(failed)

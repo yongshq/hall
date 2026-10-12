@@ -196,7 +196,7 @@ cmd_status() {
       say "  live herdr session: $live"
       if [ -e "$BASELINE" ]; then
         base=$(jq -c . "$BASELINE")
-        if [ "$base" = "$live" ]; then say "  unchanged since up's baseline"; else say "  CHECK: differs from up's baseline $base"; fi
+        if [ "$base" = "$live" ]; then say "  live session entry (name, socket, dir, running) unchanged since up's baseline; its panes are not checked"; else say "  CHECK: differs from up's baseline $base"; fi
       else
         say "  no baseline yet (up writes one)"
       fi

@@ -10,9 +10,11 @@ hall-standin --home ~/.reeve-hall-dev
 
 `--home` is required on every call. There is no default and no environment fallback. The stand-in refuses (exit status 1, a message on stderr, nothing on stdout):
 
-- `~/.reeve`, or any path inside it, symlinks followed;
+- `~/.reeve`, or any path inside it, symlinks followed, for `HOME` and for the home the user database records; matched by the directory on disk, so another letter case (`~/.REEVE`) or another route to it is refused too;
+- a path through a symlink whose target does not exist;
 - any home whose directory name does not start with `.reeve-hall-dev`;
-- a world file that places a reeve or an errand in the herdr session `default` (any letter case).
+- a world file that places a reeve or an errand in the herdr session `default` (any letter case);
+- a world file or `place` with a pane id that is not `^[A-Za-z0-9:_-]+$` or that starts with `-`, so it can never reach herdr as an option.
 
 A missing `--home` is a usage error (exit status 2).
 
@@ -71,7 +73,7 @@ The stand-in reads `<home>/standin/world.toml`. Editing it changes the listing o
 [[reeve]]
 name = "ansel"              # required, unique
 herdr_session = "hall-dev"  # required, never "default"
-pane_id = "w1:p1"           # optional; recorded by scripts/test-setup up
+pane_id = "w1:p1"           # optional; recorded by scripts/test-setup up; A-Z a-z 0-9 : _ -, no leading -
 live = true                 # optional, default true
 
 [[errand]]
@@ -101,6 +103,9 @@ hall-standin --home ~/.reeve-hall-dev set ansel live=false
 hall-standin --home ~/.reeve-hall-dev place ansel hall-dev w1:p1   # record a session location
 hall-standin --home ~/.reeve-hall-dev locate ansel                 # prints: hall-dev w1:p1
 hall-standin --home ~/.reeve-hall-dev sessions                     # one line per reeve and errand in flight
+hall-standin --home ~/.reeve-hall-dev check-home                   # prints the home as resolved on disk, or refuses it
 ```
+
+`check-home` reads nothing inside the home, which need not exist yet. The test setup scripts run it before anything else and use the path it prints.
 
 `set` and `place` keep the file's comments and layout, and write nothing unless the result is still a valid world file.
