@@ -70,11 +70,32 @@ run_into() {
   printf -v "$__var" '%s' "$__out"
 }
 
+# no_link <path>: refuses <path> under the test reeve home if it, or any
+# directory between the home and it, is a symlink, dangling or not, since a write
+# or mkdir would follow it out of the home. The stand-in's check-home refuses
+# these too; a write does not lean on that alone.
+no_link() {
+  local p=$1
+  while [ "$p" != "$HALL_DEV_HOME" ] && [ "$p" != / ] && [ "$p" != . ]; do
+    if [ -L "$p" ]; then
+      die "refusing to write $1: $p is a symlink, which could lead out of the test reeve home"
+    fi
+    p=$(dirname "$p")
+  done
+}
+
 # write_file <path> <text>: print what is written, then write it unless this is a dry run.
 write_file() {
+  no_link "$1"
   say "+ write $(q "$1")"
   [ "$DRY_RUN" = 1 ] && return 0
   printf '%s' "$2" >"$1"
+}
+
+# make_dir <path>: mkdir -p, through run.
+make_dir() {
+  no_link "$1"
+  run mkdir -p "$1"
 }
 
 check_session() {

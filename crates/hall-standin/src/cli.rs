@@ -22,13 +22,13 @@ usage: hall-standin --home <test reeve home> [command]
   sessions                             print `<kind> <name> <herdr-session> <pane-id|->` per
                                          reeve and errand in flight
   check-home                           print the test reeve home as resolved on disk, or
-                                         refuse it; reads no file inside it
+                                         refuse it; lists its directories but
+                                         reads no file inside it
 
 The world file is <home>/standin/world.toml. --home must be a directory whose
 name starts with .reeve-hall-dev, and never ~/.reeve (for HOME or for the
 home in the user database), in any letter case or through any symlink. It
-may not have .. in it, and its standin and work, and the entries directly
-inside them, may not be symlinks.";
+may not have .. in it, and nothing inside it may be a symlink.";
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum CliError {

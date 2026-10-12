@@ -3,6 +3,8 @@
 //! rules (ADR 0003, decisions 24 and 26). Nothing is started and no herdr
 //! session is touched.
 
+use std::fs::Permissions;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
@@ -317,12 +319,112 @@ fn refuses_a_symlink_inside_the_home() {
     let user = fake_user("inner-symlink", true);
     let live = user.join(".reeve");
     let h = user.join(".reeve-hall-dev");
-    for name in ["standin", "work", "work/ansel"] {
+    for name in [
+        "standin",
+        "work",
+        "work/ansel",
+        "state",
+        "errands",
+        "work/ansel/.claude",
+    ] {
         let _ = std::fs::remove_dir_all(&h);
         std::fs::create_dir_all(h.join("work")).unwrap();
         let _ = std::fs::remove_dir(h.join(name));
+        std::fs::create_dir_all(h.join(name).parent().unwrap()).unwrap();
         std::os::unix::fs::symlink(&live, h.join(name)).unwrap();
         refused_everywhere(Some(&user), h.to_str().unwrap(), "is a symlink");
+    }
+    let mut names: Vec<_> = std::fs::read_dir(&live)
+        .unwrap()
+        .map(|e| e.unwrap().file_name())
+        .collect();
+    names.sort();
+    assert_eq!(names, ["state"]);
+}
+
+#[test]
+fn refuses_a_home_it_cannot_list() {
+    let user = fake_user("unlisted", true);
+    let live = user.join(".reeve");
+    let h = user.join(".reeve-hall-dev");
+    for dir in ["standin", "work"] {
+        let _ = std::fs::set_permissions(h.join("standin"), Permissions::from_mode(0o755));
+        let _ = std::fs::set_permissions(h.join("work"), Permissions::from_mode(0o755));
+        let _ = std::fs::remove_dir_all(&h);
+        std::fs::create_dir_all(h.join("standin")).unwrap();
+        std::fs::create_dir_all(h.join("work")).unwrap();
+        if dir == "standin" {
+            std::os::unix::fs::symlink(live.join("world.toml"), h.join("standin/world.toml"))
+                .unwrap();
+        } else {
+            std::os::unix::fs::symlink(&live, h.join("work/ansel")).unwrap();
+        }
+        // Search but no read: the link inside can be followed but not listed.
+        std::fs::set_permissions(h.join(dir), Permissions::from_mode(0o300)).unwrap();
+        refused_everywhere(
+            Some(&user),
+            h.to_str().unwrap(),
+            "cannot be checked for symlinks",
+        );
+        std::fs::set_permissions(h.join(dir), Permissions::from_mode(0o755)).unwrap();
+    }
+    assert!(!live.join("world.toml").exists());
+}
+
+/// A stand-in whose check-home passes any home, so the scripts' own checks
+/// behind it can be seen; every other command goes to the real stand-in.
+fn lax_standin(dir: &Path) -> PathBuf {
+    let p = dir.join("lax-standin");
+    std::fs::write(
+        &p,
+        format!(
+            "#!/bin/sh\nif [ \"$1\" = check-home ]; then printf '%s\\n' \"$3\"; exit 0; fi\nexec '{}' \"$@\"\n",
+            env!("CARGO_BIN_EXE_hall-standin")
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&p, Permissions::from_mode(0o755)).unwrap();
+    p
+}
+
+#[test]
+fn up_refuses_to_write_through_a_symlink() {
+    let user = fake_user("write-link", true);
+    let live = user.join(".reeve");
+    let h = user.join(".reeve-hall-dev");
+    let lax = lax_standin(&tmp("write-link"));
+    // Dangling links first: a plain -e test reads them as absent.
+    for (name, target) in [
+        ("standin/world.toml", live.join("world.toml")),
+        (
+            "standin/live-baseline.json",
+            live.join("live-baseline.json"),
+        ),
+        ("standin", live.join("standin")),
+        ("work/ansel", live.join("ansel")),
+        ("work", live.clone()),
+    ] {
+        let _ = std::fs::remove_dir_all(&h);
+        std::fs::create_dir_all(h.join("standin")).unwrap();
+        std::fs::create_dir_all(h.join("work")).unwrap();
+        let _ = std::fs::remove_dir(h.join(name));
+        std::os::unix::fs::symlink(&target, h.join(name)).unwrap();
+        let out = command(
+            "test-setup",
+            &["--dry-run", "--home", h.to_str().unwrap(), "up"],
+        )
+        .env("HOME", &user)
+        .env("HALL_STANDIN_BIN", &lax)
+        .output()
+        .unwrap();
+        assert_eq!(out.status.code(), Some(1), "{name}: {out:?}");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains("refusing to write"), "{name}: {err}");
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            !stdout.contains(&format!("{}\n", h.join(name).display())),
+            "{name} printed as written: {stdout}"
+        );
     }
     let mut names: Vec<_> = std::fs::read_dir(&live)
         .unwrap()

@@ -38,6 +38,8 @@ struct Rig {
     user: PathBuf,
     home: PathBuf,
     bin: PathBuf,
+    /// The stand-in the scripts run: the real one unless a test swaps it.
+    standin: PathBuf,
 }
 
 impl Rig {
@@ -65,7 +67,12 @@ impl Rig {
             ),
         )
         .unwrap();
-        Rig { user, home, bin }
+        Rig {
+            user,
+            home,
+            bin,
+            standin: PathBuf::from(env!("CARGO_BIN_EXE_hall-standin")),
+        }
     }
 
     fn run(&self, script: &str, args: &[&str]) -> Output {
@@ -81,7 +88,7 @@ impl Rig {
             .args(args)
             .env("HOME", &self.user)
             .env("PATH", path)
-            .env("HALL_STANDIN_BIN", env!("CARGO_BIN_EXE_hall-standin"))
+            .env("HALL_STANDIN_BIN", &self.standin)
             // As inside a live herdr pane: the scripts must not pass these on.
             .env("HERDR_SOCKET_PATH", "/live/herdr.sock")
             .env("HERDR_SESSION", "default")
@@ -279,6 +286,57 @@ fn up_refuses_a_symlink_inside_the_home() {
     }
     // No herdr call was made and nothing landed in the live reeve home.
     assert!(rig.calls().is_empty(), "{:?}", rig.calls());
+    let mut names: Vec<_> = std::fs::read_dir(&live)
+        .unwrap()
+        .map(|e| e.unwrap().file_name())
+        .collect();
+    names.sort();
+    assert_eq!(names, ["state"]);
+}
+
+#[test]
+fn up_refuses_to_write_through_a_symlink() {
+    let mut rig = Rig::new("write-link");
+    // A stand-in whose check-home passes any home, so up's own check behind it
+    // is what is tested; every other command goes to the real stand-in.
+    rig.standin = rig.bin.join("lax-standin");
+    std::fs::write(
+        &rig.standin,
+        format!(
+            "#!/bin/sh\nif [ \"$1\" = check-home ]; then printf '%s\\n' \"$3\"; exit 0; fi\nexec '{}' \"$@\"\n",
+            env!("CARGO_BIN_EXE_hall-standin")
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&rig.standin, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let live = rig.user.join(".reeve");
+    // Dangling links: a plain -e test reads them as absent, and a write follows them.
+    for (name, target) in [
+        ("standin/world.toml", live.join("world.toml")),
+        (
+            "standin/live-baseline.json",
+            live.join("live-baseline.json"),
+        ),
+        ("work/ansel", live.join("ansel")),
+    ] {
+        let _ = std::fs::remove_dir_all(&rig.home);
+        std::fs::create_dir_all(rig.home.join("standin")).unwrap();
+        std::fs::create_dir_all(rig.home.join("work")).unwrap();
+        if name != "standin/world.toml" {
+            std::fs::write(rig.home.join("standin/world.toml"), "").unwrap();
+        }
+        std::os::unix::fs::symlink(&target, rig.home.join(name)).unwrap();
+        let out = rig.run("test-setup", &["up"]);
+        assert_eq!(out.status.code(), Some(1), "{name}: {out:?}");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains("refusing to write"), "{name}: {err}");
+    }
+    // No claude was started and nothing landed in the live reeve home.
+    assert!(
+        !rig.calls().iter().any(|c| c.starts_with("pane run ")),
+        "{:?}",
+        rig.calls()
+    );
     let mut names: Vec<_> = std::fs::read_dir(&live)
         .unwrap()
         .map(|e| e.unwrap().file_name())

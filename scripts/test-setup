@@ -115,7 +115,7 @@ cmd_up() {
   done
   [ "$missing" = 0 ] || exit 3
 
-  run mkdir -p "$HALL_DEV_HOME/standin"
+  make_dir "$HALL_DEV_HOME/standin"
   if [ "$DRY_RUN" = 1 ] || [ ! -e "$WORLD" ]; then
     seed_world
   else
@@ -131,7 +131,7 @@ cmd_up() {
   for line in "${HALL_DEV_ROSTER[@]}"; do
     roster_read "$line"
     say "$R_KIND $R_NAME in $R_SESSION:"
-    run mkdir -p "$(work_dir "$R_NAME")"
+    make_dir "$(work_dir "$R_NAME")"
     trust_report "$(work_dir "$R_NAME")"
 
     loc=""

@@ -1,5 +1,6 @@
 //! The stand-in binary end to end, against temp test reeve homes under target/.
 
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
@@ -388,10 +389,14 @@ fn refuses_a_symlink_inside_the_home() {
 
     let h = fake.join(".reeve-hall-dev");
     let hs = h.to_str().unwrap();
-    let plants: [(&str, PathBuf); 6] = [
+    let plants: [(&str, PathBuf); 9] = [
         ("standin", live.clone()),
         ("work", live.clone()),
         ("work/ansel", live.clone()),
+        // What reeve writes under REEVE_HOME, and claude in its working directory.
+        ("state", live.clone()),
+        ("errands", live.join("errands")),
+        ("work/ansel/.claude", live.clone()),
         ("standin/world.toml", live.join("world.toml")),
         (
             "standin/live-baseline.json",
@@ -415,6 +420,7 @@ fn refuses_a_symlink_inside_the_home() {
         if name != "standin" && name != "standin/world.toml" {
             std::fs::write(h.join("standin/world.toml"), WORLD).unwrap();
         }
+        std::fs::create_dir_all(h.join(name).parent().unwrap()).unwrap();
         std::os::unix::fs::symlink(&target, h.join(name)).unwrap();
         for args in commands {
             refused(&standin_as(&fake, args), 1, "is a symlink");
@@ -435,6 +441,58 @@ fn refuses_a_symlink_inside_the_home() {
         .collect();
     names.sort();
     assert_eq!(names, ["live-baseline.json", "work", "world.toml"]);
+}
+
+#[test]
+fn refuses_a_home_it_cannot_list() {
+    let fake = Path::new(env!("CARGO_TARGET_TMPDIR")).join("standin-cli/unlisted-user");
+    let h = fake.join(".reeve-hall-dev");
+    let open = |d: &str| {
+        let _ = std::fs::set_permissions(h.join(d), std::fs::Permissions::from_mode(0o755));
+    };
+    for dir in ["standin", "work"] {
+        open("standin");
+        open("work");
+        let _ = std::fs::remove_dir_all(&fake);
+        let live = fake.join(".reeve");
+        std::fs::create_dir_all(&live).unwrap();
+        std::fs::create_dir_all(h.join("standin")).unwrap();
+        std::fs::create_dir_all(h.join("work")).unwrap();
+        // Search but no read: the link inside can be followed but not listed.
+        if dir == "standin" {
+            std::os::unix::fs::symlink(live.join("world.toml"), h.join("standin/world.toml"))
+                .unwrap();
+        } else {
+            std::os::unix::fs::symlink(&live, h.join("work/ansel")).unwrap();
+        }
+        std::fs::set_permissions(h.join(dir), std::fs::Permissions::from_mode(0o300)).unwrap();
+        let hs = h.to_str().unwrap();
+        for args in [&["--home", hs, "check-home"][..], &["--home", hs]] {
+            refused(
+                &standin_as(&fake, args),
+                1,
+                "cannot be checked for symlinks",
+            );
+        }
+        open(dir);
+        assert!(!live.join("world.toml").exists());
+    }
+}
+
+#[test]
+fn refuses_a_home_past_the_walk_limit() {
+    let h = home("walk-limit", WORLD);
+    let deep: PathBuf = std::iter::repeat_n("d", hall_standin::home::MAX_DEPTH + 1).collect();
+    std::fs::create_dir_all(h.join(&deep)).unwrap();
+    let hs = h.to_str().unwrap();
+    refused(
+        &standin(&["--home", hs, "check-home"]),
+        1,
+        "past what the symlink check walks",
+    );
+    // One level less is walked in full.
+    std::fs::remove_dir(h.join(&deep)).unwrap();
+    ok(&["--home", hs, "check-home"]);
 }
 
 #[test]

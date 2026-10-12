@@ -3,6 +3,7 @@
 
 use std::ffi::{CStr, OsStr};
 use std::fmt;
+use std::io::ErrorKind;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Component, Path, PathBuf};
@@ -23,9 +24,17 @@ pub enum HomeError {
     DanglingLink(PathBuf),
     /// The path has a `..` component, which could undo a symlink before it.
     ParentDir(PathBuf),
-    /// Something the test setup reads or writes inside the home is a symlink,
-    /// so it could lead out of the home (into the live one, say).
+    /// Something inside the home is a symlink, so it could lead out of the home
+    /// (into the live one, say).
     InnerLink(PathBuf),
+    /// Something inside the home could not be looked at, so a symlink in it
+    /// could not be ruled out.
+    Unchecked(PathBuf, String),
+    /// The home holds more entries, or nests deeper, than the symlink check walks.
+    TooBig(PathBuf),
+    /// The liege's home has a `..` in it, so where its `.reeve` is depends on
+    /// who reads the path: the kernel undoes `..` after symlinks, a shell before.
+    UserHomeParentDir(PathBuf),
     /// The liege's own home could not be found, so the live reeve home cannot be ruled out.
     NoUserHome,
     /// The liege's home in the user database could not be read, so the live
@@ -58,7 +67,22 @@ impl fmt::Display for HomeError {
             ),
             HomeError::InnerLink(p) => write!(
                 f,
-                "refusing reeve home: {} is a symlink, and nothing the test setup uses inside a test reeve home may lead out of it",
+                "refusing reeve home: {} is a symlink, and nothing inside a test reeve home may lead out of it",
+                p.display()
+            ),
+            HomeError::Unchecked(p, e) => write!(
+                f,
+                "refusing reeve home: {} cannot be checked for symlinks ({e})",
+                p.display()
+            ),
+            HomeError::TooBig(p) => write!(
+                f,
+                "refusing reeve home {}: it holds more than {MAX_ENTRIES} entries or nests more than {MAX_DEPTH} directories deep, past what the symlink check walks; use a fresh test reeve home",
+                p.display()
+            ),
+            HomeError::UserHomeParentDir(p) => write!(
+                f,
+                "refusing: the liege's home {} has a .. in it, so where the live reeve home is cannot be told for sure",
                 p.display()
             ),
             HomeError::NoUserHome => write!(
@@ -125,12 +149,18 @@ pub fn passwd_home() -> Option<PathBuf> {
 /// refused too. The live reeve home is matched by what the path names on disk,
 /// not by its spelling, so a case variant (`~/.REEVE`) or another route to the
 /// same directory is refused as well. A `..` in `arg` is refused, since it is
-/// only undone after the symlinks before it are followed. So is a home whose
-/// `standin` or `work`, or an entry directly inside either, is a symlink
+/// only undone after the symlinks before it are followed, and so is a user home
+/// with a `..` in it. So is a home with a symlink anywhere inside it
 /// ([`check_inner_links`]).
 pub fn resolve_test_home(arg: &Path, user_homes: &[PathBuf]) -> Result<PathBuf, HomeError> {
     if user_homes.is_empty() {
         return Err(HomeError::NoUserHome);
+    }
+    if let Some(u) = user_homes
+        .iter()
+        .find(|u| u.components().any(|c| c == Component::ParentDir))
+    {
+        return Err(HomeError::UserHomeParentDir(u.clone()));
     }
     if arg.components().any(|c| c == Component::ParentDir) {
         return Err(HomeError::ParentDir(arg.to_path_buf()));
@@ -163,24 +193,61 @@ pub fn resolve_test_home(arg: &Path, user_homes: &[PathBuf]) -> Result<PathBuf, 
     Ok(home)
 }
 
-/// Refuses a test reeve home whose `standin` or `work`, or any entry directly
-/// inside either, is a symlink: the world file, the live baseline and each
-/// claude's working directory sit there, and a symlink would carry a read, a
-/// write or a claude session out of the home. Missing entries are fine.
+/// The most entries [`check_inner_links`] walks before it refuses the home.
+pub const MAX_ENTRIES: usize = 20_000;
+
+/// How many directories deep below the home [`check_inner_links`] walks before
+/// it refuses the home.
+pub const MAX_DEPTH: usize = 32;
+
+/// Refuses a test reeve home with a symlink anywhere inside it. The world file,
+/// the live baseline, each claude's working directory and whatever reeve and
+/// claude write there (`state`, `errands`, a project `.claude`) all sit inside
+/// it, and a symlink would carry a read, a write or a claude session out of the
+/// home. The walk follows no link and lists only real directories. Whatever it
+/// cannot look at is refused, not skipped; only what is not there is fine, so a
+/// home that does not exist yet passes. A home past [`MAX_ENTRIES`] entries or
+/// [`MAX_DEPTH`] directories deep is refused rather than walked in part.
 pub fn check_inner_links(home: &Path) -> Result<(), HomeError> {
-    for dir in ["standin", "work"].map(|d| home.join(d)) {
-        let Ok(meta) = dir.symlink_metadata() else {
-            continue;
-        };
-        if meta.file_type().is_symlink() {
-            return Err(HomeError::InnerLink(dir));
+    walk_for_links(home, MAX_DEPTH, MAX_ENTRIES)
+}
+
+fn walk_for_links(home: &Path, max_depth: usize, max_entries: usize) -> Result<(), HomeError> {
+    let unchecked =
+        |p: &Path, e: std::io::Error| HomeError::Unchecked(p.to_path_buf(), e.to_string());
+    match home.symlink_metadata() {
+        Err(e) if e.kind() == ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(unchecked(home, e)),
+        Ok(m) if m.file_type().is_symlink() => {
+            return Err(HomeError::InnerLink(home.to_path_buf()));
         }
-        let Ok(entries) = std::fs::read_dir(&dir) else {
-            continue;
+        Ok(m) if !m.is_dir() => return Ok(()),
+        Ok(_) => {}
+    }
+    let mut dirs = vec![(home.to_path_buf(), 0)];
+    let mut seen = 0;
+    while let Some((dir, depth)) = dirs.pop() {
+        if depth > max_depth {
+            return Err(HomeError::TooBig(home.to_path_buf()));
+        }
+        let entries = match std::fs::read_dir(&dir) {
+            Err(e) if e.kind() == ErrorKind::NotFound => continue,
+            Err(e) => return Err(unchecked(&dir, e)),
+            Ok(entries) => entries,
         };
-        for entry in entries.flatten() {
-            if entry.file_type().is_ok_and(|t| t.is_symlink()) {
-                return Err(HomeError::InnerLink(entry.path()));
+        for entry in entries {
+            let entry = entry.map_err(|e| unchecked(&dir, e))?;
+            seen += 1;
+            if seen > max_entries {
+                return Err(HomeError::TooBig(home.to_path_buf()));
+            }
+            let path = entry.path();
+            let kind = entry.file_type().map_err(|e| unchecked(&path, e))?;
+            if kind.is_symlink() {
+                return Err(HomeError::InnerLink(path));
+            }
+            if kind.is_dir() {
+                dirs.push((path, depth + 1));
             }
         }
     }
@@ -356,6 +423,64 @@ mod tests {
                 "{p}"
             );
         }
+    }
+
+    #[test]
+    fn refuses_a_user_home_with_a_parent_dir() {
+        for users in [
+            [
+                PathBuf::from("/nonexistent-user/lnk/.."),
+                PathBuf::from("/p"),
+            ],
+            [PathBuf::from("/p"), PathBuf::from("/nonexistent-user/..")],
+        ] {
+            assert!(matches!(
+                resolve_test_home(Path::new("/x/.reeve-hall-dev"), &users),
+                Err(HomeError::UserHomeParentDir(_))
+            ));
+        }
+    }
+
+    /// A fresh scratch directory for one test, under the system temp directory.
+    fn scratch(test: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("hall-standin-{}-{test}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn the_walk_refuses_past_its_entry_limit() {
+        let h = scratch("walk-entries");
+        std::fs::create_dir(h.join("work")).unwrap();
+        for i in 0..4 {
+            std::fs::write(h.join(format!("work/f{i}")), "").unwrap();
+        }
+        // Five entries: work and the four files in it.
+        assert_eq!(walk_for_links(&h, MAX_DEPTH, 5), Ok(()));
+        assert_eq!(
+            walk_for_links(&h, MAX_DEPTH, 4),
+            Err(HomeError::TooBig(h.clone()))
+        );
+        std::fs::remove_dir_all(&h).unwrap();
+    }
+
+    #[test]
+    fn the_walk_refuses_past_its_depth_limit() {
+        let h = scratch("walk-depth");
+        std::fs::create_dir_all(h.join("a/b/c")).unwrap();
+        assert_eq!(walk_for_links(&h, 3, MAX_ENTRIES), Ok(()));
+        assert_eq!(
+            walk_for_links(&h, 2, MAX_ENTRIES),
+            Err(HomeError::TooBig(h.clone()))
+        );
+        // A link in the deepest directory walked is found.
+        std::os::unix::fs::symlink("/", h.join("a/b/c/up")).unwrap();
+        assert_eq!(
+            walk_for_links(&h, 3, MAX_ENTRIES),
+            Err(HomeError::InnerLink(h.join("a/b/c/up")))
+        );
+        std::fs::remove_dir_all(&h).unwrap();
     }
 
     #[test]
