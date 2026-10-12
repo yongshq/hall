@@ -1,6 +1,6 @@
 # Modifications to herdr
 
-Hall is a modified version of herdr v0.9.0 (commit b99002ac99b09e00b4ca692436cb15a6b0d676f1), Apache-2.0; see [NOTICE](NOTICE). Every herdr file hall changes is listed here, kept current with each change. Files hall adds (`crates/`, `scripts/`, hall's own `docs/*.md`, `docs/adr/`, `docs/research/`, `GLOSSARY.md`, `NOTICE`, this file and `tests/hall_separation.rs`) are hall's own and not listed.
+Hall is a modified version of herdr v0.9.0 (commit b99002ac99b09e00b4ca692436cb15a6b0d676f1), Apache-2.0; see [NOTICE](NOTICE). Every herdr file hall changes is listed here, kept current with each change. Files hall adds (`crates/`, `scripts/`, hall's own `docs/*.md`, `docs/adr/`, `docs/research/`, `GLOSSARY.md`, `NOTICE`, this file, `tests/hall_separation.rs` and `tests/fixtures/hall-endpoint-welcome-1001.json`) are hall's own and not listed.
 
 ## Repository and build
 
@@ -58,3 +58,25 @@ Hall is a modified version of herdr v0.9.0 (commit b99002ac99b09e00b4ca692436cb1
 | `tests/api_ping.rs`, `tests/auto_detect.rs`, `tests/broken_pipe.rs`, `tests/client_mode.rs`, `tests/cross_area.rs`, `tests/detach_reattach.rs`, `tests/multi_client.rs`, `tests/cli/agents.rs`, `tests/cli/harness.rs`, `tests/cli/plugins.rs`, `tests/cli/sessions.rs`, `tests/cli/surface.rs` | Binary `hall`, inbound `HALL_*` names, `hall-dev` folders, protocol 1022. |
 | `tests/live_handoff.rs` | As above; two tests ignored on macOS, where they fail by platform behaviour (SO_RCVTIMEO after the peer closes; another process's environment of `/bin/sleep`). |
 | `tests/machine_setup.rs` | As above; the explicit `--remote` handoff test now checks that `--remote` is refused. |
+
+## Step 1 repair (decision 44)
+
+| File | Change |
+|---|---|
+| `src/session.rs` | 44a: restart and attach guidance names `hall` (`hall server stop`, `hall session stop <name>`, `hall session attach <name>`, `hall`), the socket-override form included; usage lines; tests to match. |
+| `src/main.rs` | 44a: help usage and common commands, usage errors and the nested-guard message name `hall`; the default config's header and worktree folder come from `app_dir_name()` (`hall` or `hall-dev`); 44b: a test that `HALL_ENV` refuses and `HERDR_ENV` alone does not; a default-config test. |
+| `src/config.rs` | `app_dir_name()` no longer test-only, for the default config text. |
+| `src/config/model.rs` | The worktree-folder test asserts `app_dir_name()`'s folder, so it passes in a release build. |
+| `src/cli.rs`, `src/cli/agent.rs`, `src/cli/api.rs`, `src/cli/completion.rs`, `src/cli/integration.rs`, `src/cli/machine.rs`, `src/cli/notification.rs`, `src/cli/server.rs`, `src/cli/server_not_running.rs`, `src/cli/spec.rs`, `src/cli/status.rs`, `src/cli/tab.rs`, `src/cli/workspace.rs`, `src/cli/worktree.rs` | 44a: usage, help and guidance text names `hall` commands; tests to match. |
+| `src/cli/pane.rs` | 44a as above; 44b: the default pane target reads `HALL_PANE_ID` only, never `HERDR_PANE_ID`; a test. |
+| `src/cli/plugin.rs` | 44a as above; 44b: plugin builds also scrub `HALL_PANE_ID`, `HALL_TAB_ID` and `HALL_WORKSPACE_ID`. |
+| `src/pane.rs` | 44b: panes get `HALL_ENV=1`, `HALL_PANE_ID`, `HALL_TAB_ID` and `HALL_WORKSPACE_ID` beside herdr's names; tests. |
+| `src/integration/env.rs`, `src/integration/mod.rs` | 44b: the `HALL_*` pane id names. |
+| `src/app/api/plugins/runtime.rs`, `src/app/api/plugins/panes.rs` | 44b: plugin commands and plugin panes get the `HALL_*` names beside herdr's; `HALL_ENV` is protected in plugin panes. |
+| `src/integration/registry.rs` | 44a: the integration update notice names `hall integration install`. |
+| `src/config/io.rs`, `src/app/mod.rs`, `src/app/actions.rs`, `src/app/state.rs`, `src/server/autodetect.rs`, `src/server/client_shell.rs`, `src/server/headless/bootstrap.rs`, `src/server/socket_paths.rs`, `src/client/errors.rs`, `src/protocol/wire.rs`, `src/remote.rs`, `src/remote/saved.rs`, `src/remote/attach.rs`, `src/update.rs`, `src/ui/release_notes.rs` | 44a: toasts, errors and guidance that give a command name `hall` (`hall config check`, `hall update`, `hall server`, `hall --remote`); tests to match. |
+| `src/protocol/endpoint.rs` | 44d: a test of hall's own frozen welcome at generation 1001, beside herdr's generation-one fixture. |
+| `src/client/shell/tests/startup_overlays.rs` | A test that the onboarding write ignores `HERDR_CONFIG_PATH` and follows `HALL_CONFIG_PATH`; command text as 44a. |
+| `src/client/shell/tests/mod.rs`, `src/client/tests/mod.rs`, `src/server/headless/tests/mod.rs`, `src/server/headless/tests/pane_graphics.rs` | Expected command text as 44a. |
+| `skills/herdr/SKILL.md` | 44a and 44b: the skill `hall --skill` prints gives `hall` commands and the `HALL_*` pane names. |
+| `tests/support/mod.rs` | Server cleanup works on macOS (process list, argv and environment from `proc_listallpids` and `KERN_PROCARGS2`, as `/proc` gives them on Linux) and matches the `hall` binary, so no test server or `server --handoff-import` outlives a test or writes back into a removed `/tmp/hlh-*` folder; tests. |

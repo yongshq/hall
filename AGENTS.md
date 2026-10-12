@@ -36,7 +36,7 @@ env $(env | sed -nE 's/^((HERDR|HALL)_[A-Z_]*)=.*/-u \1/p') cargo test --workspa
 
 Use `sed -E` as written: macOS sed has no `\|` in a basic expression, so the `\(A\|B\)` form matches nothing and unsets nothing.
 
-Hall reads `HALL_SOCKET_PATH`, `HALL_CLIENT_SOCKET_PATH`, `HALL_SESSION`, `HALL_CONFIG_PATH` and `HALL_ENV`; it still sets herdr's names (`HERDR_SOCKET_PATH`, `HERDR_PANE_ID`, `HERDR_ENV` and the rest) into its panes until step 5 settles that (plan, "Environment names set into panes").
+Hall reads `HALL_SOCKET_PATH`, `HALL_CLIENT_SOCKET_PATH`, `HALL_SESSION`, `HALL_CONFIG_PATH`, `HALL_ENV` and `HALL_PANE_ID`. Into its panes it sets `HALL_ENV=1`, `HALL_PANE_ID`, `HALL_TAB_ID` and `HALL_WORKSPACE_ID` (decision 44b), and still herdr's names (`HERDR_SOCKET_PATH`, `HERDR_PANE_ID`, `HERDR_ENV` and the rest) until step 5 settles those (plan, "Environment names set into panes").
 
 ## Toolchain
 
@@ -50,6 +50,15 @@ PATH=/opt/homebrew/opt/rustup/bin:/opt/homebrew/opt/zig@0.15/bin:$PATH cargo tes
 ```
 
 with `HERDR_*` and `HALL_*` unset as above. This runs herdr's tests and hall's (`crates/hall-standin`, which also drives the scripts in `scripts/` with a fake HOME). Herdr's CLI integration suite (`tests/cli.rs`, `tests/auto_detect.rs`) is Linux-only and does not run on a Mac: check CLI changes by hand.
+
+Known test gaps on this Mac, where hall runs:
+
+- `tests/cli.rs` and `tests/auto_detect.rs` are Linux-only, so their renamed cases (`tests/cli/*`) have never run.
+- Two `tests/live_handoff.rs` tests are ignored on macOS (each says why): `live_handoff_preserves_pane_process_io` and `live_handoff_keeps_unmanaged_agent_name_bound_to_saved_session`. Their paths are untested here.
+
+## Never build or test a commit before the separation
+
+Never build, test or run a commit before `237d5cf` (feat: separate hall from herdr), the separation commit, `git bisect` included: bisect only within `237d5cf..` (decision 44c). The merge `fe0d686` and the test-harness commit `0f7bba1` (split from the same working tree as `237d5cf`, never built on its own) are unseparated herdr: they use herdr's folders (`herdr-dev`, `/var/tmp/herdr-pane-graphics-<uid>`, a live place) and follow the inherited `HERDR_*` names, including `HERDR_SOCKET_PATH`, which points at the live server. They stay in the history; this rule is what keeps them from running.
 
 ## At the end of every change
 
