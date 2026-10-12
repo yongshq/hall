@@ -77,7 +77,7 @@ Hall is a modified version of herdr v0.9.0 (commit b99002ac99b09e00b4ca692436cb1
 | `src/config/io.rs`, `src/app/mod.rs`, `src/app/actions.rs`, `src/app/state.rs`, `src/server/autodetect.rs`, `src/server/client_shell.rs`, `src/server/headless/bootstrap.rs`, `src/server/socket_paths.rs`, `src/client/errors.rs`, `src/protocol/wire.rs`, `src/remote.rs`, `src/remote/saved.rs`, `src/remote/attach.rs`, `src/update.rs`, `src/ui/release_notes.rs` | 44a: toasts, errors and guidance that give a command name `hall` (`hall config check`, `hall update`, `hall server`, `hall --remote`); tests to match. |
 | `src/protocol/endpoint.rs` | 44d: a test of hall's own frozen welcome at generation 1001, beside herdr's generation-one fixture. |
 | `src/client/shell/tests/startup_overlays.rs` | A test that the onboarding write ignores `HERDR_CONFIG_PATH` and follows `HALL_CONFIG_PATH`; command text as 44a. |
-| `src/client/shell/tests/mod.rs`, `src/client/tests/mod.rs`, `src/server/headless/tests/mod.rs`, `src/server/headless/tests/pane_graphics.rs` | Expected command text as 44a. |
+| `src/client/shell/tests/mod.rs`, `src/client/tests/mod.rs`, `src/server/headless/tests/mod.rs`, `src/server/headless/tests/pane_graphics.rs`, `tests/cli/workspace.rs` | Expected command text as 44a. |
 | `skills/herdr/SKILL.md` | 44a and 44b: the skill `hall --skill` prints gives `hall` commands and the `HALL_*` pane names. |
 | `tests/support/mod.rs` | Server cleanup works on macOS (process list, argv and environment from `proc_listallpids` and `KERN_PROCARGS2`, as `/proc` gives them on Linux) and matches the `hall` binary, so no test server or `server --handoff-import` outlives a test or writes back into a removed `/tmp/hlh-*` folder; tests. |
 
