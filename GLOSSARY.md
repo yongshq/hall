@@ -45,7 +45,7 @@ The liege's real reeves, reeve home and herdr session, doing the household's act
 _Avoid_: production, prod, real setup
 
 **Test setup**:
-A separate herdr session and reeve home, holding stand-in reeves, that hall is built and tested against.
+A separate herdr session and reeve home, holding test reeves and test hands, that hall is built and tested against.
 _Avoid_: sandbox, staging, dev env
 
 **Test reeve**:
