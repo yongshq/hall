@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Drive a test reeve to a dialog or to the end of a turn, so hall's alerts can
-# be shown on demand (plan step 1). See docs/test-setup.md.
+# be shown on demand (the earlier plan's step 1; see docs/test-setup.md).
 set -euo pipefail
 
 HALL_PROG=test-drive
