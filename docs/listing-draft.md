@@ -107,8 +107,9 @@ hall-standin --home ~/.reeve-hall-dev place ansel hall-dev w1:p1   # record a se
 hall-standin --home ~/.reeve-hall-dev locate ansel                 # prints: hall-dev w1:p1
 hall-standin --home ~/.reeve-hall-dev sessions                     # one line per reeve and errand in flight
 hall-standin --home ~/.reeve-hall-dev check-home                   # prints the home as resolved on disk, or refuses it
+hall-standin --home ~/.reeve-hall-dev check-root                   # the same, without the walk inside the home
 ```
 
-`check-home` reads no file inside the home, which need not exist yet; it only lists its directories, to check that nothing inside is a symlink. The test setup scripts run it before anything else and use the path it prints.
+`check-home` reads no file inside the home, which need not exist yet; it only lists its directories and looks at each entry, to check that nothing inside is a symlink, a file with more than one name (a hard link), or neither a regular file nor a directory. Every other command makes the same check first. `check-root` makes only the check of the path itself (the live reeve home, `..`, the name). The test setup scripts run `check-root` before anything else and use the path it prints, then `check-home` (see [test-setup.md](test-setup.md) for which subcommands go on past that one with a warning).
 
 `set` and `place` keep the file's comments and layout, and write nothing unless the result is still a valid world file.

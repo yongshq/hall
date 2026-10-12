@@ -295,15 +295,53 @@ fn up_refuses_a_symlink_inside_the_home() {
 }
 
 #[test]
+fn down_and_status_go_on_past_a_dirtied_home() {
+    let rig = Rig::new("dirtied");
+    rig.ok("test-setup", &["up"]);
+    // What `npm install` leaves in a test claude's working directory.
+    let bin = rig.home.join("work/ansel/node_modules/.bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    std::os::unix::fs::symlink("../pkg/cli.js", bin.join("pkg")).unwrap();
+
+    let out = rig.run("test-setup", &["up"]);
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+
+    let status = rig.ok("test-setup", &["status"]);
+    assert!(status.contains("CHECK: up's baseline not read"), "{status}");
+    assert!(
+        status.contains("CHECK: recorded panes not read"),
+        "{status}"
+    );
+    assert!(!status.contains("reads as"), "{status}");
+    assert!(status.contains("listing: not read"), "{status}");
+
+    let before = rig.calls().len();
+    let down = rig.ok("test-setup", &["down"]);
+    assert!(down.contains("recorded panes not forgotten"), "{down}");
+    let calls = rig.calls();
+    for s in ["hall-dev", "hall-dev-2"] {
+        assert!(
+            calls[before..]
+                .iter()
+                .any(|c| c.starts_with(&format!("session stop {s} --json|"))),
+            "{calls:?}"
+        );
+    }
+    // The world file was left alone: the panes up recorded are still there.
+    std::fs::remove_file(bin.join("pkg")).unwrap();
+    assert!(rig.listing()["reeves"][0]["session"]["pane_id"].is_string());
+}
+
+#[test]
 fn up_refuses_to_write_through_a_symlink() {
     let mut rig = Rig::new("write-link");
-    // A stand-in whose check-home passes any home, so up's own check behind it
+    // A stand-in whose check-root and check-home pass any home, so up's own check behind it
     // is what is tested; every other command goes to the real stand-in.
     rig.standin = rig.bin.join("lax-standin");
     std::fs::write(
         &rig.standin,
         format!(
-            "#!/bin/sh\nif [ \"$1\" = check-home ]; then printf '%s\\n' \"$3\"; exit 0; fi\nexec '{}' \"$@\"\n",
+            "#!/bin/sh\ncase $1 in check-home | check-root) printf '%s\\n' \"$3\"; exit 0 ;; esac\nexec '{}' \"$@\"\n",
             env!("CARGO_BIN_EXE_hall-standin")
         ),
     )

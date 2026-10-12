@@ -6,7 +6,7 @@
 #   and runs under `env -u HERDR_SOCKET_PATH -u HERDR_SESSION`, because a process
 #   inside a live herdr pane inherits a HERDR_SOCKET_PATH pointing at default;
 # - the herdr session default and the reeve home ~/.reeve are refused, the home
-#   by the stand-in's check-home before anything else happens;
+#   by the stand-in's check-root before anything else happens;
 # - every test reeve and test hand claude starts with REEVE_HOME=<test home> on
 #   its own command line;
 # - --dry-run prints every command and runs none.
@@ -130,20 +130,37 @@ herdr_session_list() {
   run_into "$1" '{"sessions":[]}' "${HALL_HERDR[@]}" session list --json
 }
 
+# What a home that passes the root check but fails the stand-in's walk inside it
+# does to this run: block (refuse it, as every write or launch does) or warn
+# (`down` and `status`: go on, reading and writing nothing inside the home, so a
+# home a test claude dirtied can still be brought down). check_home sets
+# HOME_WALKED to 1 when the walk passed.
+HOME_WALK=block
+HOME_WALKED=0
+
 # check_home <path>: refuses <path> unless it is a test reeve home, and sets
-# HALL_DEV_HOME to it as resolved on disk. The stand-in is the one judge of that
-# (`hall-standin check-home`): it follows symlinks, ignores letter case, and rules
-# out ~/.reeve for HOME and for the user database's home alike. Without it there
-# is no weaker check to fall back on, so a missing stand-in is a refusal too.
+# HALL_DEV_HOME to it as resolved on disk. The stand-in is the one judge of that:
+# first `hall-standin check-root`, which follows symlinks, ignores letter case,
+# and rules out ~/.reeve for HOME and for the user database's home alike, and
+# always blocks; then `hall-standin check-home`, which also walks inside the
+# home, and blocks or warns as HOME_WALK says. Without the stand-in there is no
+# weaker check to fall back on, so a missing stand-in is a refusal too.
 check_home() {
   local h=$1 real
   [[ $h =~ ^[A-Za-z0-9_./-]+$ ]] || die "refusing reeve home $h: use letters, digits, '.', '_', '-' and '/' only"
   case "/$h/" in */../* | */./*) die "refusing reeve home $h: no . or .. in the path" ;; esac
   [ -x "$HALL_STANDIN" ] || die "refusing reeve home $h: the stand-in $HALL_STANDIN, which checks it, is not built; build it first: PATH=$HALL_RUSTUP_BIN:\$PATH cargo build --manifest-path $HALL_REPO/Cargo.toml -p hall-standin"
-  real=$("$HALL_STANDIN" check-home --home "$h") || die "refusing reeve home $h, as the stand-in says above"
+  real=$("$HALL_STANDIN" check-root --home "$h") || die "refusing reeve home $h, as the stand-in says above"
   # The resolved path goes into the pane command line, so it must be as plain as the given one.
   [[ $real =~ ^/[A-Za-z0-9_./-]+$ ]] || die "refusing reeve home $h: it resolves to $real; use letters, digits, '.', '_', '-' and '/' only"
   HALL_DEV_HOME=$real
+  if "$HALL_STANDIN" check-home --home "$real" >/dev/null; then
+    HOME_WALKED=1
+  elif [ "$HOME_WALK" = warn ]; then
+    printf '%s: WARNING: the test reeve home %s fails the check inside it, as the stand-in says above; going on without reading or writing anything inside it\n' "$HALL_PROG" "$real" >&2
+  else
+    die "refusing reeve home $h, as the stand-in says above"
+  fi
 }
 
 # parse_common <args...>: takes the shared flags, leaves the rest in REST.
@@ -192,6 +209,7 @@ load_inputs() {
   say "  reeve home:      $HALL_DEV_HOME"
   say "  herdr sessions:  $HALL_DEV_SESSION_1 $HALL_DEV_SESSION_2"
   say "  config:          ${CONFIG:-none}"
+  [ "$HOME_WALKED" = 1 ] || say "  WARNING:         the test reeve home fails the check inside it (see stderr); nothing inside it is read or written"
   [ "$DRY_RUN" = 1 ] && say "  dry run:         printing commands, running none"
   return 0
 }

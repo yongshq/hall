@@ -4,7 +4,7 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use crate::home::{HomeError, resolve_test_home};
+use crate::home::{HomeError, check_inner_links, resolve_test_root};
 use crate::listing::Listing;
 use crate::world::{World, WorldEdit, locate, world_path};
 
@@ -24,11 +24,14 @@ usage: hall-standin --home <test reeve home> [command]
   check-home                           print the test reeve home as resolved on disk, or
                                          refuse it; lists its directories but
                                          reads no file inside it
+  check-root                           as check-home, without the walk inside the home
 
 The world file is <home>/standin/world.toml. --home must be a directory whose
 name starts with .reeve-hall-dev, and never ~/.reeve (for HOME or for the
 home in the user database), in any letter case or through any symlink. It
-may not have .. in it, and nothing inside it may be a symlink.";
+may not have .. in it. Every command but check-root then walks the whole
+home and refuses it if anything inside is a symlink, a file with more than
+one name (a hard link), or neither a regular file nor a directory.";
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum CliError {
@@ -97,7 +100,11 @@ pub fn run(
         return Err(CliError::Usage("--home is empty".into()));
     }
     let user_homes = user_homes.map_err(failed)?;
-    let home = resolve_test_home(&home, &user_homes).map_err(failed)?;
+    let home = resolve_test_root(&home, &user_homes).map_err(failed)?;
+    if rest == ["check-root"] {
+        return writeln!(out, "{}", home.display()).map_err(failed);
+    }
+    check_inner_links(&home).map_err(failed)?;
 
     match rest.as_slice() {
         ["check-home"] => writeln!(out, "{}", home.display()).map_err(failed),

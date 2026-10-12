@@ -267,6 +267,57 @@ fn refused_everywhere(user: Option<&Path>, home: &str, needle: &str) {
     }
 }
 
+/// The subcommands that write or launch, which refuse a home failing the walk
+/// inside it, and those that go on past it with a warning.
+const BLOCKS: [&[&str]; 4] = [ALL[0], ALL[3], ALL[4], ALL[5]];
+const WARNS: [&[&str]; 2] = [ALL[1], ALL[2]];
+
+/// Checks a dry run that went on past a home failing the walk inside it: it
+/// warned with `needle`, ran only commands the test setup's rules allow, and
+/// none that reads or writes inside the home. Returns the commands.
+fn warned(out: &Output, home: &Path, needle: &str) -> Vec<String> {
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{err}\n{stdout}");
+    assert!(err.contains("WARNING") && err.contains(needle), "{err}");
+    assert!(stdout.contains("  WARNING: "), "{stdout}");
+    let cmds: Vec<String> = stdout
+        .lines()
+        .filter(|l| l.starts_with("+ "))
+        .map(String::from)
+        .collect();
+    for c in &cmds {
+        check_command(c, home);
+        for inside in [
+            "hall-standin",
+            " place ",
+            " locate ",
+            " listing",
+            "+ write ",
+            "mkdir",
+        ] {
+            assert!(!c.contains(inside), "ran inside the home: {c}");
+        }
+    }
+    cmds
+}
+
+/// Like [`refused_everywhere`] for a home that passes the root check and fails
+/// the walk inside it: up and test-drive refuse it, down and status warn.
+fn refused_inside(user: &Path, home: &Path, needle: &str) {
+    let hs = home.to_str().unwrap();
+    for cmd in BLOCKS {
+        let mut args = vec!["--dry-run", "--home", hs];
+        args.extend_from_slice(&cmd[1..]);
+        refused(&script_as(user, cmd[0], &args), needle);
+    }
+    for cmd in WARNS {
+        let mut args = vec!["--dry-run", "--home", hs];
+        args.extend_from_slice(&cmd[1..]);
+        warned(&script_as(user, cmd[0], &args), home, needle);
+    }
+}
+
 /// A fake HOME under target/, with a live reeve home `.reeve` in it when `with_reeve`.
 fn fake_user(test: &str, with_reeve: bool) -> PathBuf {
     let u = tmp(test).join("user");
@@ -332,7 +383,7 @@ fn refuses_a_symlink_inside_the_home() {
         let _ = std::fs::remove_dir(h.join(name));
         std::fs::create_dir_all(h.join(name).parent().unwrap()).unwrap();
         std::os::unix::fs::symlink(&live, h.join(name)).unwrap();
-        refused_everywhere(Some(&user), h.to_str().unwrap(), "is a symlink");
+        refused_inside(&user, &h, "is a symlink");
     }
     let mut names: Vec<_> = std::fs::read_dir(&live)
         .unwrap()
@@ -361,24 +412,78 @@ fn refuses_a_home_it_cannot_list() {
         }
         // Search but no read: the link inside can be followed but not listed.
         std::fs::set_permissions(h.join(dir), Permissions::from_mode(0o300)).unwrap();
-        refused_everywhere(
-            Some(&user),
-            h.to_str().unwrap(),
-            "cannot be checked for symlinks",
-        );
+        refused_inside(&user, &h, "cannot be checked for symlinks");
         std::fs::set_permissions(h.join(dir), Permissions::from_mode(0o755)).unwrap();
     }
     assert!(!live.join("world.toml").exists());
 }
 
-/// A stand-in whose check-home passes any home, so the scripts' own checks
+/// What `npm install` leaves in a test claude's working directory: a relative
+/// link that stays inside the home, but a link all the same.
+fn plant_npm_link(dir: &Path) {
+    std::fs::create_dir_all(dir.join("node_modules/.bin")).unwrap();
+    std::fs::create_dir_all(dir.join("node_modules/pkg")).unwrap();
+    std::fs::write(dir.join("node_modules/pkg/cli.js"), "").unwrap();
+    std::os::unix::fs::symlink("../pkg/cli.js", dir.join("node_modules/.bin/pkg")).unwrap();
+}
+
+#[test]
+fn down_and_status_go_on_past_a_dirtied_home() {
+    let user = fake_user("dirtied", true);
+    let h = user.join(".reeve-hall-dev");
+    std::fs::create_dir_all(h.join("standin")).unwrap();
+    std::fs::write(h.join("standin/world.toml"), "").unwrap();
+    plant_npm_link(&h.join("work/ansel"));
+    refused_inside(&user, &h, "is a symlink");
+
+    // down still stops, and with --delete deletes, both test herdr sessions by name.
+    let hs = h.to_str().unwrap();
+    for (args, verb) in [
+        (&["--dry-run", "--home", hs, "down"][..], "stop"),
+        (&["--dry-run", "--home", hs, "down", "--delete"], "delete"),
+    ] {
+        let cmds = warned(&script_as(&user, "test-setup", args), &h, "is a symlink");
+        for s in SESSIONS {
+            assert_eq!(
+                count(&cmds, &format!("herdr session {verb} {s} --json")),
+                1,
+                "{cmds:?}"
+            );
+        }
+    }
+    let out = script_as(&user, "test-setup", &["--dry-run", "--home", hs, "status"]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("CHECK: recorded panes not read"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn the_root_check_still_blocks_down_and_status() {
+    // A live reeve home a claude dirtied the same way: its root check fails
+    // before its walk would, so down and status refuse it outright.
+    let user = fake_user("dirtied-live", true);
+    let live = user.join(".reeve");
+    plant_npm_link(&live.join("work/ansel"));
+    std::os::unix::fs::symlink(&live, user.join(".reeve-hall-dev")).unwrap();
+    for h in [live.clone(), user.join(".reeve-hall-dev")] {
+        for cmd in WARNS {
+            let mut args = vec!["--dry-run", "--home", h.to_str().unwrap()];
+            args.extend_from_slice(&cmd[1..]);
+            refused(&script_as(&user, cmd[0], &args), "live reeve home");
+        }
+    }
+}
+
+/// A stand-in whose check-root and check-home pass any home, so the scripts' own checks
 /// behind it can be seen; every other command goes to the real stand-in.
 fn lax_standin(dir: &Path) -> PathBuf {
     let p = dir.join("lax-standin");
     std::fs::write(
         &p,
         format!(
-            "#!/bin/sh\nif [ \"$1\" = check-home ]; then printf '%s\\n' \"$3\"; exit 0; fi\nexec '{}' \"$@\"\n",
+            "#!/bin/sh\ncase $1 in check-home | check-root) printf '%s\\n' \"$3\"; exit 0 ;; esac\nexec '{}' \"$@\"\n",
             env!("CARGO_BIN_EXE_hall-standin")
         ),
     )

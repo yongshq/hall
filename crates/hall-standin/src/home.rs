@@ -27,6 +27,12 @@ pub enum HomeError {
     /// Something inside the home is a symlink, so it could lead out of the home
     /// (into the live one, say).
     InnerLink(PathBuf),
+    /// A file inside the home has more than one name (a hard link), so another
+    /// name for it could sit outside the home (in the live one, say).
+    HardLink(PathBuf, u64),
+    /// Something inside the home is neither a regular file nor a directory (a
+    /// fifo, a socket or a device), which a read could hang on.
+    OddEntry(PathBuf),
     /// Something inside the home could not be looked at, so a symlink in it
     /// could not be ruled out.
     Unchecked(PathBuf, String),
@@ -68,6 +74,16 @@ impl fmt::Display for HomeError {
             HomeError::InnerLink(p) => write!(
                 f,
                 "refusing reeve home: {} is a symlink, and nothing inside a test reeve home may lead out of it",
+                p.display()
+            ),
+            HomeError::HardLink(p, n) => write!(
+                f,
+                "refusing reeve home: {} is a hard link ({n} names for one file), so a write to it could land in a file outside the home; keep build trees and local git clones, which make hard links, out of a test reeve home",
+                p.display()
+            ),
+            HomeError::OddEntry(p) => write!(
+                f,
+                "refusing reeve home: {} is neither a regular file nor a directory (a fifo, a socket or a device), which a read could hang on",
                 p.display()
             ),
             HomeError::Unchecked(p, e) => write!(
@@ -150,9 +166,19 @@ pub fn passwd_home() -> Option<PathBuf> {
 /// not by its spelling, so a case variant (`~/.REEVE`) or another route to the
 /// same directory is refused as well. A `..` in `arg` is refused, since it is
 /// only undone after the symlinks before it are followed, and so is a user home
-/// with a `..` in it. So is a home with a symlink anywhere inside it
-/// ([`check_inner_links`]).
+/// with a `..` in it. So is a home with a symlink, a hard link or anything but a
+/// regular file or a directory anywhere inside it ([`check_inner_links`]).
 pub fn resolve_test_home(arg: &Path, user_homes: &[PathBuf]) -> Result<PathBuf, HomeError> {
+    let home = resolve_test_root(arg, user_homes)?;
+    check_inner_links(&home)?;
+    Ok(home)
+}
+
+/// [`resolve_test_home`] without the walk inside the home: the root check alone,
+/// which rules out the live reeve home, a `..` and a home not named as a test
+/// home. The test setup scripts' `down` and `status` go on past a home that
+/// fails only the walk, reading and writing nothing inside it.
+pub fn resolve_test_root(arg: &Path, user_homes: &[PathBuf]) -> Result<PathBuf, HomeError> {
     if user_homes.is_empty() {
         return Err(HomeError::NoUserHome);
     }
@@ -189,7 +215,6 @@ pub fn resolve_test_home(arg: &Path, user_homes: &[PathBuf]) -> Result<PathBuf, 
     if !named_as_test {
         return Err(HomeError::NotTestHome(home));
     }
-    check_inner_links(&home)?;
     Ok(home)
 }
 
@@ -204,10 +229,14 @@ pub const MAX_DEPTH: usize = 32;
 /// the live baseline, each claude's working directory and whatever reeve and
 /// claude write there (`state`, `errands`, a project `.claude`) all sit inside
 /// it, and a symlink would carry a read, a write or a claude session out of the
-/// home. The walk follows no link and lists only real directories. Whatever it
-/// cannot look at is refused, not skipped; only what is not there is fine, so a
-/// home that does not exist yet passes. A home past [`MAX_ENTRIES`] entries or
-/// [`MAX_DEPTH`] directories deep is refused rather than walked in part.
+/// home. A hard link would carry an append out the same way (reeve's hooks
+/// append to `state` files), so a regular file with more than one name is
+/// refused too, and so is anything that is neither a regular file nor a
+/// directory, since reading a fifo hangs. The walk follows no link and lists
+/// only real directories. Whatever it cannot look at is refused, not skipped;
+/// only what is not there is fine, so a home that does not exist yet passes. A
+/// home past [`MAX_ENTRIES`] entries or [`MAX_DEPTH`] directories deep is
+/// refused rather than walked in part.
 pub fn check_inner_links(home: &Path) -> Result<(), HomeError> {
     walk_for_links(home, MAX_DEPTH, MAX_ENTRIES)
 }
@@ -221,7 +250,8 @@ fn walk_for_links(home: &Path, max_depth: usize, max_entries: usize) -> Result<(
         Ok(m) if m.file_type().is_symlink() => {
             return Err(HomeError::InnerLink(home.to_path_buf()));
         }
-        Ok(m) if !m.is_dir() => return Ok(()),
+        Ok(m) if m.is_file() => return one_name(home, &m),
+        Ok(m) if !m.is_dir() => return Err(HomeError::OddEntry(home.to_path_buf())),
         Ok(_) => {}
     }
     let mut dirs = vec![(home.to_path_buf(), 0)];
@@ -245,13 +275,28 @@ fn walk_for_links(home: &Path, max_depth: usize, max_entries: usize) -> Result<(
             let kind = entry.file_type().map_err(|e| unchecked(&path, e))?;
             if kind.is_symlink() {
                 return Err(HomeError::InnerLink(path));
-            }
-            if kind.is_dir() {
+            } else if kind.is_dir() {
                 dirs.push((path, depth + 1));
+            } else if kind.is_file() {
+                match entry.metadata() {
+                    Err(e) if e.kind() == ErrorKind::NotFound => {}
+                    Err(e) => return Err(unchecked(&path, e)),
+                    Ok(m) => one_name(&path, &m)?,
+                }
+            } else {
+                return Err(HomeError::OddEntry(path));
             }
         }
     }
     Ok(())
+}
+
+/// Refuses the regular file at `path` if it has more than one name.
+fn one_name(path: &Path, m: &std::fs::Metadata) -> Result<(), HomeError> {
+    match m.nlink() {
+        n if n > 1 => Err(HomeError::HardLink(path.to_path_buf(), n)),
+        _ => Ok(()),
+    }
 }
 
 /// True when `name` is the live herdr session. Case is ignored, since herdr's
@@ -480,6 +525,43 @@ mod tests {
             walk_for_links(&h, 3, MAX_ENTRIES),
             Err(HomeError::InnerLink(h.join("a/b/c/up")))
         );
+        std::fs::remove_dir_all(&h).unwrap();
+    }
+
+    #[test]
+    fn the_walk_refuses_a_hard_link() {
+        let h = scratch("walk-hard-link");
+        let outside = scratch("walk-hard-link-outside").join("sentry.log");
+        std::fs::write(&outside, "").unwrap();
+        std::fs::create_dir(h.join("state")).unwrap();
+        std::fs::write(h.join("state/own.log"), "").unwrap();
+        assert_eq!(check_inner_links(&h), Ok(()));
+        std::fs::hard_link(&outside, h.join("state/sentry.log")).unwrap();
+        assert_eq!(
+            check_inner_links(&h),
+            Err(HomeError::HardLink(h.join("state/sentry.log"), 2))
+        );
+        std::fs::remove_dir_all(&h).unwrap();
+        std::fs::remove_dir_all(outside.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn the_walk_refuses_a_fifo_and_a_socket() {
+        let h = scratch("walk-odd");
+        std::fs::create_dir(h.join("standin")).unwrap();
+        let fifo = h.join("standin/world.toml");
+        let c = std::ffi::CString::new(fifo.as_os_str().as_bytes()).unwrap();
+        // SAFETY: c is a valid NUL-terminated path.
+        assert_eq!(unsafe { libc::mkfifo(c.as_ptr(), 0o600) }, 0);
+        assert_eq!(
+            check_inner_links(&h),
+            Err(HomeError::OddEntry(fifo.clone()))
+        );
+        std::fs::remove_file(&fifo).unwrap();
+
+        let sock = h.join("standin/sock");
+        let _listener = std::os::unix::net::UnixListener::bind(&sock).unwrap();
+        assert_eq!(check_inner_links(&h), Err(HomeError::OddEntry(sock)));
         std::fs::remove_dir_all(&h).unwrap();
     }
 

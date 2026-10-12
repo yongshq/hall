@@ -32,6 +32,9 @@ parse_common ${args[@]+"${args[@]}"}
 CMD=${REST[0]}
 case $CMD in up | down | status) ;; *) usage_die "unknown command $CMD" ;; esac
 [ "$DELETE" = 0 ] || [ "$CMD" = down ] || usage_die "--delete goes with down only"
+# down and status still run on a home that fails only the walk inside it, so the
+# test sessions can always be seen and stopped; up writes and launches, so it blocks.
+case $CMD in down | status) HOME_WALK=warn ;; esac
 load_inputs
 
 WORLD="$HALL_DEV_HOME/standin/world.toml"
@@ -175,7 +178,9 @@ cmd_down() {
       run "${HALL_HERDR[@]}" session delete "$s" --json
     fi
   done
-  if [ "$DRY_RUN" = 1 ] || [ -e "$WORLD" ]; then
+  if [ "$HOME_WALKED" = 0 ]; then
+    say "  recorded panes not forgotten: the test reeve home fails the check inside it, so its world file is left alone"
+  elif [ "$DRY_RUN" = 1 ] || [ -e "$WORLD" ]; then
     for line in "${HALL_DEV_ROSTER[@]}"; do
       roster_read "$line"
       standin place "$R_NAME" "$R_SESSION"
@@ -197,7 +202,9 @@ cmd_status() {
       say "  CHECK: the session list shows no live herdr session"
     else
       say "  live herdr session: $live"
-      if [ -e "$BASELINE" ]; then
+      if [ "$HOME_WALKED" = 0 ]; then
+        say "  CHECK: up's baseline not read: the test reeve home fails the check inside it"
+      elif [ -e "$BASELINE" ]; then
         base=$(jq -c . "$BASELINE")
         if [ "$base" = "$live" ]; then say "  live session entry (name, socket, dir, running) unchanged since up's baseline; its panes are not checked"; else say "  CHECK: differs from up's baseline $base"; fi
       else
@@ -212,7 +219,9 @@ cmd_status() {
   fi
 
   say "test sessions:"
+  [ "$HOME_WALKED" = 1 ] || say "  CHECK: recorded panes not read: the test reeve home fails the check inside it"
   for line in "${HALL_DEV_ROSTER[@]}"; do
+    [ "$HOME_WALKED" = 1 ] || break
     roster_read "$line"
     if ! run_into loc "$R_SESSION <pane-of-$R_NAME>" "$HALL_STANDIN" --home "$HALL_DEV_HOME" locate "$R_NAME" 2>/dev/null; then
       say "  $R_KIND $R_NAME: no pane recorded"
@@ -255,7 +264,9 @@ cmd_status() {
     trust_report "$(work_dir "$R_NAME")"
   done
 
-  if [ "$DRY_RUN" = 1 ] || { [ -x "$HALL_STANDIN" ] && [ -e "$WORLD" ]; }; then
+  if [ "$HOME_WALKED" = 0 ]; then
+    say "listing: not read, the test reeve home fails the check inside it"
+  elif [ "$DRY_RUN" = 1 ] || { [ -x "$HALL_STANDIN" ] && [ -e "$WORLD" ]; }; then
     say "listing:"
     standin listing || true
   fi

@@ -496,6 +496,65 @@ fn refuses_a_home_past_the_walk_limit() {
 }
 
 #[test]
+fn refuses_a_hard_link_inside_the_home() {
+    let fake = Path::new(env!("CARGO_TARGET_TMPDIR")).join("standin-cli/hard-link-user");
+    let _ = std::fs::remove_dir_all(&fake);
+    let live = fake.join(".reeve");
+    std::fs::create_dir_all(live.join("state")).unwrap();
+    std::fs::write(live.join("state/sentry.log"), "live\n").unwrap();
+    let h = fake.join(".reeve-hall-dev");
+    std::fs::create_dir_all(h.join("standin")).unwrap();
+    std::fs::create_dir_all(h.join("state")).unwrap();
+    std::fs::write(h.join("standin/world.toml"), WORLD).unwrap();
+    std::fs::hard_link(live.join("state/sentry.log"), h.join("state/sentry.log")).unwrap();
+    let hs = h.to_str().unwrap();
+    let commands: [&[&str]; 4] = [
+        &["--home", hs, "check-home"],
+        &["--home", hs],
+        &["--home", hs, "set", "ansel", "live=false"],
+        &["--home", hs, "place", "ansel", "hall-dev", "w9:p9"],
+    ];
+    for args in commands {
+        let out = standin_as(&fake, args);
+        refused(&out, 1, "state/sentry.log is a hard link");
+    }
+    // The root check alone passes it, as down and status need.
+    assert_eq!(
+        String::from_utf8(standin_as(&fake, &["--home", hs, "check-root"]).stdout).unwrap(),
+        format!("{}\n", h.canonicalize().unwrap().display())
+    );
+    assert_eq!(
+        std::fs::read_to_string(live.join("state/sentry.log")).unwrap(),
+        "live\n"
+    );
+}
+
+#[test]
+fn refuses_a_fifo_inside_the_home() {
+    let h = home("fifo", WORLD);
+    let world = h.join("standin/world.toml");
+    std::fs::remove_file(&world).unwrap();
+    let status = Command::new("mkfifo").arg(&world).status().unwrap();
+    assert!(status.success());
+    let hs = h.to_str().unwrap();
+    // check-home first: it reads nothing, so without the refusal it passes at
+    // once, where the listing would hang reading the fifo.
+    let commands: [&[&str]; 4] = [
+        &["--home", hs, "check-home"],
+        &["--home", hs],
+        &["--home", hs, "set", "ansel", "live=false"],
+        &["--home", hs, "locate", "ansel"],
+    ];
+    for args in commands {
+        refused(
+            &standin(args),
+            1,
+            "is neither a regular file nor a directory",
+        );
+    }
+}
+
+#[test]
 fn a_leftover_temp_file_is_replaced_not_followed() {
     let h = home("leftover-tmp", WORLD);
     std::fs::write(h.join("standin/world.toml.tmp"), "half written").unwrap();
