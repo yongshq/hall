@@ -12,7 +12,10 @@ use serde::{Deserialize, Serialize};
 
 use super::{ClientShellSnapshot, ClientSurfaceSize, ServerMessage};
 
-pub const ENDPOINT_PROTOCOL_GENERATION: u32 = 1;
+// hall: off herdr's 1, so a herdr client on a hall client socket, or the
+// reverse, is refused at the endpoint handshake (decision 33); P8's protocol
+// number covers the CLI and API, this covers the client.
+pub const ENDPOINT_PROTOCOL_GENERATION: u32 = 1001;
 pub const ENDPOINT_HELLO_KIND: &str = "endpoint.hello.v1";
 pub const ENDPOINT_WELCOME_KIND: &str = "endpoint.welcome.v1";
 pub const SNAPSHOT_CODEC_V1: &str = "shell.snapshot.v1";
@@ -209,7 +212,8 @@ mod tests {
             "/tests/fixtures/endpoint-welcome-v1.json"
         )))
         .unwrap();
-        assert_eq!(welcome.generation, ENDPOINT_PROTOCOL_GENERATION);
+        // hall: the frozen fixture is herdr's generation 1; hall's own is 1001.
+        assert_eq!(welcome.generation, 1);
         assert_eq!(welcome.snapshot_codec, SNAPSHOT_CODEC_V1);
         assert_eq!(welcome.surface_codec, SURFACE_CODEC_V1);
         assert_eq!(welcome.input_codec, INPUT_CODEC_V1);

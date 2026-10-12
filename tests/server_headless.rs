@@ -15,8 +15,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use support::{
-    cleanup_test_base, client_handshake, register_runtime_dir, register_spawned_herdr_pid,
-    unregister_spawned_herdr_pid, CURRENT_PROTOCOL,
+    cleanup_test_base, client_handshake, client_shell_handshake, register_runtime_dir,
+    register_spawned_herdr_pid, unregister_spawned_herdr_pid, CURRENT_ENDPOINT_PROTOCOL_GENERATION,
+    CURRENT_PROTOCOL,
 };
 
 fn unique_test_dir() -> PathBuf {
@@ -437,6 +438,35 @@ fn client_handshake_rejects_incompatible_version() {
     assert!(
         error.is_some(),
         "version 0 should be rejected with an error"
+    );
+
+    cleanup_spawned_herdr(spawned, base);
+}
+
+// hall: a herdr client speaks endpoint generation 1; a hall server refuses it
+// (decision 33), so a herdr client never attaches to hall, nor hall's to herdr.
+#[test]
+fn client_shell_handshake_rejects_herdr_endpoint_generation() {
+    let _lock = test_lock();
+    let base = unique_test_dir();
+    let config_home = base.join("config");
+    let runtime_dir = base.join("runtime");
+    let api_socket = runtime_dir.join("herdr.sock");
+    let client_socket = runtime_dir.join("herdr-client.sock");
+
+    let spawned = spawn_server(&config_home, &runtime_dir, &api_socket, &client_socket);
+    wait_for_socket(&api_socket, Duration::from_secs(10));
+    wait_for_file(&client_socket, Duration::from_secs(10));
+
+    let mut stream = UnixStream::connect(&client_socket).expect("should connect to client socket");
+    let (generation, error) = client_shell_handshake(&mut stream, 1, 80, 24)
+        .expect("should read the welcome even on rejection");
+
+    assert_eq!(generation, CURRENT_ENDPOINT_PROTOCOL_GENERATION);
+    let error = error.expect("herdr's endpoint generation 1 should be rejected");
+    assert!(
+        error.contains("endpoint generation 1 is unsupported"),
+        "{error}"
     );
 
     cleanup_spawned_herdr(spawned, base);
