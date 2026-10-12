@@ -2,7 +2,7 @@
 
 Hall is the liege's audience hall: one full-screen terminal app over every live reeve on the machine. Each reeve sits at the top level of the reeve tree with its hands beneath it, a hand state on every hand and a waiting-on-you badge on every reeve. Picking one shows its session live, through herdr as the backend.
 
-**Status: planning, no code yet.**
+**Status: step 1 (test setup and stand-in) is built; steps 2 to 5 are planned.**
 
 - [Version one plan](docs/plan.md): scope, architecture sketch, test setup and the five build steps.
 - [Glossary](GLOSSARY.md): the terms every document and, later, the code uses.

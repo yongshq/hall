@@ -21,11 +21,20 @@ Hall is built and tested only against its test setup, never the live one (ADR [0
 
 The config also holds the roster, one line per test reeve or test hand (`reeve <name> <1|2>` or `errand <id> <1|2> <owner> <office>`). As shipped: test reeves `ansel` (hall-dev) and `bertil` (hall-dev-2); test hands `ansel-fix` (hall-dev), `ansel-review` (hall-dev-2, so a reeve has a hand in the other herdr session) and `bertil-probe` (hall-dev-2).
 
-Every subcommand takes `--dry-run`: it prints every command it would run, each on a line starting `+ `, and runs none. Plumbing that only parses output already captured (`jq` over a herdr reply) is not printed.
+Every subcommand takes `--dry-run`: it prints every command it would run, each on a line starting `+ `, and runs none. Plumbing that only parses output already captured (`jq` over a herdr reply) is not printed, and neither is the home check below, which runs in a dry run too, since it reads only where the path leads and writes nothing.
+
+The scripts need the stand-in built before their first run, because it checks the reeve home:
+
+```sh
+PATH=/opt/homebrew/opt/rustup/bin:$PATH cargo build -p hall-standin
+```
+
+Without it every subcommand refuses; there is no weaker check to fall back on.
 
 ## What the scripts refuse
 
-- The reeve home `~/.reeve`, anything inside it, and any home whose directory name does not start with `.reeve-hall-dev` (symlinks followed).
+- The reeve home `~/.reeve`, anything inside it, and any home whose directory name does not start with `.reeve-hall-dev`. Before any other step, every subcommand asks the stand-in (`hall-standin check-home --home <path>`), the one judge of a reeve home, and from then on uses the path it prints: the home as resolved on disk. It follows symlinks, and matches the live reeve home by the directory on disk, not by its spelling, so a case variant (`~/.REEVE`) or another route to it (`/System/Volumes/Data/Users/...`) is refused too. It rules out `~/.reeve` both for `HOME` and for the home the user database records, so a wrong `HOME` does not open it. A symlink whose target does not exist is refused, since where it leads cannot be checked.
+- A reeve home with anything but letters, digits, `.`, `_`, `-` and `/` in it, as given or as resolved, since it goes into the command line each pane runs.
 - The herdr session `default` in any letter case, and any herdr session not named `hall-dev*`.
 
 ## Rules every command keeps
@@ -41,7 +50,7 @@ Every subcommand takes `--dry-run`: it prints every command it would run, each o
 scripts/test-setup up            # or --dry-run first
 ```
 
-1. Builds the stand-in (`cargo build -p hall-standin`, with keg-only rustup's bin put first on PATH).
+1. Rebuilds the stand-in (`cargo build -p hall-standin`, with keg-only rustup's bin put first on PATH), unless `HALL_STANDIN_BIN` names one. The first build is by hand (Inputs, above), since the home check needs it.
 2. Reads `herdr session list --json`. If `hall-dev` or `hall-dev-2` is not running, it prints the command to start it and stops with exit status 3 (see "Starting a herdr session" below). Run it, detach, and run `up` again.
 3. Seeds `<home>/standin/world.toml` from the roster if it does not exist yet; an existing world file is kept as it is.
 4. Writes `<home>/standin/live-baseline.json` once: the live herdr session's entry in the session list (name, running, socket path, session dir), for `status` to compare against later.
@@ -71,7 +80,7 @@ scripts/test-setup status
 Read only. It prints:
 
 - `hall-dev` and `hall-dev-2` from the session list: running, socket path.
-- The live setup check: the live herdr session's entry in the session list, compared with up's baseline (`unchanged since up's baseline`, or a `CHECK:` line), and that neither test session shares its socket.
+- The live setup check: the live herdr session's entry in the session list, compared with up's baseline (`live session entry (name, socket, dir, running) unchanged since up's baseline; its panes are not checked`, or a `CHECK:` line), and that neither test session shares its socket.
 - Per roster line: the recorded pane, confirmed with `herdr pane get` in its test herdr session, and herdr's reading of it from `herdr agent explain --json`.
 - `~/.reeve/state`: any file mentioning the test home's path or a roster name (`grep -rlF`, `grep -rlwF`). `none` is the expected answer for both.
 - Folder trust per work dir, and the listing.
@@ -112,6 +121,8 @@ scripts/test-setup down --delete    # and delete their saved state
 
 Stops each test herdr session that is running (`herdr session stop <name> --json`), which ends every test reeve and test hand in it, and forgets every recorded pane in the world file. Without `--delete`, herdr keeps each session's saved shape and restores it on the next start. The test reeve home and its world file are kept; remove `~/.reeve-hall-dev` by hand to start fresh.
 
+`herdr session stop|delete <name>` carries no `--session`: the name is its argument, and herdr resolves its own connection for it, which under `env -u` is the default session's. Whether herdr then asks the default server to stop the named session, or reaches the named one directly, is not documented and was not tried. Check it once in the first supervised live run: after `down`, `herdr session list --json` should show `default` still running with the same entry as before.
+
 ## Setting states
 
 Any hand state, question or flag is set by editing `<home>/standin/world.toml`, or with `hall-standin set` (see [listing-draft.md](listing-draft.md)):
@@ -125,8 +136,8 @@ target/debug/hall-standin --home ~/.reeve-hall-dev set bertil-probe question="Wh
 
 `cargo test --workspace` (with `PATH=/opt/homebrew/opt/rustup/bin:$PATH`) runs:
 
-- the stand-in's unit tests, and `tests/standin_cli.rs`: the listing's shape, every hand state and flag, a question present and absent, errands not in flight left out, and the refusals (a missing `--home`, `~/.reeve` directly, inside it and through a symlink, a home not named `.reeve-hall-dev*`, the herdr session `default`);
-- `tests/scripts_dry_run.rs`: every subcommand of both scripts in `--dry-run`. Every herdr line runs under `env -u HERDR_SOCKET_PATH -u HERDR_SESSION` and ends `--session hall-dev` or `--session hall-dev-2` (or is `session list --json`, or `session stop|delete hall-dev*`); nothing printed mentions `default`; every claude line has `REEVE_HOME="<home>"` and the haiku model; nothing is created; `status` runs only reads; the only key ever sent is Esc; the refusals fire before any command is printed;
+- the stand-in's unit tests, and `tests/standin_cli.rs`: the listing's shape, every hand state and flag, a question present and absent, errands not in flight left out, `check-home`, and the refusals (a missing `--home`, `~/.reeve` directly, inside it, through a symlink and in another letter case, the user database's `~/.reeve` under a wrong `HOME`, a home not named `.reeve-hall-dev*`, the herdr session `default`, a pane id that could read as an option);
+- `tests/scripts_dry_run.rs`: every subcommand of both scripts in `--dry-run`. Every herdr line runs under `env -u HERDR_SOCKET_PATH -u HERDR_SESSION` and ends `--session hall-dev` or `--session hall-dev-2` (or is `session list --json`, or `session stop|delete hall-dev*`); nothing printed mentions `default`; every claude line has `REEVE_HOME="<home>"` and the haiku model; nothing is created; `status` runs only reads; the only key ever sent is Esc; the refusals fire before any command is printed, including `~/.reeve` in another letter case, through a symlink, and from the user database under a wrong `HOME`, a home that resolves to a path with a quote or `$(...)` in it, and a missing stand-in;
 - `tests/scripts_fake_herdr.rs`: both scripts run for real against a fake `herdr` on PATH and a fake HOME, all under `target/`, with `HERDR_SOCKET_PATH` and `HERDR_SESSION` set as inside a live pane. It checks that neither variable reaches herdr, that the listing's session locations are the panes herdr handed out, that a second `up` starts nothing, that `status` reports the live setup clean and flags a `~/.reeve/state` file mentioning the test setup, and that `up` stops when a test session is not running.
 
 The tests never start herdr or claude and never read or write the real `~/.reeve-hall-dev`.
