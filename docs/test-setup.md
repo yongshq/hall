@@ -1,6 +1,6 @@
 # Test setup
 
-> **Note:** this page describes the test setup as built, on herdr, under the earlier plan (its "Plan step 1"). Step 2 of the [current plan](plan.md#2-test-setup-on-hall) retargets it to the debug hall binary and one hall session, `hall-dev`, dropping `hall-dev-2` (decision 38); until then it runs as written here. It has never been brought up live, so herdr holds no `hall-dev*` session.
+> **Note:** this page describes the test setup as built, on herdr, under the earlier plan (its "Plan step 1"). Step 2 of the [current plan](plan.md#2-test-setup-on-hall) retargets it to the debug hall binary and one hall session, `hall-dev`, dropping `hall-dev-2` (decision 38); until then it is not run (decision 41), because every `up` and `status` reads `herdr session list --json`, which connects to the live `default` server. It has never been brought up live, so herdr holds no `hall-dev*` session.
 
 Hall is built and tested only against its test setup, never the live one (ADR [0003](adr/0003-separate-from-live-setup.md), decisions 10, 23, 24 and 26). This page is how to bring it up and down, drive a test reeve to a dialog or the end of a turn, and what is checked on the way. Plan step 1.
 
