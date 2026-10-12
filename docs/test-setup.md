@@ -1,5 +1,7 @@
 # Test setup
 
+> **Note:** this page describes the test setup as built, on herdr, under the earlier plan (its "Plan step 1"). Step 2 of the [current plan](plan.md#2-test-setup-on-hall) retargets it to the hall binary and the `hall-dev` and `hall-dev-2` hall sessions; until then it runs as written here.
+
 Hall is built and tested only against its test setup, never the live one (ADR [0003](adr/0003-separate-from-live-setup.md), decisions 10, 23, 24 and 26). This page is how to bring it up and down, drive a test reeve to a dialog or the end of a turn, and what is checked on the way. Plan step 1.
 
 - Two herdr sessions, `hall-dev` and `hall-dev-2`.

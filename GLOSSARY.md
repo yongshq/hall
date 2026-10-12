@@ -26,13 +26,25 @@ _Avoid_: task, job, ticket
 One running reeve or hand, together with the terminal it lives in. Picking a reeve or a hand in hall shows its session.
 _Avoid_: pane, tab, endpoint, window
 
+**Hall session**:
+One hall server with its own socket, holding many sessions: `hall-dev` and `hall-dev-2` for the test setup. Kept under hall's own config folder, never in herdr's.
+_Avoid_: server, instance, session (alone)
+
 **Herdr session**:
-One herdr server with its own socket, holding many sessions: `default` for the live setup, `hall-dev` and `hall-dev-2` for the test setup.
+One server of the liege's installed herdr, with its own socket: `default` holds the live setup. Until plan step 2, the test setup's `hall-dev` and `hall-dev-2` are herdr sessions too.
 _Avoid_: server, instance, session (alone)
 
 **Backend**:
-The terminal manager that keeps every session alive underneath hall. Today, herdr.
+The terminal manager a reeve dispatches its hands through. The live setup's is herdr; hall becomes one at go-live.
 _Avoid_: engine, multiplexer, server
+
+**Fork**:
+Hall's relation to herdr: herdr v0.9.0's code, renamed and changed, sharing nothing with the installed herdr.
+_Avoid_: copy, pinned copy, wrapper
+
+**Upstream**:
+Herdr's own repository, github.com/herdrdev/herdr. Its changes reach hall only when chosen and ported by hand.
+_Avoid_: origin, herdr (for the repository)
 
 **Local copy**:
 The separate checkout of a repository a hand works in, so hands never collide.
@@ -45,7 +57,7 @@ The liege's real reeves, reeve home and herdr session, doing the household's act
 _Avoid_: production, prod, real setup
 
 **Test setup**:
-A separate herdr session and reeve home, holding test reeves and test hands, that hall is built and tested against.
+Two hall sessions and a reeve home of its own, holding test reeves and test hands, that hall is built and tested against.
 _Avoid_: sandbox, staging, dev env
 
 **Test reeve**:
@@ -63,8 +75,8 @@ _Avoid_: mock, fake, stub
 ## Screen
 
 **Reeve tree**:
-The left column of hall: every reeve, its hands nested beneath, a state mark per hand and a waiting-on-you badge per reeve.
-_Avoid_: sidebar, agent list
+The reeve list in hall's sidebar: every reeve, its hands nested beneath, a state mark per hand and a waiting-on-you badge per reeve. A reeve is a workspace and each hand a tab in it.
+_Avoid_: spaces, agent list
 
 ## State
 

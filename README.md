@@ -1,11 +1,12 @@
 # Hall
 
-Hall is the liege's audience hall: one full-screen terminal app over every live reeve on the machine. Each reeve sits at the top level of the reeve tree with its hands beneath it, a hand state on every hand and a waiting-on-you badge on every reeve. Picking one shows its session live, through herdr as the backend.
+Hall is the liege's audience hall: herdr, forked from v0.9.0 and renamed, with every live reeve at the top level of the sidebar, its hands beneath it, a hand state on every hand and a waiting-on-you badge on every reeve. The liege types `hall` and it starts, detaches and reattaches exactly like herdr, with its own sessions, config and state, sharing nothing with the installed herdr.
 
-**Status: step 1 (test setup and stand-in) is built; steps 2 to 5 are planned.**
+**Status: planned as a fork (decision 31); the fork itself is not merged yet. Built so far: the stand-in and the test setup, on herdr.**
 
 - [Version one plan](docs/plan.md): scope, architecture sketch, test setup and the five build steps.
 - [Glossary](GLOSSARY.md): the terms every document and, later, the code uses.
-- Decision records: [0001 own app on herdr](docs/adr/0001-own-app-on-herdr.md), [0002 state through reeve](docs/adr/0002-state-through-reeve.md), [0003 separate from the live setup](docs/adr/0003-separate-from-live-setup.md).
-- [Planning log](docs/decisions.md): every decision settled while planning and after the plan review.
-- [Herdr research](docs/research/herdr-surface.md): what herdr 0.9.0 offers a separate app, which the plan cites.
+- Decision records: [0001 own app on herdr](docs/adr/0001-own-app-on-herdr.md) (superseded), [0002 state through reeve](docs/adr/0002-state-through-reeve.md), [0003 separate from the live setup](docs/adr/0003-separate-from-live-setup.md), [0004 fork of herdr](docs/adr/0004-fork-of-herdr.md).
+- [Planning log](docs/decisions.md): every decision settled while planning and after.
+- Research: [herdr's surface](docs/research/herdr-surface.md), [starting hall like herdr](docs/research/herdr-launch.md), [turning herdr into hall](docs/research/fork-map.md).
+- [Test setup](docs/test-setup.md): bringing the test reeves up and down.
