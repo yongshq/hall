@@ -43,6 +43,13 @@ fn set_sigpipe_disposition(handler: libc::sighandler_t) {
 }
 
 pub(crate) fn begin_cli_output() {
+    // hall: herdr runs its suite under nextest, one process per test. Under
+    // `cargo test` every unit test shares one process, and a CLI print in one
+    // test left SIGPIPE at its default for the rest, so a later test's write to
+    // a closed pipe killed the whole run. The binary still resets it.
+    if cfg!(test) {
+        return;
+    }
     set_sigpipe_disposition(libc::SIG_DFL);
 }
 

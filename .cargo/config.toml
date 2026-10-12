@@ -1,2 +1,9 @@
 [target.x86_64-pc-windows-msvc]
 rustflags = ["-C", "target-feature=+crt-static"]
+
+# hall: herdr's tests share process-wide environment variables and state and
+# are run upstream by nextest, one process per test. Under `cargo test` they
+# share one process per binary and race, so hall runs each test binary's tests
+# one at a time. An explicit RUST_TEST_THREADS or --test-threads still wins.
+[env]
+RUST_TEST_THREADS = "1"

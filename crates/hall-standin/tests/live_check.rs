@@ -93,7 +93,11 @@ impl Rig {
     }
 
     fn lsof_out(&self, which: &str, body: &str) {
-        std::fs::write(self.bin.join(format!("lsof-{which}.out")), format!("{HEADER}{body}")).unwrap();
+        std::fs::write(
+            self.bin.join(format!("lsof-{which}.out")),
+            format!("{HEADER}{body}"),
+        )
+        .unwrap();
     }
 
     fn lsof_log(&self) -> Vec<String> {
@@ -116,7 +120,10 @@ impl Rig {
     }
 
     fn run(&self, args: &[&str]) -> Output {
-        self.run_with_path(args, &format!("{}:/usr/bin:/bin:/usr/sbin:/sbin", self.bin.display()))
+        self.run_with_path(
+            args,
+            &format!("{}:/usr/bin:/bin:/usr/sbin:/sbin", self.bin.display()),
+        )
     }
 }
 
@@ -140,7 +147,11 @@ fn passes(out: &Output) -> String {
 
 fn fails(out: &Output) -> (String, String) {
     let (stdout, stderr) = text(out);
-    assert_eq!(out.status.code(), Some(1), "expected a failure:\n{stdout}\n{stderr}");
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "expected a failure:\n{stdout}\n{stderr}"
+    );
     (stdout, stderr)
 }
 
@@ -167,14 +178,26 @@ fn first_run_records_baseline_once() {
     let stdout = passes(&out);
     let (_, stderr) = text(&out);
     assert!(stderr.contains("baseline recorded"), "{stderr}");
-    for part in ["config", "state", "worktrees", "pane-graphics", "peers", "reeve-state"] {
+    for part in [
+        "config",
+        "state",
+        "worktrees",
+        "pane-graphics",
+        "peers",
+        "reeve-state",
+    ] {
         assert!(line(&stdout, part).contains(": pass"), "{stdout}");
     }
     assert_eq!(stdout.lines().count(), 6, "one line per part:\n{stdout}");
     let b = rig.baseline();
     assert_eq!(
         entries(&b, "config"),
-        ["config.toml", "sessions", "sessions/work", "sessions/work/session.json"]
+        [
+            "config.toml",
+            "sessions",
+            "sessions/work",
+            "sessions/work/session.json"
+        ]
     );
     assert_eq!(b["places"]["config"]["exists"], true);
     let first = std::fs::read(rig.baseline_path()).unwrap();
@@ -192,7 +215,10 @@ fn first_run_records_baseline_once() {
 fn absent_place_is_an_empty_listing() {
     let rig = Rig::new("absent");
     let stdout = passes(&rig.run(&[]));
-    assert!(line(&stdout, "pane-graphics").contains("absent"), "{stdout}");
+    assert!(
+        line(&stdout, "pane-graphics").contains("absent"),
+        "{stdout}"
+    );
     let b = rig.baseline();
     for place in ["config", "state", "worktrees", "pane-graphics"] {
         assert_eq!(b["places"][place]["exists"], false);
@@ -243,22 +269,66 @@ fn new_entry_fails_until_accepted() {
     std::fs::remove_file(rig.config().join("config.toml")).unwrap();
 
     let (stdout, stderr) = fails(&rig.run(&[]));
-    assert!(line(&stdout, "state").contains("FAIL 2 new entries"), "{stdout}");
-    assert!(line(&stdout, "config").contains("pass"), "a gone entry does not fail:\n{stdout}");
-    assert!(stderr.contains("gone since baseline config.toml"), "{stderr}");
-    assert!(stderr.contains("state: new client-shell/state.json (born 20"), "{stderr}");
+    assert!(
+        line(&stdout, "state").contains("FAIL 2 new entries"),
+        "{stdout}"
+    );
+    assert!(
+        line(&stdout, "config").contains("pass"),
+        "a gone entry does not fail:\n{stdout}"
+    );
+    assert!(
+        stderr.contains("gone since baseline config.toml"),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("state: new client-shell/state.json (born 20"),
+        "{stderr}"
+    );
 
     // Only an entry on disk and not yet in the baseline can be accepted, and
     // only with who and why.
-    let missing = rig.run(&["accept", "state", "nothing-here", "--by", "t", "--reason", "r"]);
+    let missing = rig.run(&[
+        "accept",
+        "state",
+        "nothing-here",
+        "--by",
+        "t",
+        "--reason",
+        "r",
+    ]);
     assert_eq!(missing.status.code(), Some(1));
-    let known = rig.run(&["accept", "state", "agent-detection", "--by", "t", "--reason", "r"]);
+    let known = rig.run(&[
+        "accept",
+        "state",
+        "agent-detection",
+        "--by",
+        "t",
+        "--reason",
+        "r",
+    ]);
     assert_eq!(known.status.code(), Some(1));
-    assert_eq!(rig.run(&["accept", "state", "client-shell"]).status.code(), Some(2));
-    assert_eq!(rig.run(&["accept", "nowhere", "x", "--by", "t", "--reason", "r"]).status.code(), Some(2));
+    assert_eq!(
+        rig.run(&["accept", "state", "client-shell"]).status.code(),
+        Some(2)
+    );
+    assert_eq!(
+        rig.run(&["accept", "nowhere", "x", "--by", "t", "--reason", "r"])
+            .status
+            .code(),
+        Some(2)
+    );
 
     for e in ["client-shell", "client-shell/state.json"] {
-        let out = rig.run(&["accept", "state", e, "--by", "liege", "--reason", "herdr client state"]);
+        let out = rig.run(&[
+            "accept",
+            "state",
+            e,
+            "--by",
+            "liege",
+            "--reason",
+            "herdr client state",
+        ]);
         passes(&out);
     }
     let b = rig.baseline();
@@ -289,23 +359,39 @@ fn depth_per_place() {
     // Config and state are listed at every level.
     touch(&rig.config().join("sessions/work/a/b/c/deep.json"));
     let (stdout, stderr) = fails(&rig.run(&[]));
-    assert!(line(&stdout, "config").contains("FAIL 4 new entries"), "{stdout}");
-    assert!(stderr.contains("new sessions/work/a/b/c/deep.json"), "{stderr}");
+    assert!(
+        line(&stdout, "config").contains("FAIL 4 new entries"),
+        "{stdout}"
+    );
+    assert!(
+        stderr.contains("new sessions/work/a/b/c/deep.json"),
+        "{stderr}"
+    );
     std::fs::remove_dir_all(rig.config().join("sessions/work/a")).unwrap();
 
     // A new branch names the repo its .git file points to.
     let wt = rig.worktrees().join("portfolio/feat-x");
     std::fs::create_dir_all(&wt).unwrap();
-    std::fs::write(wt.join(".git"), "gitdir: /src/portfolio/.git/worktrees/feat-x\n").unwrap();
+    std::fs::write(
+        wt.join(".git"),
+        "gitdir: /src/portfolio/.git/worktrees/feat-x\n",
+    )
+    .unwrap();
     // A new server folder names its pid's command while it runs.
     let me = std::process::id();
     std::fs::create_dir_all(rig.pane_graphics().join(format!("server-{me}-n1"))).unwrap();
     std::fs::create_dir_all(rig.pane_graphics().join("server-999999999-n2")).unwrap();
     let (stdout, stderr) = fails(&rig.run(&[]));
-    assert!(line(&stdout, "worktrees").contains("FAIL 1 new entries"), "{stdout}");
+    assert!(
+        line(&stdout, "worktrees").contains("FAIL 1 new entries"),
+        "{stdout}"
+    );
     assert!(stderr.contains("new portfolio/feat-x (born"), "{stderr}");
     assert!(stderr.contains("repo /src/portfolio"), "{stderr}");
-    assert!(line(&stdout, "pane-graphics").contains("FAIL 2 new entries"), "{stdout}");
+    assert!(
+        line(&stdout, "pane-graphics").contains("FAIL 2 new entries"),
+        "{stdout}"
+    );
     assert!(stderr.contains(&format!("pid {me} alive: ")), "{stderr}");
     assert!(stderr.contains("pid 999999999 not running"), "{stderr}");
 }
@@ -328,9 +414,18 @@ fn peer_on_a_live_herdr_socket_fails() {
         "hall     4242 yong    3u  unix 0xbf80ef7d4cee9c28      0t0      ->0x6680e81d2b274bc8\n",
     );
     let (stdout, stderr) = fails(&rig.run(&[]));
-    assert!(line(&stdout, "peers").contains("FAIL 1 hall fds"), "{stdout}");
+    assert!(
+        line(&stdout, "peers").contains("FAIL 1 hall fds"),
+        "{stdout}"
+    );
     assert!(stderr.contains("pid 4242"), "{stderr}");
-    assert!(stderr.contains(&format!("herdr pid 1186 fd 17u {}/herdr.sock", config.display())), "{stderr}");
+    assert!(
+        stderr.contains(&format!(
+            "herdr pid 1186 fd 17u {}/herdr.sock",
+            config.display()
+        )),
+        "{stderr}"
+    );
 
     // Both sides are asked for unix fds of that command only.
     let log = rig.lsof_log();
@@ -364,23 +459,38 @@ fn peer_check_ignores_lines_lsof_without_a_would_add() {
          hall     4242 yong    8u  unix 0x6666666666666666      0t0      /Users/x/.config/hall-dev/herdr.sock\n",
     );
     let stdout = passes(&rig.run(&[]));
-    assert!(line(&stdout, "peers").contains("pass (3 hall unix fds, 2 live herdr socket fds"), "{stdout}");
+    assert!(
+        line(&stdout, "peers").contains("pass (3 hall unix fds, 2 live herdr socket fds"),
+        "{stdout}"
+    );
 
     // The same lines plus a real hit still fail.
     let mut hall = std::fs::read_to_string(rig.bin.join("lsof-hall.out")).unwrap();
-    hall.push_str("hall-stan 4343 yong    3u  unix 0x7777777777777777      0t0      ->0x8AB16074EA3A2569\n");
+    hall.push_str(
+        "hall-stan 4343 yong    3u  unix 0x7777777777777777      0t0      ->0x8AB16074EA3A2569\n",
+    );
     std::fs::write(rig.bin.join("lsof-hall.out"), hall).unwrap();
     let (stdout, stderr) = fails(&rig.run(&[]));
-    assert!(line(&stdout, "peers").contains("FAIL 1 hall fds"), "{stdout}");
+    assert!(
+        line(&stdout, "peers").contains("FAIL 1 hall fds"),
+        "{stdout}"
+    );
     assert!(stderr.contains("hall-stan pid 4343"), "{stderr}");
 }
 
 #[test]
 fn lsof_failing_or_missing_fails() {
     let rig = Rig::new("lsof-fail");
-    std::fs::write(rig.bin.join("lsof-fail"), "lsof: can't read kernel name list\n").unwrap();
+    std::fs::write(
+        rig.bin.join("lsof-fail"),
+        "lsof: can't read kernel name list\n",
+    )
+    .unwrap();
     let (stdout, stderr) = fails(&rig.run(&[]));
-    assert!(line(&stdout, "peers").contains("FAIL lsof did not run cleanly"), "{stdout}");
+    assert!(
+        line(&stdout, "peers").contains("FAIL lsof did not run cleanly"),
+        "{stdout}"
+    );
     assert!(stderr.contains("can't read kernel name list"), "{stderr}");
 
     // No lsof on PATH at all: only what the script needs besides it.
@@ -400,13 +510,20 @@ fn reeve_state_naming_the_test_setup_fails() {
     let state = rig.user.join(".reeve/state");
     // Near misses: a longer name, a name inside a longer one, a similar home.
     std::fs::create_dir_all(state.join("sessions/s1")).unwrap();
-    std::fs::write(state.join("sessions/s1/meta"), "reeve anselm\nerrand ansel-fixed\nhome /u/.reeve-hall-devx\n").unwrap();
+    std::fs::write(
+        state.join("sessions/s1/meta"),
+        "reeve anselm\nerrand ansel-fixed\nhome /u/.reeve-hall-devx\n",
+    )
+    .unwrap();
     std::fs::write(state.join("binary.bin"), [0u8, 159, 146, 150, b'a']).unwrap();
     let stdout = passes(&rig.run(&[]));
     assert!(line(&stdout, "reeve-state").contains("pass"), "{stdout}");
 
     for (file, body) in [
-        ("sessions/s1/home", "REEVE_HOME=/Users/x/.reeve-hall-dev/work\n".to_string()),
+        (
+            "sessions/s1/home",
+            "REEVE_HOME=/Users/x/.reeve-hall-dev/work\n".to_string(),
+        ),
         ("sessions/s1/tilde", "cd ~/.reeve-hall-dev\n".to_string()),
         ("errands.log", "dispatched ansel-fix\n".to_string()),
         ("reeves", "name=bertil;\n".to_string()),
@@ -414,7 +531,10 @@ fn reeve_state_naming_the_test_setup_fails() {
         let p = state.join(file);
         std::fs::write(&p, body).unwrap();
         let (stdout, stderr) = fails(&rig.run(&[]));
-        assert!(line(&stdout, "reeve-state").contains("FAIL 1 files"), "{file}: {stdout}");
+        assert!(
+            line(&stdout, "reeve-state").contains("FAIL 1 files"),
+            "{file}: {stdout}"
+        );
         assert!(stderr.contains(p.to_str().unwrap()), "{stderr}");
         std::fs::remove_file(&p).unwrap();
     }
