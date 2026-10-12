@@ -1,0 +1,261 @@
+#!/usr/bin/env bash
+# Bring hall's test setup up or down, or report on it. See docs/test-setup.md.
+set -euo pipefail
+
+HALL_PROG=test-setup
+HALL_USAGE="usage: scripts/test-setup [options] up|down|status
+
+  up      seed the world file, start a claude session per roster line in the
+          test herdr sessions, record where each one sits, print the listing
+  down    stop the two test herdr sessions and forget the recorded panes
+  status  read only: the test herdr sessions, each session's herdr reading,
+          and a check that the live setup is untouched
+
+options:
+  --home <path>        test reeve home (else HALL_DEV_HOME from the config)
+  --session-1 <name>   first test herdr session (else HALL_DEV_SESSION_1)
+  --session-2 <name>   second test herdr session (else HALL_DEV_SESSION_2)
+  --config <file>      config to source (default scripts/test-setup.conf)
+  --delete             with down: also delete the stopped herdr sessions' saved state
+  --dry-run            print every command, run none"
+
+# shellcheck source=test-setup-lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/test-setup-lib.sh"
+
+DELETE=0
+args=()
+for a in "$@"; do
+  if [ "$a" = --delete ]; then DELETE=1; else args+=("$a"); fi
+done
+parse_common ${args[@]+"${args[@]}"}
+[ "${#REST[@]}" -eq 1 ] || usage_die "expected one of up, down, status"
+CMD=${REST[0]}
+case $CMD in up | down | status) ;; *) usage_die "unknown command $CMD" ;; esac
+[ "$DELETE" = 0 ] || [ "$CMD" = down ] || usage_die "--delete goes with down only"
+load_inputs
+
+WORLD="$HALL_DEV_HOME/standin/world.toml"
+BASELINE="$HALL_DEV_HOME/standin/live-baseline.json"
+
+# session_running <json> <name>: 0 when the session list shows it running.
+session_running() {
+  [ "$DRY_RUN" = 1 ] && return 0
+  [ "$(printf '%s' "$1" | jq -r --arg n "$2" '.sessions[]? | select(.name == $n) | .running')" = true ]
+}
+
+# The session list entry of the herdr session that is the live one, as one line of JSON.
+live_entry() {
+  printf '%s' "$1" | jq -c '[.sessions[]? | select(.default == true) | {name, running, socket_path, session_dir}] | first // empty'
+}
+
+seed_world() {
+  local text line
+  text="# hall test setup world file: what the stand-in serves as the draft listing.
+# Seeded by scripts/test-setup up from the roster. Edit freely, or use
+# hall-standin --home <home> set <name> <key>=<value>. Format: docs/listing-draft.md.
+"
+  for line in "${HALL_DEV_ROSTER[@]}"; do
+    roster_read "$line"
+    case $R_KIND in
+      reeve)
+        text+="
+[[reeve]]
+name = \"$R_NAME\"
+herdr_session = \"$R_SESSION\"
+live = true
+"
+        ;;
+      errand)
+        text+="
+[[errand]]
+id = \"$R_NAME\"
+office = \"$R_OFFICE\"
+owner = \"$R_OWNER\"
+state = \"working\"
+waiting = false
+idle = false
+wedged = false
+in_flight = true
+herdr_session = \"$R_SESSION\"
+"
+        ;;
+      *) die "roster line '$line': kind is reeve or errand" ;;
+    esac
+  done
+  write_file "$WORLD" "$text"
+}
+
+cmd_up() {
+  local sessions line pane loc ws out missing=0 s
+  if [ "$DRY_RUN" = 0 ]; then
+    command -v herdr >/dev/null || die "herdr is not on PATH"
+    command -v jq >/dev/null || die "jq is not on PATH"
+  fi
+  if [ -n "${HALL_STANDIN_BIN:-}" ]; then
+    say "  stand-in: $HALL_STANDIN (HALL_STANDIN_BIN, not built here)"
+  else
+    say "  cargo: $HALL_RUSTUP_BIN put first on PATH (keg-only rustup)"
+    PATH="$HALL_RUSTUP_BIN:$PATH"
+    run cargo build --quiet --manifest-path "$HALL_REPO/Cargo.toml" -p hall-standin
+  fi
+
+  herdr_session_list sessions
+  for s in "$HALL_DEV_SESSION_1" "$HALL_DEV_SESSION_2"; do
+    if [ "$DRY_RUN" = 1 ]; then
+      say "  (dry run: if $s is not running, up stops here and asks the liege to run, in a spare terminal:"
+      say "     $(q "${HALL_HERDR[@]}" --session "$s")"
+      say "   then detach with ctrl+b q and run up again)"
+    elif ! session_running "$sessions" "$s"; then
+      missing=1
+      say "herdr session $s is not running. Herdr documents no way to start a named session"
+      say "without a client attached, so start it yourself, in a spare terminal:"
+      say "  $(q "${HALL_HERDR[@]}" --session "$s")"
+      say "then detach with ctrl+b q (the server keeps running) and run up again."
+    fi
+  done
+  [ "$missing" = 0 ] || exit 3
+
+  run mkdir -p "$HALL_DEV_HOME/standin"
+  if [ "$DRY_RUN" = 1 ] || [ ! -e "$WORLD" ]; then
+    seed_world
+  else
+    say "  world file $WORLD exists, kept as it is"
+  fi
+  if [ "$DRY_RUN" = 0 ] && [ -z "$(live_entry "$sessions")" ]; then
+    die "the herdr session list shows no live session to take a baseline of"
+  fi
+  if [ "$DRY_RUN" = 1 ] || [ ! -e "$BASELINE" ]; then
+    write_file "$BASELINE" "$(live_entry "$sessions")"
+  fi
+
+  for line in "${HALL_DEV_ROSTER[@]}"; do
+    roster_read "$line"
+    say "$R_KIND $R_NAME in $R_SESSION:"
+    run mkdir -p "$(work_dir "$R_NAME")"
+    trust_report "$(work_dir "$R_NAME")"
+
+    loc=""
+    if run_into loc "" "$HALL_STANDIN" --home "$HALL_DEV_HOME" locate "$R_NAME" 2>/dev/null && [ -n "$loc" ]; then
+      pane=${loc#* }
+      if [ "${loc%% *}" = "$R_SESSION" ] && hd_into out "" "$R_SESSION" pane get "$pane" 2>/dev/null; then
+        say "  already up in pane $pane"
+        continue
+      fi
+    fi
+    hd_into ws '{}' "$R_SESSION" workspace create --cwd "$(work_dir "$R_NAME")" --label "$R_NAME" --no-focus
+    if [ "$DRY_RUN" = 1 ]; then
+      pane="<pane-of-$R_NAME>"
+    else
+      pane=$(printf '%s' "$ws" | jq -r '.result.root_pane.pane_id // empty')
+      [ -n "$pane" ] || die "workspace create in $R_SESSION gave no pane id: $ws"
+    fi
+    hd "$R_SESSION" pane run "$pane" "$(claude_line "$R_NAME")"
+    standin place "$R_NAME" "$R_SESSION" "$pane"
+  done
+
+  say "listing:"
+  standin listing
+  say "next: answer any folder trust dialog yourself, then scripts/test-setup status"
+}
+
+cmd_down() {
+  local sessions line s
+  herdr_session_list sessions
+  for s in "$HALL_DEV_SESSION_1" "$HALL_DEV_SESSION_2"; do
+    check_session "$s"
+    if session_running "$sessions" "$s"; then
+      run "${HALL_HERDR[@]}" session stop "$s" --json
+    else
+      say "  $s is not running"
+    fi
+    if [ "$DELETE" = 1 ]; then
+      run "${HALL_HERDR[@]}" session delete "$s" --json
+    fi
+  done
+  if [ "$DRY_RUN" = 1 ] || [ -e "$WORLD" ]; then
+    for line in "${HALL_DEV_ROSTER[@]}"; do
+      roster_read "$line"
+      standin place "$R_NAME" "$R_SESSION"
+    done
+  fi
+  say "the test reeve home $HALL_DEV_HOME is kept; remove it by hand if wanted"
+}
+
+cmd_status() {
+  local sessions s line loc pane live base hits out
+  herdr_session_list sessions
+  if [ "$DRY_RUN" = 0 ]; then
+    for s in "$HALL_DEV_SESSION_1" "$HALL_DEV_SESSION_2"; do
+      say "  $s: $(printf '%s' "$sessions" | jq -c --arg n "$s" '[.sessions[]? | select(.name == $n) | {running, socket_path}] | first // "not listed"')"
+    done
+    live=$(live_entry "$sessions")
+    say "live setup:"
+    if [ -z "$live" ]; then
+      say "  CHECK: the session list shows no live herdr session"
+    else
+      say "  live herdr session: $live"
+      if [ -e "$BASELINE" ]; then
+        base=$(jq -c . "$BASELINE")
+        if [ "$base" = "$live" ]; then say "  unchanged since up's baseline"; else say "  CHECK: differs from up's baseline $base"; fi
+      else
+        say "  no baseline yet (up writes one)"
+      fi
+      for s in "$HALL_DEV_SESSION_1" "$HALL_DEV_SESSION_2"; do
+        if [ "$(printf '%s' "$sessions" | jq -r --arg n "$s" '.sessions[]? | select(.name == $n) | .socket_path')" = "$(printf '%s' "$live" | jq -r .socket_path)" ]; then
+          say "  CHECK: $s shares the live session's socket"
+        fi
+      done
+    fi
+  fi
+
+  say "test sessions:"
+  for line in "${HALL_DEV_ROSTER[@]}"; do
+    roster_read "$line"
+    if ! run_into loc "$R_SESSION <pane-of-$R_NAME>" "$HALL_STANDIN" --home "$HALL_DEV_HOME" locate "$R_NAME" 2>/dev/null; then
+      say "  $R_KIND $R_NAME: no pane recorded"
+      continue
+    fi
+    pane=${loc#* }
+    s=${loc%% *}
+    if ! (check_session "$s") 2>/dev/null; then
+      say "  CHECK: $R_KIND $R_NAME is recorded in herdr session $s, which is not a test herdr session"
+      continue
+    fi
+    if ! session_running "$sessions" "$s"; then
+      say "  $R_KIND $R_NAME: pane $pane recorded, but $s is not running"
+      continue
+    fi
+    if hd_into out "{}" "$s" pane get "$pane" 2>/dev/null; then
+      [ "$DRY_RUN" = 1 ] || say "  $R_KIND $R_NAME: pane $pane is in $s, not in the live session"
+      explain_report "$s" "$pane"
+    else
+      say "  CHECK: $R_KIND $R_NAME: pane $pane not found in $s"
+    fi
+  done
+
+  say "live reeve state (~/.reeve/state) mentions of the test setup:"
+  local names=()
+  for line in "${HALL_DEV_ROSTER[@]}"; do
+    roster_read "$line"
+    names+=(-e "$R_NAME")
+  done
+  hits=""
+  run_into hits "" grep -rlF -e "$HALL_DEV_HOME" "$HOME/.reeve/state" || true
+  [ "$DRY_RUN" = 1 ] || say "  test home: ${hits:-none}"
+  hits=""
+  run_into hits "" grep -rlwF "${names[@]}" "$HOME/.reeve/state" || true
+  [ "$DRY_RUN" = 1 ] || say "  test names: ${hits:-none}"
+
+  say "folder trust:"
+  for line in "${HALL_DEV_ROSTER[@]}"; do
+    roster_read "$line"
+    trust_report "$(work_dir "$R_NAME")"
+  done
+
+  if [ "$DRY_RUN" = 1 ] || { [ -x "$HALL_STANDIN" ] && [ -e "$WORLD" ]; }; then
+    say "listing:"
+    standin listing || true
+  fi
+}
+
+"cmd_$CMD"

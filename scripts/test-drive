@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# Drive a test reeve to a dialog or to the end of a turn, so hall's alerts can
+# be shown on demand (plan step 1). See docs/test-setup.md.
+set -euo pipefail
+
+HALL_PROG=test-drive
+HALL_USAGE="usage: scripts/test-drive [options] <test reeve> dialog|turn-end|deny
+
+  dialog    prompt the test reeve to create a file, which its default
+            permissions ask about, wait for herdr to read it as blocked, and
+            print herdr's reading; the dialog is left standing
+  turn-end  deny any standing dialog with Esc, prompt a direct question, wait
+            for the turn to end, and print herdr's reading
+  deny      deny a standing dialog with Esc and print herdr's reading
+
+A dialog is never answered with allow.
+
+options: --home, --session-1, --session-2, --config, --dry-run, as for
+scripts/test-setup"
+
+# shellcheck source=test-setup-lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/test-setup-lib.sh"
+
+DIALOG_PROMPT="Create a file named hall-dialog-probe.txt in the current directory containing the single word probe."
+TURN_PROMPT="What is 2 + 2? Reply with the number only, without using any tools."
+WAIT_MS=120000
+
+parse_common "$@"
+[ "${#REST[@]}" -eq 2 ] || usage_die "expected <test reeve> and one of dialog, turn-end, deny"
+NAME=${REST[0]}
+ACTION=${REST[1]}
+case $ACTION in dialog | turn-end | deny) ;; *) usage_die "unknown action $ACTION" ;; esac
+load_inputs
+
+roster_find "$NAME" || die "$NAME is not in the roster"
+[ "$R_KIND" = reeve ] || die "$NAME is a test hand; test-drive drives test reeves"
+
+loc=""
+run_into loc "$R_SESSION <pane-of-$NAME>" "$HALL_STANDIN" --home "$HALL_DEV_HOME" locate "$NAME" ||
+  die "no pane recorded for $NAME; run scripts/test-setup up first"
+S=${loc%% *}
+P=${loc#* }
+check_session "$S"
+say "test reeve $NAME: pane $P in $S, action $ACTION"
+
+deny() {
+  hd "$S" agent send-keys "$P" esc
+}
+
+case $ACTION in
+  dialog)
+    hd "$S" agent prompt "$P" "$DIALOG_PROMPT"
+    hd "$S" agent wait "$P" --until blocked --timeout "$WAIT_MS" ||
+      say "  agent wait did not see blocked; a dialog claude paints over the whole screen can read as idle, see the reading below"
+    explain_report "$S" "$P"
+    ;;
+  turn-end)
+    explain_report "$S" "$P"
+    if [ "$DRY_RUN" = 1 ]; then
+      say "  (only if the reading above is a dialog:)"
+      deny
+    elif [ "${EXPLAIN_STATE:-}" = blocked ] || { [[ ${EXPLAIN_STATE:-} =~ ^(idle|done)$ ]] && [ "${EXPLAIN_BOX:-}" != true ]; }; then
+      deny
+    fi
+    # --wait needs observed activity before it settles, so an agent already idle
+    # does not end the wait before the turn has started.
+    hd "$S" agent prompt "$P" "$TURN_PROMPT" --wait --timeout "$WAIT_MS"
+    explain_report "$S" "$P"
+    ;;
+  deny)
+    deny
+    explain_report "$S" "$P"
+    ;;
+esac
