@@ -93,6 +93,7 @@ Each step works end to end and can be shown to the liege on its own. Every step 
 - **Outcome:** the `hall-dev` and `hall-dev-2` herdr sessions running, with test reeves and test hands in both; `~/.reeve-hall-dev`; and the stand-in printing the draft listing for them. Any hand state, question, or waiting, idle or wedged flag can be set by changing `~/.reeve-hall-dev`, and any test reeve can be driven to a dialog or to the end of a turn, so later steps can show every state and every alert on demand.
 - **Shown working:** the stand-in's listing names every test reeve and errand, with session locations that match the sessions in `hall-dev` and `hall-dev-2`; a test reeve driven to a dialog reads as blocked in herdr, and after a turn reads as ready for input (`herdr agent explain`, with `--session`); the live setup is unchanged (the `default` session and `~/.reeve` as they were, `~/.reeve/state` unchanged).
 - **Needs:** nothing earlier.
+- **Built:** the stand-in and the test setup scripts ([test-setup.md](test-setup.md), [listing-draft.md](listing-draft.md)); the live run is still to come.
 
 ### 2. Reeve tree from the stand-in
 

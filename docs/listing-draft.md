@@ -1,0 +1,106 @@
+# Listing draft
+
+**DRAFT.** This is the shape the stand-in serves today, built from the fields in the plan's "Listing format hall needs from reeve". It is not a settled format: the real one is owned by a reeve change that goes to the liege for approval when hall is ready for the live setup (ADR [0002](adr/0002-state-through-reeve.md), decision 11). Until then the stand-in (`crates/hall-standin`) serves it from a test reeve home, and hall reads only this.
+
+## Asking for it
+
+```sh
+hall-standin --home ~/.reeve-hall-dev
+```
+
+`--home` is required on every call. There is no default and no environment fallback. The stand-in refuses (exit status 1, a message on stderr, nothing on stdout):
+
+- `~/.reeve`, or any path inside it, symlinks followed;
+- any home whose directory name does not start with `.reeve-hall-dev`;
+- a world file that places a reeve or an errand in the herdr session `default` (any letter case).
+
+A missing `--home` is a usage error (exit status 2).
+
+## The listing
+
+JSON on stdout:
+
+```json
+{
+  "draft": true,
+  "reeves": [
+    {
+      "name": "ansel",
+      "session": { "herdr_session": "hall-dev", "pane_id": "w1:p1" },
+      "live": true
+    }
+  ],
+  "errands": [
+    {
+      "id": "ansel-fix",
+      "office": "artificer",
+      "owner_reeve": "ansel",
+      "hand_state": "needs-decision",
+      "question": "Which base branch?",
+      "waiting": false,
+      "idle": false,
+      "wedged": false,
+      "session": { "herdr_session": "hall-dev", "pane_id": "w3:p1" }
+    }
+  ]
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `draft` | Always `true` while this is a draft. |
+| `reeves[].name` | The reeve's name, as shown in the reeve tree. |
+| `reeves[].session` | Its session location (below). |
+| `reeves[].live` | Whether the reeve is alive now. |
+| `errands[]` | Errands in flight only (decision 16). One not in flight is left out. |
+| `errands[].id` | The errand id. |
+| `errands[].office` | The office the hand holds. |
+| `errands[].owner_reeve` | The reeve that dispatched it; always one of `reeves[].name`. |
+| `errands[].hand_state` | One of `working`, `needs-decision`, `blocked`, `done`, `failed`. |
+| `errands[].question` | The hand's unanswered question, or `null`. |
+| `errands[].waiting`, `idle`, `wedged` | One flag each, as the reeve judges them. |
+| `errands[].session` | The hand's session location (below). |
+
+A session location is `{ "herdr_session": <name>, "pane_id": <id or null> }`: the herdr session, and the pane inside it that holds the session. `pane_id` is `null` until the test setup has recorded one. `herdr_session` is never `default`.
+
+## The world file
+
+The stand-in reads `<home>/standin/world.toml`. Editing it changes the listing on the next read; nothing is cached. `scripts/test-setup up` seeds it from the roster in `scripts/test-setup.conf` and records each pane id.
+
+```toml
+[[reeve]]
+name = "ansel"              # required, unique
+herdr_session = "hall-dev"  # required, never "default"
+pane_id = "w1:p1"           # optional; recorded by scripts/test-setup up
+live = true                 # optional, default true
+
+[[errand]]
+id = "ansel-fix"            # required, unique, not also a reeve name
+office = "artificer"        # required
+owner = "ansel"             # required, a reeve above
+state = "working"           # optional, default working: working | needs-decision | blocked | done | failed
+question = "Which base?"    # optional; absent or "" means no question
+waiting = false             # optional, default false
+idle = false                # optional, default false
+wedged = false              # optional, default false
+in_flight = true            # optional, default true; false leaves the errand out of the listing
+herdr_session = "hall-dev"  # required, never "default"
+pane_id = "w3:p1"           # optional
+```
+
+Unknown keys are refused, so a typo fails loudly instead of being ignored.
+
+## Changing it without an editor
+
+```sh
+hall-standin --home ~/.reeve-hall-dev set ansel-fix state=blocked
+hall-standin --home ~/.reeve-hall-dev set ansel-fix question="Which base?" waiting=true
+hall-standin --home ~/.reeve-hall-dev set ansel-fix question=      # clears the question
+hall-standin --home ~/.reeve-hall-dev set ansel-fix in_flight=false # finished and cleaned up
+hall-standin --home ~/.reeve-hall-dev set ansel live=false
+hall-standin --home ~/.reeve-hall-dev place ansel hall-dev w1:p1   # record a session location
+hall-standin --home ~/.reeve-hall-dev locate ansel                 # prints: hall-dev w1:p1
+hall-standin --home ~/.reeve-hall-dev sessions                     # one line per reeve and errand in flight
+```
+
+`set` and `place` keep the file's comments and layout, and write nothing unless the result is still a valid world file.
