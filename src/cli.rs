@@ -45,11 +45,9 @@ const TERMINAL_SESSION_OBSERVE_USAGE: &str =
 const TERMINAL_SESSION_CONTROL_USAGE: &str =
     "usage: hall terminal session control <target> [--takeover] [--cols N] [--rows N]";
 pub(crate) const AGENT_HELP_FOOTER: &str = concat!(
+    // hall: herdr.dev's agent guide and llms.txt give herdr commands, so they
+    // are not pointed to (decision 45).
     "Are you an AI? Use these resources ONLY IF your task specifically asks you to:\n",
-    "  Help a human understand or set up Herdr for the first time:\n",
-    "    https://herdr.dev/agent-guide.md\n",
-    "  Debug or investigate a problem with Herdr:\n",
-    "    https://herdr.dev/llms.txt\n",
     "  Control Herdr panes, agents, or workspaces:\n",
     "    SKIP if a Herdr skill is already in your context. Otherwise run: hall --skill",
 );

@@ -88,6 +88,7 @@ Hall is a modified version of herdr v0.9.0 (commit b99002ac99b09e00b4ca692436cb1
 | `src/api/status.rs`, `src/api/mod.rs` | `HALL_NUMBER_FLOOR` (1000) and `RuntimeStatus::is_hall_server`: a server is hall's only when its protocol and endpoint generation are both at or above the floor; a test. |
 | `src/session.rs` | `ensure_hall_server_at` pings first and refuses a server that is not hall's; `hall server stop` and `hall session stop` call it before `server.stop`; `not_hall_server_message`, which gives no stop command; stop tests answer ping as a hall server. |
 | `src/cli/server.rs` | `hall server live-handoff` refuses a server that is not hall's before sending the handoff. |
-| `src/cli.rs`, `src/cli/protocol_guard.rs` | A CLI request to a server that is not hall's prints `not_hall_server` instead of restart guidance. |
+| `src/cli.rs`, `src/cli/protocol_guard.rs` | A CLI request to a server that is not hall's prints `not_hall_server` instead of restart guidance; the agent help footer drops herdr.dev's agent guide and llms.txt. |
 | `src/server/autodetect.rs` | The client launch says a server that is not hall's, or whose status is unavailable, is not one hall will attach to, stop or hand off, with no stop command; tests. |
 | `src/update.rs` | The (refused) update flow's stop and handoff also refuse a server that is not hall's. |
+| `tests/cli/surface.rs` | The help test asserts no herdr.dev link. |
