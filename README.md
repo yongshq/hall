@@ -2,7 +2,9 @@
 
 Hall is the liege's audience hall: herdr, forked from v0.9.0 and renamed, with every live reeve at the top level of the sidebar, its hands beneath it, a hand state on every hand and a waiting-on-you badge on every reeve. The liege types `hall` and it starts, detaches and reattaches exactly like herdr, with its own sessions, config and state, sharing nothing with the installed herdr.
 
-**Status: planned as a fork (decision 31); the fork itself is not merged yet. Built so far: the stand-in and the test setup, on herdr.**
+Hall is a modified version of herdr (https://github.com/herdrdev/herdr), Apache-2.0: herdr's `LICENSE` is kept, [NOTICE](NOTICE) says so, and [MODIFICATIONS.md](MODIFICATIONS.md) lists every herdr file hall changes. Herdr's own instructions for agents are kept for reference at [docs/herdr/AGENTS.md](docs/herdr/AGENTS.md).
+
+**Status: step 1 (fork and separate) in progress: herdr v0.9.0 merged at the root. Built so far: the stand-in, the test setup (still on herdr) and `scripts/live-check`.**
 
 - [Version one plan](docs/plan.md): scope, architecture sketch, test setup and the five build steps.
 - [Glossary](GLOSSARY.md): the terms every document and, later, the code uses.
