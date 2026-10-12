@@ -24,7 +24,9 @@ case "$*" in
     ;;
   "workspace create "*)
     n=$(( $(cat "$dir/n" 2>/dev/null || echo 0) + 1 )); echo "$n" >"$dir/n"
-    printf '{"result":{"workspace":{"workspace_id":"w%s"},"root_pane":{"pane_id":"w%s:p1"}}}\n' "$n" "$n"
+    # A pane-id file, if present, is the pane id handed out instead.
+    pane=$(cat "$dir/pane-id" 2>/dev/null || echo "w$n:p1")
+    printf '{"result":{"workspace":{"workspace_id":"w%s"},"root_pane":{"pane_id":"%s"}}}\n' "$n" "$pane"
     ;;
   "session stop "*) touch "$dir/stopped"; echo '{"result":{}}' ;;
   "agent explain "*) echo '{"state":"idle","evaluated_rules":[{"id":"live_prompt_box","matched":true}]}' ;;
@@ -237,6 +239,52 @@ fn status_flags_the_live_reeve_state_mentioning_the_test_setup() {
         "{status}"
     );
     assert!(status.contains("name.meta"), "{status}");
+}
+
+#[test]
+fn up_refuses_a_pane_id_that_reads_as_an_option() {
+    let rig = Rig::new("bad-pane");
+    std::fs::write(rig.bin.join("pane-id"), "--session=default").unwrap();
+    let out = rig.run("test-setup", &["up"]);
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("refusing pane id"), "{err}");
+    let calls = rig.calls();
+    assert!(
+        calls.iter().any(|c| c.starts_with("workspace create ")),
+        "{calls:?}"
+    );
+    assert!(
+        !calls.iter().any(|c| c.starts_with("pane run ")),
+        "{calls:?}"
+    );
+    // Nothing was recorded either.
+    for r in rig.listing()["reeves"].as_array().unwrap() {
+        assert_eq!(r["session"]["pane_id"], Value::Null, "{r}");
+    }
+}
+
+#[test]
+fn up_refuses_a_symlink_inside_the_home() {
+    let rig = Rig::new("inner-link");
+    let live = rig.user.join(".reeve");
+    for name in ["standin", "work"] {
+        let _ = std::fs::remove_dir_all(&rig.home);
+        std::fs::create_dir_all(&rig.home).unwrap();
+        std::os::unix::fs::symlink(&live, rig.home.join(name)).unwrap();
+        let out = rig.run("test-setup", &["up"]);
+        assert_eq!(out.status.code(), Some(1), "{out:?}");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains("is a symlink"), "{err}");
+    }
+    // No herdr call was made and nothing landed in the live reeve home.
+    assert!(rig.calls().is_empty(), "{:?}", rig.calls());
+    let mut names: Vec<_> = std::fs::read_dir(&live)
+        .unwrap()
+        .map(|e| e.unwrap().file_name())
+        .collect();
+    names.sort();
+    assert_eq!(names, ["state"]);
 }
 
 #[test]

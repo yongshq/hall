@@ -21,6 +21,11 @@ pub enum HomeError {
     NotTestHome(PathBuf),
     /// The path goes through a symlink whose target does not exist.
     DanglingLink(PathBuf),
+    /// The path has a `..` component, which could undo a symlink before it.
+    ParentDir(PathBuf),
+    /// Something the test setup reads or writes inside the home is a symlink,
+    /// so it could lead out of the home (into the live one, say).
+    InnerLink(PathBuf),
     /// The liege's own home could not be found, so the live reeve home cannot be ruled out.
     NoUserHome,
     /// The liege's home in the user database could not be read, so the live
@@ -44,6 +49,16 @@ impl fmt::Display for HomeError {
             HomeError::DanglingLink(p) => write!(
                 f,
                 "refusing reeve home: {} is a symlink to a path that does not exist, so where it leads cannot be checked",
+                p.display()
+            ),
+            HomeError::ParentDir(p) => write!(
+                f,
+                "refusing reeve home {}: no .. in the path, since it could undo a symlink before it",
+                p.display()
+            ),
+            HomeError::InnerLink(p) => write!(
+                f,
+                "refusing reeve home: {} is a symlink, and nothing the test setup uses inside a test reeve home may lead out of it",
                 p.display()
             ),
             HomeError::NoUserHome => write!(
@@ -109,10 +124,16 @@ pub fn passwd_home() -> Option<PathBuf> {
 /// exists, so a link named `.reeve-hall-dev` that points at `~/.reeve` is
 /// refused too. The live reeve home is matched by what the path names on disk,
 /// not by its spelling, so a case variant (`~/.REEVE`) or another route to the
-/// same directory is refused as well.
+/// same directory is refused as well. A `..` in `arg` is refused, since it is
+/// only undone after the symlinks before it are followed. So is a home whose
+/// `standin` or `work`, or an entry directly inside either, is a symlink
+/// ([`check_inner_links`]).
 pub fn resolve_test_home(arg: &Path, user_homes: &[PathBuf]) -> Result<PathBuf, HomeError> {
     if user_homes.is_empty() {
         return Err(HomeError::NoUserHome);
+    }
+    if arg.components().any(|c| c == Component::ParentDir) {
+        return Err(HomeError::ParentDir(arg.to_path_buf()));
     }
     let home = real(&absolute(arg));
     let live: Vec<Place> = user_homes
@@ -138,7 +159,32 @@ pub fn resolve_test_home(arg: &Path, user_homes: &[PathBuf]) -> Result<PathBuf, 
     if !named_as_test {
         return Err(HomeError::NotTestHome(home));
     }
+    check_inner_links(&home)?;
     Ok(home)
+}
+
+/// Refuses a test reeve home whose `standin` or `work`, or any entry directly
+/// inside either, is a symlink: the world file, the live baseline and each
+/// claude's working directory sit there, and a symlink would carry a read, a
+/// write or a claude session out of the home. Missing entries are fine.
+pub fn check_inner_links(home: &Path) -> Result<(), HomeError> {
+    for dir in ["standin", "work"].map(|d| home.join(d)) {
+        let Ok(meta) = dir.symlink_metadata() else {
+            continue;
+        };
+        if meta.file_type().is_symlink() {
+            return Err(HomeError::InnerLink(dir));
+        }
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            if entry.file_type().is_ok_and(|t| t.is_symlink()) {
+                return Err(HomeError::InnerLink(entry.path()));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// True when `name` is the live herdr session. Case is ignored, since herdr's
@@ -229,7 +275,6 @@ mod tests {
             "/nonexistent-user/.reeve",
             "/nonexistent-user/.reeve/",
             "/nonexistent-user/.reeve/.reeve-hall-dev",
-            "/nonexistent-user/x/../.reeve",
             "/nonexistent-user/.REEVE",
             "/nonexistent-user/.Reeve/.reeve-hall-dev",
             "/NonExistent-User/.reeve/.reeve-hall-dev",
@@ -239,6 +284,26 @@ mod tests {
                 matches!(
                     resolve_test_home(Path::new(p), &user),
                     Err(HomeError::LiveHome(_))
+                ),
+                "{p}"
+            );
+        }
+    }
+
+    #[test]
+    fn refuses_a_parent_dir_component() {
+        let user = [PathBuf::from("/nonexistent-user")];
+        for p in [
+            "/nonexistent-user/x/../.reeve",
+            "/nonexistent-user/link/../.reeve-hall-dev",
+            "link/../.reeve-hall-dev",
+            "../.reeve-hall-dev",
+            "/nonexistent-user/.reeve-hall-dev/..",
+        ] {
+            assert!(
+                matches!(
+                    resolve_test_home(Path::new(p), &user),
+                    Err(HomeError::ParentDir(_))
                 ),
                 "{p}"
             );

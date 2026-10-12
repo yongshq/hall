@@ -313,6 +313,33 @@ fn refuses_a_symlink_to_the_live_reeve_home() {
 }
 
 #[test]
+fn refuses_a_symlink_inside_the_home() {
+    let user = fake_user("inner-symlink", true);
+    let live = user.join(".reeve");
+    let h = user.join(".reeve-hall-dev");
+    for name in ["standin", "work", "work/ansel"] {
+        let _ = std::fs::remove_dir_all(&h);
+        std::fs::create_dir_all(h.join("work")).unwrap();
+        let _ = std::fs::remove_dir(h.join(name));
+        std::os::unix::fs::symlink(&live, h.join(name)).unwrap();
+        refused_everywhere(Some(&user), h.to_str().unwrap(), "is a symlink");
+    }
+    let mut names: Vec<_> = std::fs::read_dir(&live)
+        .unwrap()
+        .map(|e| e.unwrap().file_name())
+        .collect();
+    names.sort();
+    assert_eq!(names, ["state"]);
+}
+
+#[test]
+fn refuses_a_parent_dir_in_the_home() {
+    let dir = tmp("parent-dir");
+    let h = dir.join("link/../.reeve-hall-dev");
+    refused_everywhere(None, h.to_str().unwrap(), "no . or .. in the path");
+}
+
+#[test]
 fn refuses_the_user_database_home_under_a_wrong_home() {
     let passwd = hall_standin::home::passwd_home().unwrap();
     let user = fake_user("wrong-home", false);

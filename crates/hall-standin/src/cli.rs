@@ -22,11 +22,13 @@ usage: hall-standin --home <test reeve home> [command]
   sessions                             print `<kind> <name> <herdr-session> <pane-id|->` per
                                          reeve and errand in flight
   check-home                           print the test reeve home as resolved on disk, or
-                                         refuse it; reads nothing inside it
+                                         refuse it; reads no file inside it
 
 The world file is <home>/standin/world.toml. --home must be a directory whose
 name starts with .reeve-hall-dev, and never ~/.reeve (for HOME or for the
-home in the user database), in any letter case or through any symlink.";
+home in the user database), in any letter case or through any symlink. It
+may not have .. in it, and its standin and work, and the entries directly
+inside them, may not be symlinks.";
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum CliError {
@@ -161,7 +163,20 @@ fn edit(
     let mut ed = WorldEdit::parse(&text).map_err(|e| failed(format!("{}: {e}", path.display())))?;
     f(&mut ed)?;
     let new = ed.finish().map_err(failed)?;
+    // A leftover temp file is removed, never followed if it is a symlink, and
+    // the new one is created afresh (O_EXCL), so the write cannot land
+    // anywhere else; the rename replaces world.toml itself, not what it names.
     let tmp = path.with_extension("toml.tmp");
-    std::fs::write(&tmp, new).map_err(failed)?;
+    if let Err(e) = std::fs::remove_file(&tmp)
+        && e.kind() != std::io::ErrorKind::NotFound
+    {
+        return Err(failed(e));
+    }
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&tmp)
+        .and_then(|mut f| f.write_all(new.as_bytes()))
+        .map_err(failed)?;
     std::fs::rename(&tmp, &path).map_err(failed)
 }

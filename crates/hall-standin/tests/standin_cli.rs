@@ -366,6 +366,108 @@ fn check_home_prints_the_home_as_resolved() {
     );
 }
 
+/// Runs the stand-in with HOME set to `user`.
+fn standin_as(user: &Path, args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_hall-standin"))
+        .env("HOME", user)
+        .args(args)
+        .output()
+        .unwrap()
+}
+
+#[test]
+fn refuses_a_symlink_inside_the_home() {
+    // A fake HOME whose live reeve home holds a world file and a baseline.
+    let fake = Path::new(env!("CARGO_TARGET_TMPDIR")).join("standin-cli/inner-user");
+    let _ = std::fs::remove_dir_all(&fake);
+    let live = fake.join(".reeve");
+    std::fs::create_dir_all(live.join("work")).unwrap();
+    std::fs::write(live.join("world.toml"), WORLD).unwrap();
+    std::fs::write(live.join("live-baseline.json"), "{}").unwrap();
+    let before = std::fs::read_to_string(live.join("world.toml")).unwrap();
+
+    let h = fake.join(".reeve-hall-dev");
+    let hs = h.to_str().unwrap();
+    let plants: [(&str, PathBuf); 6] = [
+        ("standin", live.clone()),
+        ("work", live.clone()),
+        ("work/ansel", live.clone()),
+        ("standin/world.toml", live.join("world.toml")),
+        (
+            "standin/live-baseline.json",
+            live.join("live-baseline.json"),
+        ),
+        ("standin/world.toml.tmp", live.join("world.toml")),
+    ];
+    let commands: [&[&str]; 5] = [
+        &["--home", hs, "check-home"],
+        &["--home", hs],
+        &["--home", hs, "set", "ansel", "live=false"],
+        &["--home", hs, "place", "ansel", "hall-dev", "w9:p9"],
+        &["--home", hs, "locate", "ansel"],
+    ];
+    for (name, target) in plants {
+        let _ = std::fs::remove_dir_all(&h);
+        std::fs::create_dir_all(&h).unwrap();
+        for d in ["standin", "work"].into_iter().filter(|d| *d != name) {
+            std::fs::create_dir(h.join(d)).unwrap();
+        }
+        if name != "standin" && name != "standin/world.toml" {
+            std::fs::write(h.join("standin/world.toml"), WORLD).unwrap();
+        }
+        std::os::unix::fs::symlink(&target, h.join(name)).unwrap();
+        for args in commands {
+            refused(&standin_as(&fake, args), 1, "is a symlink");
+        }
+    }
+    // No write landed in the live reeve home.
+    assert_eq!(
+        std::fs::read_to_string(live.join("world.toml")).unwrap(),
+        before
+    );
+    assert_eq!(
+        std::fs::read_to_string(live.join("live-baseline.json")).unwrap(),
+        "{}"
+    );
+    let mut names: Vec<_> = std::fs::read_dir(&live)
+        .unwrap()
+        .map(|e| e.unwrap().file_name())
+        .collect();
+    names.sort();
+    assert_eq!(names, ["live-baseline.json", "work", "world.toml"]);
+}
+
+#[test]
+fn a_leftover_temp_file_is_replaced_not_followed() {
+    let h = home("leftover-tmp", WORLD);
+    std::fs::write(h.join("standin/world.toml.tmp"), "half written").unwrap();
+    ok(&["--home", h.to_str().unwrap(), "set", "ansel", "live=false"]);
+    assert_eq!(listing(&h)["reeves"][0]["live"], false);
+    assert!(!h.join("standin/world.toml.tmp").exists());
+}
+
+#[test]
+fn refuses_a_parent_dir_in_the_home() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("standin-cli/parent-dir");
+    let _ = std::fs::remove_dir_all(&dir);
+    // Spelled out, link/.. is `dir`; the kernel follows the link first and
+    // lands in `elsewhere`, so the two readings differ.
+    std::fs::create_dir_all(dir.join("elsewhere/inner")).unwrap();
+    std::os::unix::fs::symlink(dir.join("elsewhere/inner"), dir.join("link")).unwrap();
+    let arg = dir.join("link/../.reeve-hall-dev");
+    let a = arg.to_str().unwrap();
+    let commands: [&[&str]; 3] = [
+        &["--home", a, "check-home"],
+        &["--home", a],
+        &["--home", "link/../.reeve-hall-dev", "check-home"],
+    ];
+    for args in commands {
+        refused(&standin(args), 1, "no .. in the path");
+    }
+    assert!(!dir.join(".reeve-hall-dev").exists());
+    assert!(!dir.join("elsewhere/.reeve-hall-dev").exists());
+}
+
 #[test]
 fn refuses_pane_ids_that_read_as_options() {
     let h = home(

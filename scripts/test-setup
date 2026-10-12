@@ -148,6 +148,9 @@ cmd_up() {
     else
       pane=$(printf '%s' "$ws" | jq -r '.result.root_pane.pane_id // empty')
       [ -n "$pane" ] || die "workspace create in $R_SESSION gave no pane id: $ws"
+      # The stand-in's pane id rule (is_pane_id), checked before the id reaches
+      # herdr's command line, where a leading '-' would read as an option.
+      [[ $pane =~ ^[A-Za-z0-9:_][A-Za-z0-9:_-]*$ ]] || die "refusing pane id $(q "$pane") from workspace create in $R_SESSION: not letters, digits, ':', '_' and '-', starting with no '-'"
     fi
     hd "$R_SESSION" pane run "$pane" "$(claude_line "$R_NAME")"
     standin place "$R_NAME" "$R_SESSION" "$pane"

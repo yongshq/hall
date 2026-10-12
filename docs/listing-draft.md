@@ -12,6 +12,8 @@ hall-standin --home ~/.reeve-hall-dev
 
 - `~/.reeve`, or any path inside it, symlinks followed, for `HOME` and for the home the user database records; matched by the directory on disk, so another letter case (`~/.REEVE`) or another route to it is refused too;
 - a path through a symlink whose target does not exist;
+- a path with a `..` in it, since `..` is only undone after the symlinks before it are followed, so the spelled-out path and the one on disk could differ;
+- a home whose `standin` or `work`, or any entry directly inside either (the world file, the live baseline, each claude's working directory), is a symlink, since it could carry a read, a write or a claude session out of the home;
 - any home whose directory name does not start with `.reeve-hall-dev`;
 - a world file that places a reeve or an errand in the herdr session `default` (any letter case);
 - a world file or `place` with a pane id that is not `^[A-Za-z0-9:_-]+$` or that starts with `-`, so it can never reach herdr as an option.
@@ -106,6 +108,6 @@ hall-standin --home ~/.reeve-hall-dev sessions                     # one line pe
 hall-standin --home ~/.reeve-hall-dev check-home                   # prints the home as resolved on disk, or refuses it
 ```
 
-`check-home` reads nothing inside the home, which need not exist yet. The test setup scripts run it before anything else and use the path it prints.
+`check-home` reads no file inside the home, which need not exist yet; it only checks that `standin`, `work` and the entries directly inside them are not symlinks. The test setup scripts run it before anything else and use the path it prints.
 
 `set` and `place` keep the file's comments and layout, and write nothing unless the result is still a valid world file.
