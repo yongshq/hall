@@ -1,0 +1,429 @@
+#!/usr/bin/env python3
+"""scripts/live-check: the "live setup unchanged" check (decisions 40, 41, 42).
+
+Usage:
+  scripts/live-check
+  scripts/live-check accept <place> <entry> --by <who> --reason <why>
+  scripts/live-check --help
+
+Checks, one line each on stdout, diagnostics on stderr; exit 0 only when every
+part passes, 1 when any fails, 2 on a usage error:
+
+  config, state, worktrees, pane-graphics
+      No new entry in the live herdr's four places, against a baseline listing
+      recorded on the first run:
+        config         ~/.config/herdr                    entry names, recursive
+        state          ~/.local/state/herdr               entry names, recursive
+        worktrees      ~/.herdr/worktrees                 two levels: <repo>/<branch>
+        pane-graphics  /var/tmp/herdr-pane-graphics-<uid> one level: server-<pid>-<nonce>
+      An absent folder is an empty listing, recorded as such. An entry not in
+      the baseline fails until accepted (decision 42); each is printed with what
+      made it, as far as the filesystem and process table tell. An entry gone
+      from the baseline is printed and does not fail: the liege's herdr deletes
+      its own.
+
+  peers
+      No hall process connected to a live herdr socket. Hall's unix fds come
+      from `lsof -nP -a -U -c hall`, the live herdr's from `lsof -nP -a -U -c
+      herdr` (every herdr process); a hall fd whose `->0x<addr>` peer is a herdr
+      socket fd named under ~/.config/herdr fails. This sees only connections
+      open at the instant lsof runs: a short-lived connection that opens and
+      closes between runs is not seen. lsof missing or erroring fails the part.
+
+  reeve-state
+      No file under ~/.reeve/state (read only) names the test reeve home or a
+      test reeve or errand from scripts/test-setup.conf, in its contents or in
+      its own path under ~/.reeve/state. The home matches as a
+      path component (/.reeve-hall-dev followed by a non-name character or the
+      end); names match as whole words (not inside a longer run of letters,
+      digits, `_` or `-`), so `ansel` does not match `anselm` or `ansel-fix`,
+      and `ansel-fix` is its own name.
+
+The check never calls herdr: it reads the filesystem and the process table only.
+
+The baseline is ~/.local/state/hall-live-check/baseline.json, written on the
+first run only. No flag rewrites it, and `accept` only adds to it. A baseline
+deleted after it existed cannot be told from a first run, so deleting it is the
+only reset, and it re-baselines over anything new since: delete it only knowing
+that.
+
+  accept <place> <entry> --by <who> --reason <why>
+      Adds one entry that is on disk now and not in the baseline to the
+      baseline, recording who accepted it, why, and when.
+
+HALL_LIVE_CHECK_VAR_TMP replaces /var/tmp as the pane-graphics folder's parent;
+the tests use it. Every line names the folder it read.
+"""
+
+import json
+import os
+import re
+import shlex
+import subprocess
+import sys
+import time
+
+PLACES = ("config", "state", "worktrees", "pane-graphics")
+REPO = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+EXIT_USAGE = 2
+
+
+def now():
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def warn(msg):
+    print(f"live-check: {msg}", file=sys.stderr)
+
+
+def home():
+    return os.environ["HOME"]
+
+
+def place_paths():
+    var_tmp = os.environ.get("HALL_LIVE_CHECK_VAR_TMP", "/var/tmp")
+    h = home()
+    return {
+        "config": os.path.join(h, ".config/herdr"),
+        "state": os.path.join(h, ".local/state/herdr"),
+        "worktrees": os.path.join(h, ".herdr/worktrees"),
+        "pane-graphics": os.path.join(var_tmp, f"herdr-pane-graphics-{os.getuid()}"),
+    }
+
+
+# Levels listed per place; None is every level.
+DEPTH = {"config": None, "state": None, "worktrees": 2, "pane-graphics": 1}
+
+
+def baseline_path():
+    return os.path.join(home(), ".local/state/hall-live-check/baseline.json")
+
+
+def listing(root, depth):
+    """Entry names under root, relative, down to depth levels. The root itself
+    may be a symlink (the liege's ~/.config/herdr points into dotfiles); links
+    below it are listed, never followed. An absent root is an empty listing."""
+    if not os.path.isdir(root):
+        return False, []
+    out = []
+
+    def walk(rel, level):
+        path = os.path.join(root, rel) if rel else root
+        try:
+            names = sorted(os.listdir(path))
+        except FileNotFoundError:
+            return
+        for n in names:
+            r = os.path.join(rel, n) if rel else n
+            out.append(r)
+            p = os.path.join(root, r)
+            if (depth is None or level < depth) and os.path.isdir(p) and not os.path.islink(p):
+                walk(r, level + 1)
+
+    walk("", 1)
+    return True, out
+
+
+def snapshot():
+    snap = {}
+    for place, root in place_paths().items():
+        exists, entries = listing(root, DEPTH[place])
+        snap[place] = {"path": root, "exists": exists, "entries": entries}
+    return snap
+
+
+def load_baseline():
+    p = baseline_path()
+    try:
+        with open(p) as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return None
+
+
+def save_baseline(b):
+    p = baseline_path()
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    tmp = f"{p}.tmp.{os.getpid()}"
+    with open(tmp, "w") as f:
+        json.dump(b, f, indent=2, sort_keys=True)
+        f.write("\n")
+    os.rename(tmp, p)
+
+
+def birth(path):
+    try:
+        st = os.lstat(path)
+    except OSError as e:
+        return f"stat failed: {e.strerror}"
+    t = getattr(st, "st_birthtime", None)
+    if t is None:
+        return "birth time unknown"
+    return "born " + time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t))
+
+
+def pid_command(pid):
+    try:
+        out = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "command="],
+            capture_output=True,
+            text=True,
+        )
+    except OSError as e:
+        return f"ps failed: {e.strerror}"
+    cmd = out.stdout.strip()
+    return f"pid {pid} alive: {cmd}" if out.returncode == 0 and cmd else f"pid {pid} not running"
+
+
+def worktree_repo(path):
+    gitfile = os.path.join(path, ".git")
+    try:
+        with open(gitfile) as f:
+            line = f.readline().strip()
+    except OSError:
+        return "no .git file"
+    if not line.startswith("gitdir:"):
+        return f".git file: {line[:120]}"
+    gitdir = line[len("gitdir:"):].strip()
+    m = re.match(r"(.*)/\.git/worktrees/[^/]+/?$", gitdir)
+    return f"repo {m.group(1)}" if m else f"gitdir {gitdir}"
+
+
+def describe(place, root, entry):
+    path = os.path.join(root, entry)
+    facts = [birth(path)]
+    if place == "worktrees" and "/" in entry:
+        facts.append(worktree_repo(path))
+    if place == "pane-graphics":
+        m = re.match(r"server-(\d+)-", entry)
+        if m:
+            facts.append(pid_command(int(m.group(1))))
+    return "; ".join(facts)
+
+
+def check_places(base, snap):
+    ok = True
+    for place in PLACES:
+        b = base["places"][place]
+        s = snap[place]
+        known = set(b["entries"])
+        now_set = set(s["entries"])
+        new = sorted(now_set - known)
+        gone = sorted(known - now_set)
+        state = "absent" if not s["exists"] else f"{len(s['entries'])} entries"
+        if new:
+            ok = False
+            print(f"{place}: FAIL {len(new)} new entries in {s['path']} ({state})")
+            for e in new:
+                warn(f"{place}: new {e} ({describe(place, s['path'], e)})")
+            warn(
+                f"{place}: judge each; accept with: scripts/live-check accept {place} <entry> --by <who> --reason <why>"
+            )
+        else:
+            print(f"{place}: pass {s['path']} ({state}, none new)")
+        for e in gone:
+            warn(f"{place}: gone since baseline {e} (not a failure)")
+    return ok
+
+
+LSOF_LINE = re.compile(r"^(\S+)\s+(\d+)\s+\S+\s+(\S+)\s+(\S+)\s+(0x[0-9a-fA-F]+)\s+\S+\s+(.*)$")
+
+
+def lsof(command):
+    """Unix socket fds of processes whose name starts with command, as
+    (command, pid, fd, device, name) tuples. Raises RuntimeError when lsof is
+    missing or errors. lsof exits 1 with no output at all when nothing matches."""
+    argv = ["lsof", "-nP", "-a", "-U", "-c", command]
+    try:
+        out = subprocess.run(argv, capture_output=True, text=True)
+    except OSError as e:
+        raise RuntimeError(f"{' '.join(argv)}: {e.strerror}")
+    if out.returncode == 1 and not out.stdout and not out.stderr.strip():
+        return []
+    if out.returncode != 0:
+        raise RuntimeError(f"{' '.join(argv)} exited {out.returncode}: {out.stderr.strip()}")
+    if out.stderr.strip():
+        warn(f"{' '.join(argv)}: {out.stderr.strip()}")
+    fds = []
+    for line in out.stdout.splitlines()[1:]:
+        m = LSOF_LINE.match(line)
+        if not m:
+            continue
+        cmd, pid, fd, typ, dev, name = m.groups()
+        # Kept even if lsof ran without -a: only that command's unix fds.
+        if typ != "unix" or not cmd.startswith(command):
+            continue
+        fds.append((cmd, int(pid), fd, dev.lower(), name.strip()))
+    return fds
+
+
+def check_peers():
+    config = os.path.join(home(), ".config/herdr")
+    # A socket's name is the path it was bound at, through the link or not.
+    live_dirs = tuple({config + "/", os.path.realpath(config) + "/"})
+    try:
+        hall_fds = lsof("hall")
+        herdr_fds = lsof("herdr")
+    except RuntimeError as e:
+        print("peers: FAIL lsof did not run cleanly")
+        warn(f"peers: {e}")
+        return False
+    live = {}
+    for _cmd, pid, fd, dev, name in herdr_fds:
+        if name.startswith(live_dirs):
+            live.setdefault(dev, []).append((pid, fd, name))
+    hits = []
+    for cmd, pid, fd, _dev, name in hall_fds:
+        if not name.startswith("->"):
+            continue
+        peer = name[2:].lower()
+        for hpid, hfd, hname in live.get(peer, []):
+            hits.append((cmd, pid, fd, peer, hpid, hfd, hname))
+    if hits:
+        print(f"peers: FAIL {len(hits)} hall fds connected to a live herdr socket")
+        for cmd, pid, fd, peer, hpid, hfd, hname in hits:
+            warn(f"peers: {cmd} pid {pid} fd {fd} -> {peer}: herdr pid {hpid} fd {hfd} {hname}")
+        return False
+    print(
+        f"peers: pass ({len(hall_fds)} hall unix fds, {sum(map(len, live.values()))} live herdr socket fds;"
+        " connections open at this instant only)"
+    )
+    return True
+
+
+def test_names():
+    """The test home and the roster's reeve and errand names, from
+    scripts/test-setup.conf (sourced by bash, as the test setup does)."""
+    conf = os.path.join(REPO, "scripts/test-setup.conf")
+    script = 'source "$1" && printf "%s\\n" "$HALL_DEV_HOME" && printf "%s\\n" "${HALL_DEV_ROSTER[@]}"'
+    out = subprocess.run(["bash", "-c", script, "bash", conf], capture_output=True, text=True)
+    if out.returncode != 0:
+        raise RuntimeError(f"reading {conf}: {out.stderr.strip()}")
+    lines = out.stdout.splitlines()
+    names = []
+    for line in lines[1:]:
+        f = line.split()
+        if len(f) >= 2 and f[0] in ("reeve", "errand"):
+            names.append(f[1])
+    return lines[0], names
+
+
+def check_reeve_state():
+    root = os.path.join(home(), ".reeve/state")
+    try:
+        test_home, names = test_names()
+    except RuntimeError as e:
+        print("reeve-state: FAIL could not read the test names")
+        warn(f"reeve-state: {e}")
+        return False
+    home_re = re.escape(os.path.basename(test_home.rstrip("/")))
+    pattern = re.compile(
+        (rf"/{home_re}(?![A-Za-z0-9_.-])|(?<![A-Za-z0-9_-])(?:"
+         + "|".join(re.escape(n) for n in names)
+         + r")(?![A-Za-z0-9_-])").encode()
+    )
+    if not os.path.isdir(root):
+        print(f"reeve-state: pass {root} (absent)")
+        return True
+    hits, unread, files = [], [], 0
+    for dirpath, _dirs, filenames in os.walk(root):
+        for n in filenames:
+            p = os.path.join(dirpath, n)
+            # Regular files only: never follow a link, never open a fifo or socket.
+            if os.path.islink(p) or not os.path.isfile(p):
+                continue
+            files += 1
+            try:
+                with open(p, "rb") as f:
+                    data = f.read()
+            except FileNotFoundError:
+                continue
+            except OSError as e:
+                unread.append((p, e.strerror))
+                continue
+            # The file's own path under the state folder counts as naming too.
+            m = pattern.search(os.path.relpath(p, root).encode()) or pattern.search(data)
+            if m:
+                hits.append((p, m.group(0).decode(errors="replace")))
+    if hits or unread:
+        print(f"reeve-state: FAIL {len(hits)} files name the test setup, {len(unread)} unreadable, in {root}")
+        for p, what in hits:
+            warn(f"reeve-state: {p} names {what}")
+        for p, why in unread:
+            warn(f"reeve-state: could not read {p}: {why}")
+        return False
+    print(f"reeve-state: pass {root} ({files} files, none name {test_home} or {', '.join(names)})")
+    return True
+
+
+def run_check():
+    base = load_baseline()
+    snap = snapshot()
+    if base is None:
+        base = {"version": 1, "recorded": now(), "places": snap, "accepted": []}
+        save_baseline(base)
+        warn(f"baseline recorded at {baseline_path()} (first run)")
+    ok = check_places(base, snap)
+    ok = check_peers() and ok
+    ok = check_reeve_state() and ok
+    return 0 if ok else 1
+
+
+def accept(args):
+    usage = "usage: scripts/live-check accept <place> <entry> --by <who> --reason <why>"
+    pos, by, reason = [], None, None
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a in ("--by", "--reason") and i + 1 < len(args):
+            if a == "--by":
+                by = args[i + 1]
+            else:
+                reason = args[i + 1]
+            i += 2
+        elif a.startswith("--"):
+            warn(f"unknown option {a}\n{usage}")
+            return EXIT_USAGE
+        else:
+            pos.append(a)
+            i += 1
+    if len(pos) != 2 or not by or not reason:
+        warn(usage)
+        return EXIT_USAGE
+    place, entry = pos
+    if place not in PLACES:
+        warn(f"unknown place {place}: one of {', '.join(PLACES)}")
+        return EXIT_USAGE
+    base = load_baseline()
+    if base is None:
+        warn(f"no baseline at {baseline_path()}: run scripts/live-check first")
+        return 1
+    snap = snapshot()[place]
+    if entry in base["places"][place]["entries"]:
+        warn(f"{place}: {entry} is already in the baseline")
+        return 1
+    if entry not in snap["entries"]:
+        warn(f"{place}: {entry} is not in {snap['path']} now; only an entry on disk can be accepted")
+        return 1
+    base["places"][place]["entries"] = sorted(base["places"][place]["entries"] + [entry])
+    record = {"place": place, "entry": entry, "by": by, "reason": reason, "at": now()}
+    base["accepted"].append(record)
+    save_baseline(base)
+    print(f"accepted {place} {entry} by {shlex.quote(by)} at {record['at']}: {reason}")
+    return 0
+
+
+def main(argv):
+    if argv and argv[0] in ("-h", "--help"):
+        print(__doc__.strip())
+        return 0
+    if not argv:
+        return run_check()
+    if argv[0] == "accept":
+        return accept(argv[1:])
+    warn(f"unknown argument {argv[0]}; see scripts/live-check --help")
+    return EXIT_USAGE
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
