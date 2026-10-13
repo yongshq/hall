@@ -278,9 +278,12 @@ fn drive() {
         assert_eq!(count(&cmds, " agent prompt "), 1);
         assert_eq!(count(&cmds, " --wait "), 1);
         assert_eq!(count(&cmds, " agent explain "), 2);
+        assert_eq!(count(&cmds, " agent wait "), 1);
 
         let cmds = dry("test-drive", &h, &[reeve, "deny"]);
         assert_eq!(count(&cmds, " agent send-keys "), 1);
+        // Esc is followed by a wait for hall to read the dialog gone.
+        assert_eq!(count(&cmds, " agent wait "), 1);
     }
     // No key that could answer a dialog with allow is ever sent.
     for action in ["dialog", "turn-end", "deny"] {

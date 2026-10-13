@@ -51,7 +51,15 @@ case "$*" in
     printf '{"result":{"type":"pane_info","pane":{"pane_id":"%s","workspace_id":"%s","tab_id":"%s"}}}\n' "$3" "$ws" "$tab"
     ;;
   "session stop "*) rm -f "$dir/running"; echo '{"result":{}}' ;;
-  "agent explain "*) echo '{"state":"idle","evaluated_rules":[{"id":"live_prompt_box","matched":true}]}' ;;
+  # A blocked file stands for a dialog, which Esc clears.
+  "agent explain "*)
+    if [ -e "$dir/blocked" ]; then
+      echo '{"state":"blocked","evaluated_rules":[]}'
+    else
+      echo '{"state":"idle","evaluated_rules":[{"id":"live_prompt_box","matched":true}]}'
+    fi
+    ;;
+  "agent send-keys "*" esc --session "*) rm -f "$dir/blocked"; echo '{"result":{}}' ;;
   *) echo '{"result":{}}' ;;
 esac
 "#;
@@ -338,6 +346,27 @@ fn up_status_drive_down() {
             .iter()
             .any(|c| c.starts_with("agent send-keys "))
     );
+
+    // A standing dialog is denied with Esc, and the question waits until hall
+    // no longer reads it, since hall refuses a prompt to a blocked agent.
+    std::fs::write(rig.bin.join("blocked"), "").unwrap();
+    let before = rig.calls().len();
+    let turn = rig.ok("test-drive", &["ansel", "turn-end"]);
+    assert!(turn.contains("reads as at a dialog"), "{turn}");
+    assert!(turn.contains("reads as ready for input"), "{turn}");
+    let calls = rig.calls();
+    let drive: Vec<&str> = calls[before..]
+        .iter()
+        .map(|c| c.split(' ').take(2).collect::<Vec<_>>().join(" "))
+        .filter(|c| c != "agent explain")
+        .map(|c| match c.as_str() {
+            "agent send-keys" => "esc",
+            "agent wait" => "wait",
+            "agent prompt" => "prompt",
+            _ => "other",
+        })
+        .collect();
+    assert_eq!(drive, ["esc", "wait", "prompt"], "{calls:?}");
 
     rig.ok("test-setup", &["down"]);
     let calls = rig.calls();

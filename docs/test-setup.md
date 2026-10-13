@@ -91,8 +91,8 @@ scripts/test-drive ansel deny       # deny a standing dialog with Esc
 ```
 
 - `dialog` prompts the test reeve to create a file in its work dir (`hall agent prompt`), which claude's default permissions ask about, waits up to two minutes for hall to read it as blocked (`hall agent wait --until blocked`), and prints the reading. The dialog is left standing, so hall can alert on it; `deny` or `turn-end` clears it.
-- `turn-end` reads the session first and, if a dialog stands, denies it with Esc. Then it prompts a direct question with `hall agent prompt --wait`, which waits for observed activity before it settles, so an agent already idle cannot end the wait before the turn starts. Then it prints the reading.
-- `deny` sends Esc and prints the reading.
+- `turn-end` reads the session first and, if a dialog stands, denies it as `deny` does. Then it prompts a direct question with `hall agent prompt --wait`, which waits for observed activity before it settles, so an agent already idle cannot end the wait before the turn starts. Then it prints the reading.
+- `deny` sends Esc, waits up to ten seconds for hall to stop reading the dialog (`hall agent wait --until idle --until done --until working`; hall refuses a prompt to an agent it reads as blocked), and prints the reading.
 
 How the reading is printed, from hall's `agent explain --json` (herdr's, unchanged), the same signal reeve's own backend relies on, because `agent_status` latches:
 

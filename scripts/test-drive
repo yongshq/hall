@@ -24,6 +24,7 @@ scripts/test-setup"
 DIALOG_PROMPT="Create a file named hall-dialog-probe.txt in the current directory containing the single word probe."
 TURN_PROMPT="What is 2 + 2? Reply with the number only, without using any tools."
 WAIT_MS=120000
+DENY_WAIT_MS=10000
 
 parse_common "$@"
 [ "${#REST[@]}" -eq 2 ] || usage_die "expected <test reeve> and one of dialog, turn-end, deny"
@@ -45,6 +46,10 @@ say "test reeve $NAME: pane $P in $S, action $ACTION"
 
 deny() {
   hd "$S" agent send-keys "$P" esc
+  # Hall reads the dialog for a moment after Esc and refuses a prompt while it
+  # does (agent_blocked), so wait for the reading to leave blocked.
+  hd "$S" agent wait "$P" --until idle --until done --until working --timeout "$DENY_WAIT_MS" ||
+    say "  hall still reads a dialog after Esc; see the reading below"
 }
 
 case $ACTION in
