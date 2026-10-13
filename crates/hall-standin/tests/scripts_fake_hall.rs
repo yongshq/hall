@@ -737,6 +737,20 @@ fn up_and_drive_refuse_a_link_in_herdrs_folder_inside_the_xdg_folders() {
             );
         }
         std::fs::remove_dir_all(&herdr).unwrap();
+
+        // A case variant is herdr's folder on a case-insensitive filesystem.
+        let cased = rig.home.join(name).join("Herdr");
+        std::os::unix::fs::symlink(&live, &cased).unwrap();
+        for (script, args) in [
+            ("test-setup", &["up"][..]),
+            ("test-drive", &["ansel", "turn-end"]),
+        ] {
+            let out = rig.run(script, args);
+            assert_eq!(out.status.code(), Some(1), "{name} {script}: {out:?}");
+            let err = String::from_utf8_lossy(&out.stderr);
+            assert!(err.contains("Herdr is a symlink"), "{name} {script}: {err}");
+        }
+        std::fs::remove_file(&cased).unwrap();
     }
     // With herdr's folders plain again, both go on.
     let again = rig.ok("test-setup", &["up"]);

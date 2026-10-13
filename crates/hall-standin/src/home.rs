@@ -236,7 +236,8 @@ pub const UNWALKED_DIRS: [&str; 2] = ["xdg-config", "xdg-state"];
 /// Herdr's own folder inside each of [`UNWALKED_DIRS`], walked in full: herdr,
 /// and reeve's herdr backend through it, finds its config, sessions and state
 /// there, so a link there would lead a test pane's herdr call to the live
-/// herdr (decision 48's second amendment).
+/// herdr (decision 48's second amendment). Matched in any case, since herdr's
+/// folder may sit on a case-insensitive filesystem.
 pub const WALKED_XDG_DIR: &str = "herdr";
 
 /// Refuses a test reeve home with a symlink anywhere inside it. The world file,
@@ -251,7 +252,7 @@ pub const WALKED_XDG_DIR: &str = "herdr";
 /// only what is not there is fine, so a home that does not exist yet passes. A
 /// home past [`MAX_ENTRIES`] entries or [`MAX_DEPTH`] directories deep is
 /// refused rather than walked in part. Of [`UNWALKED_DIRS`], directly under
-/// the home, only [`WALKED_XDG_DIR`] is walked.
+/// the home, only [`WALKED_XDG_DIR`] (in any case) is walked.
 pub fn check_inner_links(home: &Path) -> Result<(), HomeError> {
     walk_for_links(home, MAX_DEPTH, MAX_ENTRIES)
 }
@@ -284,7 +285,9 @@ fn walk_for_links(home: &Path, max_depth: usize, max_entries: usize) -> Result<(
         };
         for entry in entries {
             let entry = entry.map_err(|e| unchecked(&dir, e))?;
-            if only.is_some_and(|name| entry.file_name() != std::ffi::OsStr::new(name)) {
+            // Case is ignored, since a case variant of herdr's folder is the
+            // same folder on a case-insensitive filesystem.
+            if only.is_some_and(|name| !entry.file_name().eq_ignore_ascii_case(name)) {
                 continue;
             }
             seen += 1;
@@ -618,6 +621,27 @@ mod tests {
             assert_eq!(
                 check_inner_links(&h),
                 Err(HomeError::InnerLink(herdr.clone())),
+                "{name}"
+            );
+            std::fs::remove_file(&herdr).unwrap();
+            // A case variant is the same folder on a case-insensitive
+            // filesystem, so it is walked in full too: a link to it,
+            let cased = h.join(name).join("Herdr");
+            std::os::unix::fs::symlink(&outside, &cased).unwrap();
+            assert_eq!(
+                check_inner_links(&h),
+                Err(HomeError::InnerLink(cased.clone())),
+                "{name}"
+            );
+            std::fs::remove_file(&cased).unwrap();
+            // and a hard link inside it.
+            let upper = h.join(name).join("HERDR");
+            std::fs::create_dir(&upper).unwrap();
+            std::fs::hard_link(outside.join("endpoints.json"), upper.join("endpoints.json"))
+                .unwrap();
+            assert_eq!(
+                check_inner_links(&h),
+                Err(HomeError::HardLink(upper.join("endpoints.json"), 2)),
                 "{name}"
             );
             std::fs::remove_dir_all(&h).unwrap();
