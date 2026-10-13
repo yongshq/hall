@@ -15,8 +15,9 @@
 #   HALL_SOCKET_PATH=<the hall session's socket>, so a hall call from a test
 #   pane still reaches that session;
 # - nothing about a test claude's identity is inherited from whoever ran the
-#   script (decision 48): the hall server up starts and every claude line drop
-#   the names in STARTER_DROP, and a test hand's REEVE_HAND is set on purpose;
+#   script (decision 48): the hall server up starts drops the names in
+#   STARTER_DROP, every claude line drops CLAUDE_DROP's names in the pane's own
+#   shell, and a test hand's REEVE_HAND is set on purpose;
 # - --dry-run prints every command and runs none.
 
 HALL_REPO=$(cd -P "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -36,23 +37,27 @@ HALL_CLI=("${HALL_CLEAN_ENV[@]}" "$HALL_BIN")
 # herdr it talks to (decision 48): REEVE_HAND, which makes reeve's hooks take a
 # test reeve for a hand; claude's own session markers, among them its messaging
 # socket and token; and every HERDR_* name, the live herdr's socket and session.
-# Dropped from the hall server up starts and from every test claude line.
+# Dropped from the hall server up starts.
 STARTER_DROP=(REEVE_HAND CLAUDECODE CLAUDE_PID CLAUDE_EFFORT)
 while read -r __name; do
   case $__name in CLAUDE_CODE_* | HERDR_*) STARTER_DROP+=("$__name") ;; esac
 done < <(compgen -e | LC_ALL=C sort)
 unset __name
-# The HERDR_* names hall sets into every pane it starts, with that session's own
-# values (its socket, binary and pane ids); a claude line keeps them.
-HALL_PANE_NAMES=" HERDR_ENV HERDR_SOCKET_PATH HERDR_BIN_PATH HERDR_WORKSPACE_ID HERDR_TAB_ID HERDR_PANE_ID "
-# env -u of every STARTER_DROP name: the hall server's start, and a claude line.
+# env -u of every STARTER_DROP name, for the hall server's start.
 SERVER_DROP=()
-CLAUDE_DROP=()
 for __name in "${STARTER_DROP[@]}"; do
   SERVER_DROP+=(-u "$__name")
-  [[ $HALL_PANE_NAMES == *" $__name "* ]] || CLAUDE_DROP+=(-u "$__name")
 done
 unset __name
+# The env -u list of a claude line (decision 48 and its second amendment). The
+# pane's own shell works it out when the line runs, from what that shell holds,
+# so a hall-dev server someone else started, with names the runner of up lacks,
+# passes none of them on either: REEVE_HAND, claude's session markers, every
+# CLAUDE_CODE_* name and every HERDR_* name except the six hall sets into every
+# pane with that session's own values (its socket, binary and pane ids), which
+# claude's herdr agent-state hook uses to report to hall-dev. command keeps the
+# liege's aliases for env and sed out of it.
+CLAUDE_DROP='-u REEVE_HAND -u CLAUDECODE -u CLAUDE_PID -u CLAUDE_EFFORT $(command env | command sed -nE "/^HERDR_(ENV|SOCKET_PATH|BIN_PATH|WORKSPACE_ID|TAB_ID|PANE_ID)=/d;s/^((CLAUDE_CODE|HERDR)_[A-Za-z0-9_]*)=.*/-u \1/p")'
 
 DRY_RUN=0
 CONFIG="$HALL_REPO/scripts/test-setup.conf"
@@ -293,15 +298,14 @@ xdg_dir() { printf '%s/xdg-config\n' "$HALL_DEV_HOME"; }
 xdg_state_dir() { printf '%s/xdg-state\n' "$HALL_DEV_HOME"; }
 
 # claude_line <kind> <name>: the command line a test reeve or test hand runs in
-# its pane (decisions 26, 47 and 48). The STARTER_DROP names are dropped here
-# too, for a hall server someone else started; a test hand then gets its
-# REEVE_HAND back, set on purpose to its errand id. HOME is never changed: that
-# would move ~/.claude.
+# its pane (decisions 26, 47 and 48). It drops CLAUDE_DROP's names, whoever
+# started the hall server; a test hand then gets its REEVE_HAND back, set on
+# purpose to its errand id. HOME is never changed: that would move ~/.claude.
 claude_line() {
   local hand=""
   [ "$1" = errand ] && hand="REEVE_HAND=\"$2\" "
   printf 'cd "%s" && env %s %sREEVE_HOME="%s" XDG_CONFIG_HOME="%s" XDG_STATE_HOME="%s" HALL_SOCKET_PATH="%s" claude --model %s' \
-    "$(work_dir "$2")" "${CLAUDE_DROP[*]}" "$hand" "$HALL_DEV_HOME" "$(xdg_dir)" "$(xdg_state_dir)" "$HALL_DEV_SOCKET" "$HALL_MODEL"
+    "$(work_dir "$2")" "$CLAUDE_DROP" "$hand" "$HALL_DEV_HOME" "$(xdg_dir)" "$(xdg_state_dir)" "$HALL_DEV_SOCKET" "$HALL_MODEL"
 }
 
 standin() { run "$HALL_STANDIN" --home "$HALL_DEV_HOME" "$@"; }

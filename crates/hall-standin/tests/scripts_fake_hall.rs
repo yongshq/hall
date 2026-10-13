@@ -19,7 +19,9 @@ use serde_json::Value;
 /// server` logs the identity names it was started with (decision 48), marks
 /// the session running and exits, as a detached server would return control;
 /// `session stop` marks it stopped. `pane run` runs the line in a shell, with
-/// the HERDR_* names hall sets into a pane, as a pane's shell would.
+/// the HERDR_* names hall sets into a pane, as a pane's shell would, and with
+/// the names in a `server-env` file, if present, as a pane of a hall server
+/// someone else started would hold them.
 const FAKE_HALL: &str = r#"#!/usr/bin/env bash
 set -euo pipefail
 dir=$(dirname "$0")
@@ -56,7 +58,10 @@ case "$*" in
     printf '{"result":{"type":"pane_info","pane":{"pane_id":"%s","workspace_id":"%s","tab_id":"%s"}}}\n' "$3" "$ws" "$tab"
     ;;
   "pane run "*)
-    HERDR_ENV=1 HERDR_PANE_ID=$3 HERDR_SOCKET_PATH="$dir/cfg/sessions/hall-dev/herdr.sock" bash -c "$4"
+    if [ -e "$dir/server-env" ]; then set -a; . "$dir/server-env"; set +a; fi
+    read -r _ ws tab < <(grep "^$3 " "$dir/panes")
+    HERDR_ENV=1 HERDR_PANE_ID=$3 HERDR_TAB_ID=$tab HERDR_WORKSPACE_ID=$ws HERDR_BIN_PATH=$0 \
+      HERDR_SOCKET_PATH="$dir/cfg/sessions/hall-dev/herdr.sock" bash -c "$4"
     echo '{"result":{}}'
     ;;
   "session stop "*) rm -f "$dir/running"; echo '{"result":{}}' ;;
@@ -73,14 +78,16 @@ case "$*" in
 esac
 "#;
 
-/// Records, per claude line it is started from, its working directory's name and
-/// the names that say who it is or where it writes.
+/// Records, per claude line it is started from, its working directory's name,
+/// the names that say who it is or where it writes, and the six HERDR_* names
+/// hall sets into a pane.
 const FAKE_CLAUDE: &str = r#"#!/usr/bin/env bash
-printf '%s|hand=%s|ident=%s|reeve_home=%s|xdg_config=%s|xdg_state=%s|hall_socket=%s|herdr_pane=%s\n' \
+printf '%s|hand=%s|ident=%s|reeve_home=%s|xdg_config=%s|xdg_state=%s|hall_socket=%s|herdr_pane=%s|herdr=%s,%s,%s,%s,%s\n' \
   "$(basename "$PWD")" "${REEVE_HAND-unset}" \
-  "$(env | sed -nE 's/^((CLAUDECODE|CLAUDE_[A-Z_]*|HERDR_[A-Z_]*)=.*)/\1/p' | grep -v -e '^HERDR_PANE_ID=' -e '^HERDR_SOCKET_PATH=' -e '^HERDR_ENV=' | sort | tr '\n' ' ')" \
+  "$(env | sed -nE 's/^((CLAUDECODE|CLAUDE_[A-Z_]*|HERDR_[A-Z_]*)=.*)/\1/p' | grep -v -E '^HERDR_(ENV|SOCKET_PATH|BIN_PATH|WORKSPACE_ID|TAB_ID|PANE_ID)=' | sort | tr '\n' ' ')" \
   "${REEVE_HOME-unset}" "${XDG_CONFIG_HOME-unset}" "${XDG_STATE_HOME-unset}" "${HALL_SOCKET_PATH-unset}" \
-  "${HERDR_PANE_ID-unset}" >>"$(dirname "$0")/claude.log"
+  "${HERDR_PANE_ID-unset}" "${HERDR_ENV-unset}" "${HERDR_SOCKET_PATH-unset}" "${HERDR_BIN_PATH-unset}" \
+  "${HERDR_WORKSPACE_ID-unset}" "${HERDR_TAB_ID-unset}" >>"$(dirname "$0")/claude.log"
 "#;
 
 /// Any herdr call at all is a failure: this one only records it.
@@ -313,9 +320,11 @@ fn up_status_drive_down() {
         .iter()
         .map(|name| {
             let hand = if name.contains('-') { name } else { "unset" };
+            let pane = pane_of(name);
+            let (ws, tab) = rig.place_of(&pane);
             format!(
-                "{name}|hand={hand}|ident=|reeve_home={h}|xdg_config={h}/xdg-config|xdg_state={h}/xdg-state|hall_socket={socket}|herdr_pane={}",
-                pane_of(name)
+                "{name}|hand={hand}|ident=|reeve_home={h}|xdg_config={h}/xdg-config|xdg_state={h}/xdg-state|hall_socket={socket}|herdr_pane={pane}|herdr=1,{socket},{},{ws},{tab}",
+                rig.bin.join("hall").display()
             )
         })
         .collect();
@@ -647,6 +656,44 @@ fn up_and_drive_go_on_past_a_link_inside_the_xdg_folders() {
         }
         std::fs::remove_file(&dir).unwrap();
         std::fs::rename(rig.bin.join(name), &dir).unwrap();
+    }
+}
+
+#[test]
+fn a_claude_line_drops_what_a_server_up_did_not_start_holds() {
+    let rig = Rig::new("foreign-server");
+    // A hall-dev server someone else started, from a claude: its panes hold
+    // names the runner of up lacks (decision 48's second amendment).
+    std::fs::write(
+        rig.bin.join("server-env"),
+        "REEVE_HAND=server-hand\nCLAUDECODE=1\nCLAUDE_PID=7\nCLAUDE_EFFORT=low\nCLAUDE_CODE_CHILD_SESSION=1\nCLAUDE_CODE_MESSAGING_SOCKET=/other/cc.sock\nCLAUDE_CODE_MESSAGING_TOKEN=server-token\nHERDR_SESSION=other\nHERDR_CLIENT_SOCKET_PATH=/other/client.sock\n",
+    )
+    .unwrap();
+    rig.ok("test-setup", &["up"]);
+    // The lines name none of them: each pane's shell works out its own drop.
+    let runs: Vec<String> = rig
+        .calls()
+        .into_iter()
+        .filter(|c| c.starts_with("pane run "))
+        .collect();
+    assert_eq!(runs.len(), 5);
+    for r in &runs {
+        assert!(!r.contains("CHILD_SESSION"), "{r}");
+        assert!(!r.contains("-u HERDR_"), "{r}");
+    }
+    // No claude got any of them; a test hand has its own errand id, a test
+    // reeve none, and each keeps the six names hall set into its pane.
+    let claudes = rig.read_bin("claude.log");
+    assert_eq!(claudes.lines().count(), 5, "{claudes}");
+    for line in claudes.lines() {
+        let name = line.split('|').next().unwrap();
+        let hand = if name.contains('-') { name } else { "unset" };
+        assert!(
+            line.starts_with(&format!("{name}|hand={hand}|ident=|")),
+            "{line}"
+        );
+        assert!(!line.contains("server-hand"), "{line}");
+        assert!(!line.contains(",unset"), "{line}");
     }
 }
 

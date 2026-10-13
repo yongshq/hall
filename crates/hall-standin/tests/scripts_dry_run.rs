@@ -64,9 +64,11 @@ const STARTER: [(&str, &str); 8] = [
 /// The `env -u` list the hall server starts under: every STARTER name, the
 /// CLAUDE_CODE_* and HERDR_* ones sorted.
 const SERVER_DROP: &str = "-u REEVE_HAND -u CLAUDECODE -u CLAUDE_PID -u CLAUDE_EFFORT -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u HERDR_PANE_ID -u HERDR_SESSION";
-/// The same on a claude line, which keeps the HERDR_* names hall sets into
-/// every pane with that session's own values.
-const CLAUDE_DROP: &str = "-u REEVE_HAND -u CLAUDECODE -u CLAUDE_PID -u CLAUDE_EFFORT -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u HERDR_SESSION";
+/// The `env -u` list of a claude line, which the pane's shell works out when
+/// the line runs (decision 48's second amendment): the same whatever the
+/// runner of up carries. It keeps the HERDR_* names hall sets into every pane
+/// with that session's own values.
+const CLAUDE_DROP: &str = r#"-u REEVE_HAND -u CLAUDECODE -u CLAUDE_PID -u CLAUDE_EFFORT $(command env | command sed -nE "/^HERDR_(ENV|SOCKET_PATH|BIN_PATH|WORKSPACE_ID|TAB_ID|PANE_ID)=/d;s/^((CLAUDE_CODE|HERDR)_[A-Za-z0-9_]*)=.*/-u \1/p")"#;
 
 /// The scripts with this process's own identity names replaced by STARTER, so
 /// what they drop does not depend on who runs the tests.
@@ -188,6 +190,53 @@ fn check_command(c: &str, home: &Path) {
 
 fn count(cmds: &[String], needle: &str) -> usize {
     cmds.iter().filter(|c| c.contains(needle)).count()
+}
+
+/// The claude lines a dry run of up prints, with `starter` in place of STARTER
+/// and the home written `<home>`.
+fn claude_lines(test: &str, starter: &[(&str, &str)]) -> Vec<String> {
+    let h = home(test);
+    let mut c = command(
+        "test-setup",
+        &["--dry-run", "--home", h.to_str().unwrap(), "up"],
+    );
+    for (k, _) in STARTER {
+        c.env_remove(k);
+    }
+    let out = c.envs(starter.iter().copied()).output().unwrap();
+    assert!(out.status.success(), "{out:?}");
+    assert!(!h.exists(), "{test} created {}", h.display());
+    let lines: Vec<String> = String::from_utf8(out.stdout)
+        .unwrap()
+        .lines()
+        .filter(|c| c.starts_with("+ ") && c.contains("claude --model"))
+        .map(|c| c.replace(h.to_str().unwrap(), "<home>"))
+        .collect();
+    assert_eq!(lines.len(), ROSTER);
+    lines
+}
+
+#[test]
+fn the_claude_line_drops_what_the_pane_holds_not_what_the_runner_holds() {
+    // A runner of up with none of the names, and one with names the other lacks
+    // (a hall-dev server started by someone else holds such names): the claude
+    // lines are the same, since each pane's shell works out its drop.
+    let bare = claude_lines("claude-line-bare", &[]);
+    let full = claude_lines(
+        "claude-line-full",
+        &[
+            ("REEVE_HAND", "starter-hand"),
+            ("CLAUDE_CODE_CHILD_SESSION", "1"),
+            ("CLAUDE_CODE_MESSAGING_SOCKET", "/live/cc.sock"),
+            ("HERDR_SESSION", "live"),
+            ("HERDR_TAB_ID", "w9:t9"),
+        ],
+    );
+    assert_eq!(bare, full);
+    for line in &full {
+        assert!(!line.contains("-u CLAUDE_CODE_"), "{line}");
+        assert!(!line.contains("-u HERDR_"), "{line}");
+    }
 }
 
 #[test]
