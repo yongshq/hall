@@ -593,3 +593,140 @@ fn a_muted_sound_config_plays_nothing_while_the_highlight_stands() {
     assert_eq!(state.set_reeve_listing(Ok(listing)).len(), 1);
     assert_eq!(alerting(&mut state), ["ansel", "ansel-fix"]);
 }
+
+/// Every request sound in `effects`.
+fn requests(effects: &[ClientShellNotificationEffect]) -> usize {
+    sounds(effects)
+        .into_iter()
+        .filter(|sound| *sound == crate::sound::Sound::Request)
+        .count()
+}
+
+#[test]
+fn a_hand_dialog_rings_once_whatever_the_toast_delay() {
+    // Decision 65: herdr's request is held for the toast delay (or, at 0, for the snapshot)
+    // before it rings; a listing `waiting` read in that while is the same dialog.
+    let default = Config::default().ui.toast.delay_seconds;
+    for delay in [0, 1, default] {
+        let mut listing = listing();
+        let mut state = alert_state(listing.clone(), &[("p_b1", AgentStatus::Working)]);
+        state.config.toast_delay_seconds = delay;
+        let now = std::time::Instant::now();
+        let mut rung = requests(&notify(
+            &mut state,
+            SemanticNotificationKind::NeedsAttention,
+            "p_b1",
+            "ws_b_t1",
+        ));
+        assert_eq!(rung, 0, "delay {delay}: held");
+        set_statuses(&mut state, &[("p_b1", AgentStatus::Blocked)]);
+        // The hand's waiting reads true before the held request rings.
+        errand_mut(&mut listing, "bertil-probe").waiting = true;
+        rung += requests(&state.set_reeve_listing(Ok(listing.clone())));
+        assert_eq!(rung, 0, "delay {delay}: waiting while the request is held");
+        let past = past_delay(now, delay);
+        rung += requests(&state.tick_notifications(past).0);
+        assert_eq!(rung, 1, "delay {delay}: herdr's request rings");
+        assert_eq!(alerting(&mut state), ["bertil", "bertil-probe"], "{delay}");
+        rung += requests(&state.set_reeve_listing(Ok(listing.clone())));
+        rung += requests(
+            &state
+                .tick_notifications(past + std::time::Duration::from_secs(2))
+                .0,
+        );
+        assert_eq!(rung, 1, "delay {delay}: one ring for one dialog");
+
+        // The other order: waiting read after herdr's request has rung.
+        let mut listing = super::reeve_tree::listing();
+        let mut state = alert_state(listing.clone(), &[("p_b1", AgentStatus::Blocked)]);
+        state.config.toast_delay_seconds = delay;
+        let now = std::time::Instant::now();
+        let mut rung = requests(&notify(
+            &mut state,
+            SemanticNotificationKind::NeedsAttention,
+            "p_b1",
+            "ws_b_t1",
+        ));
+        rung += requests(&state.tick_notifications(past_delay(now, delay)).0);
+        errand_mut(&mut listing, "bertil-probe").waiting = true;
+        rung += requests(&state.set_reeve_listing(Ok(listing)));
+        assert_eq!(rung, 1, "delay {delay}: waiting after the ring");
+    }
+}
+
+fn past_delay(now: std::time::Instant, delay: u64) -> std::time::Instant {
+    now + std::time::Duration::from_secs(delay) + std::time::Duration::from_millis(200)
+}
+
+#[test]
+fn a_client_attached_after_the_dialog_rings_waiting_once_whatever_the_toast_delay() {
+    // The case decision 64 fixed, kept by decision 65: herdr's request rang before this client
+    // was there, so it holds neither the request nor its ring, and the listing's waiting rings.
+    let default = Config::default().ui.toast.delay_seconds;
+    for delay in [0, 1, default] {
+        let mut listing = listing();
+        let mut state = alert_state(listing.clone(), &[("p_b1", AgentStatus::Blocked)]);
+        state.config.toast_delay_seconds = delay;
+        let now = std::time::Instant::now();
+        errand_mut(&mut listing, "bertil-probe").waiting = true;
+        let mut rung = requests(&state.set_reeve_listing(Ok(listing.clone())));
+        assert_eq!(rung, 1, "delay {delay}: waiting rings");
+        assert_eq!(alerting(&mut state), ["bertil", "bertil-probe"], "{delay}");
+        rung += requests(&state.set_reeve_listing(Ok(listing)));
+        rung += requests(&state.tick_notifications(past_delay(now, delay)).0);
+        assert_eq!(rung, 1, "delay {delay}: and only once");
+    }
+}
+
+#[test]
+fn a_reply_raised_while_the_window_was_away_clears_when_focus_comes_back() {
+    // Decision 65: ansel's pane is the focused one; the hall window has lost focus.
+    let mut state = alert_state(
+        listing(),
+        &[("p_a0", AgentStatus::Idle), ("p_b0", AgentStatus::Done)],
+    );
+    state.outer_focused = Some(false);
+    let effects = notify(
+        &mut state,
+        SemanticNotificationKind::Finished,
+        "p_a0",
+        "ws_a_t0",
+    );
+    assert_eq!(sounds(&effects), [crate::sound::Sound::Done]);
+    // Bertil, out of view, ends its turn too.
+    notify(
+        &mut state,
+        SemanticNotificationKind::Finished,
+        "p_b0",
+        "ws_b_t0",
+    );
+    assert_eq!(alerting(&mut state), ["ansel", "bertil"]);
+    // Still away: the bar stands, frame after frame.
+    assert_eq!(alerting(&mut state), ["ansel", "bertil"]);
+    let outcome = state.handle_raw_events(vec![crate::raw_input::RawInputEvent::OuterFocusGained]);
+    assert!(outcome.repaint);
+    assert_eq!(
+        alerting(&mut state),
+        ["bertil"],
+        "only the reply in view is seen"
+    );
+    // Focus coming back again changes nothing more.
+    state.handle_raw_events(vec![crate::raw_input::RawInputEvent::OuterFocusLost]);
+    state.handle_raw_events(vec![crate::raw_input::RawInputEvent::OuterFocusGained]);
+    assert_eq!(alerting(&mut state), ["bertil"]);
+}
+
+#[test]
+fn a_dialog_in_view_keeps_its_highlight_when_focus_comes_back() {
+    let mut state = alert_state(listing(), &[("p_a0", AgentStatus::Blocked)]);
+    state.outer_focused = Some(false);
+    notify(
+        &mut state,
+        SemanticNotificationKind::NeedsAttention,
+        "p_a0",
+        "ws_a_t0",
+    );
+    assert_eq!(alerting(&mut state), ["ansel"]);
+    state.handle_raw_events(vec![crate::raw_input::RawInputEvent::OuterFocusGained]);
+    assert_eq!(alerting(&mut state), ["ansel"]);
+}

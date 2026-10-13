@@ -239,6 +239,9 @@ impl ClientShellState {
                     if let Some(surface) = self.pane_surface.clone() {
                         outcome.repaint |= self.acknowledge_active_surface_agents(&surface);
                     }
+                    // hall: a reeve's reply raised while the window was away is seen now, on
+                    // the pane in view (decision 65).
+                    outcome.repaint |= self.see_reply_in_view();
                     outcome
                         .requests
                         .push(ClientMessage::ClientShellFocus { focused: true });

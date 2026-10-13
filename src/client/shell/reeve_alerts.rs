@@ -54,7 +54,8 @@ impl HandFacts {
     }
 
     /// What rose from `before` to `self`, by name. A rise of `waiting` is left out when this
-    /// client rang herdr's request for the dialog the hand's pane stands at (decisions 62, 64).
+    /// client rang herdr's request for the dialog the hand's pane stands at, or holds it to
+    /// ring (decisions 62, 64, 65).
     fn rises(&self, before: &Self, dialog_rung: bool) -> Vec<&'static str> {
         let mut rises = Vec::new();
         for (now, was, name) in [
@@ -162,6 +163,25 @@ impl ClientShellState {
         self.reeve_alerts.panes.insert(pane_id.to_owned(), alert);
     }
 
+    /// The hall window has focus again: a reply on the pane in view is seen, as herdr counts it
+    /// seen, and its highlight clears; a dialog's stands (decision 65). Whether one cleared.
+    pub(super) fn see_reply_in_view(&mut self) -> bool {
+        let Some(pane_id) = self
+            .snapshot
+            .as_deref()
+            .and_then(|snapshot| snapshot.focused_pane_id.clone())
+        else {
+            return false;
+        };
+        if !self.pane_in_view(&pane_id)
+            || self.reeve_alerts.panes.get(&pane_id) != Some(&PaneAlert::Reply)
+        {
+            return false;
+        }
+        self.reeve_alerts.panes.remove(&pane_id);
+        true
+    }
+
     /// Whether the liege is looking at the pane: the focused pane of this client's active
     /// endpoint, in a window that has focus or cannot say (herdr's rule for its own
     /// focused-tab suppression).
@@ -182,15 +202,22 @@ impl ClientShellState {
         let Some((listing, session)) = self.alert_listing() else {
             return Vec::new();
         };
+        // A dialog this client rang, while its pane reads blocked, or one whose request it
+        // holds for the toast delay or the snapshot and rings when that is done (decision 65).
         let dialog_rung = |pane_id: Option<&String>| {
             pane_id.is_some_and(|pane_id| {
-                self.reeve_alerts.dialogs.contains(pane_id)
+                let rung = self.reeve_alerts.dialogs.contains(pane_id)
                     && self.snapshot.as_deref().is_some_and(|snapshot| {
                         snapshot.agents.iter().any(|agent| {
                             &agent.pane_id == pane_id
                                 && agent.agent_status == crate::api::schema::AgentStatus::Blocked
                         })
-                    })
+                    });
+                rung || self.pending_notifications.iter().any(|pending| {
+                    pending.endpoint_id == self.active_endpoint_id
+                        && pending.event.kind == SemanticNotificationKind::NeedsAttention
+                        && pending.event.pane_id.as_ref() == Some(pane_id)
+                })
             })
         };
         let errands = listing

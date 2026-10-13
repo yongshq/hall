@@ -126,7 +126,7 @@ Hall is a modified version of herdr v0.9.0 (commit b99002ac99b09e00b4ca692436cb1
 | `README.md` | Status line for step 3. |
 | `docs/next/website/src/data/config-reference.json` | The `[reeve]` keys, so `scripts/config_reference_check.py` stays in sync. |
 
-## Step 4: alerts (decisions 61 to 64)
+## Step 4: alerts (decisions 61 to 65)
 
 | File | Change |
 |---|---|
@@ -139,6 +139,7 @@ Hall is a modified version of herdr v0.9.0 (commit b99002ac99b09e00b4ca692436cb1
 | `src/client/shell/notification_policy.rs` | For a pane the listing names: herdr's done for a hand's pane is dropped, toast and all; with `alert_focused_reply` a reeve's done is current while its pane reads idle and its sound is not skipped for the focused active tab; every alert that passes raises the reeve tree's highlight, apart from the sound; a dialog on such a pane waits for the snapshot to read it blocked whatever the toast delay. |
 | `src/client/shell/composition.rs` | Alerts whose trigger has cleared, or whose pane the focus moved onto, are cleared before each frame. |
 | `src/client/shell/mouse.rs` | A click on an agent row (the reeve tree's reeve and hand rows among them) clears that pane's alert. |
+| `src/client/shell/input.rs` | When the hall window gets focus back, a reeve's reply highlight on the pane in view clears, as herdr counts it seen. |
 | `src/client/mod.rs` | A read of the listing gives the sound for hands newly stuck or asking, played through the shell's notification effects. |
 | `src/client/notifications.rs` | Every sound the shell asks for is logged at info (`sound.play`, played or muted). |
 | `src/client/shell/tests/mod.rs` | The `reeve_alerts` tests. |

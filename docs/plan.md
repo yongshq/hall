@@ -144,7 +144,7 @@ Each step works end to end and can be shown to the liege on its own. Steps 1 to 
   - a test reeve ending a turn while its tab is active and the hall window has focus, with the setting that turns herdr's suppression off (decisions 22 and 35).
 
   With the sound muted, a repeat of any trigger shows only the highlight. The "live setup unchanged" check passes.
-- **Needs:** step 3 for the highlight on the reeve; step 2 for setting states and driving test reeves on demand. The turn-end question below is settled before this step starts. Settled by decision 62; built in step 4 with decision 63 (the highlight, its clearing, the listing alert's sound), amended by decision 64 after its review, and `scripts/test-drive` drives a test hand too, for the hand at a dialog.
+- **Needs:** step 3 for the highlight on the reeve; step 2 for setting states and driving test reeves on demand. The turn-end question below is settled before this step starts. Settled by decision 62; built in step 4 with decision 63 (the highlight, its clearing, the listing alert's sound), amended by decisions 64 and 65 after its reviews, and `scripts/test-drive` drives a test hand too, for the hand at a dialog.
 
 ### 5. Go-live bridge
 
