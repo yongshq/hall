@@ -1,6 +1,6 @@
 //! scripts/test-setup and scripts/test-drive, run in --dry-run only: every
 //! command they would run is printed, and checked here against the test setup's
-//! rules (ADR 0003, decisions 26, 33, 38 and 47). Nothing is started, no hall
+//! rules (ADR 0003, decisions 26, 33, 38, 47 and 48). Nothing is started, no hall
 //! session is touched, and no herdr call is printed at all.
 
 use std::fs::Permissions;
@@ -13,6 +13,7 @@ const MODEL: &str = "claude-haiku-4-5-20251001";
 const CLEAN_ENV: &str = "+ env -u HALL_SOCKET_PATH -u HALL_CLIENT_SOCKET_PATH -u HALL_SESSION -u HALL_CONFIG_PATH -u HALL_ENV -u HALL_PANE_ID ";
 const REEVES: [&str; 2] = ["ansel", "bertil"];
 const ERRANDS: usize = 3;
+const HANDS: [&str; ERRANDS] = ["ansel-fix", "ansel-review", "bertil-probe"];
 const ROSTER: usize = 5;
 
 fn scripts() -> PathBuf {
@@ -47,10 +48,38 @@ fn home(test: &str) -> PathBuf {
     h
 }
 
+/// What the scripts' starter carries when a claude runs them from a live herdr
+/// pane (decision 48): who that claude is, and which herdr it talks to.
+const STARTER: [(&str, &str); 8] = [
+    ("REEVE_HAND", "starter-hand"),
+    ("CLAUDECODE", "1"),
+    ("CLAUDE_PID", "4242"),
+    ("CLAUDE_EFFORT", "high"),
+    ("CLAUDE_CODE_SESSION_ID", "starter-session"),
+    ("CLAUDE_CODE_MESSAGING_TOKEN", "starter-token"),
+    ("HERDR_SESSION", "live"),
+    ("HERDR_PANE_ID", "w9:p9"),
+];
+
+/// The `env -u` list the hall server starts under: every STARTER name, the
+/// CLAUDE_CODE_* and HERDR_* ones sorted.
+const SERVER_DROP: &str = "-u REEVE_HAND -u CLAUDECODE -u CLAUDE_PID -u CLAUDE_EFFORT -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u HERDR_PANE_ID -u HERDR_SESSION";
+/// The same on a claude line, which keeps the HERDR_* names hall sets into
+/// every pane with that session's own values.
+const CLAUDE_DROP: &str = "-u REEVE_HAND -u CLAUDECODE -u CLAUDE_PID -u CLAUDE_EFFORT -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u HERDR_SESSION";
+
+/// The scripts with this process's own identity names replaced by STARTER, so
+/// what they drop does not depend on who runs the tests.
 fn command(name: &str, args: &[&str]) -> Command {
     let mut c = Command::new("bash");
+    for (k, _) in std::env::vars() {
+        if k.starts_with("CLAUDE") || k.starts_with("HERDR_") || k == "REEVE_HAND" {
+            c.env_remove(k);
+        }
+    }
     c.arg(scripts().join(name))
         .args(args)
+        .envs(STARTER)
         .env("HALL_STANDIN_BIN", env!("CARGO_BIN_EXE_hall-standin"))
         .env("HALL_DEBUG_BIN", hall_bin());
     c
@@ -116,27 +145,44 @@ fn check_command(c: &str, home: &Path) {
         "a herdr call: {c}"
     );
     let hall = hall_bin().display().to_string();
-    if c.split_whitespace().any(|w| w == hall) {
+    if c.ends_with(" server &") {
+        // The hall server starts without the starter's identity names.
+        assert_eq!(
+            c,
+            format!("{CLEAN_ENV}{SERVER_DROP} {hall} --session {SESSION} server &")
+        );
+    } else if c.split_whitespace().any(|w| w == hall) {
         let prefix = hall_prefix();
         assert!(c.starts_with(&prefix), "hall without a clean env: {c}");
         let rest = &c[prefix.len()..];
         let named = rest.ends_with(&format!(" --session {SESSION}"));
         let session_cmd = rest == "session list --json"
             || rest == format!("session stop {SESSION} --json")
-            || rest == format!("session delete {SESSION} --json")
-            || rest == format!("--session {SESSION} server &");
+            || rest == format!("session delete {SESSION} --json");
         assert!(named || session_cmd, "hall call names no test session: {c}");
     }
     if c.contains("claude ") {
         let h = home.to_str().unwrap();
+        let cd = format!("cd \"{h}/work/");
+        let at = c.find(&cd).unwrap_or_else(|| panic!("{c}"));
+        let name = c[at + cd.len()..].split('"').next().unwrap();
+        // A test hand gets REEVE_HAND back, set on purpose; a test reeve has none.
+        let hand = if HANDS.contains(&name) {
+            format!("REEVE_HAND=\"{name}\" ")
+        } else {
+            String::new()
+        };
         assert!(
             c.contains(&format!(
-                "REEVE_HOME=\"{h}\" XDG_CONFIG_HOME=\"{h}/xdg-config\" HALL_SOCKET_PATH=\"<socket-of-{SESSION}>\" claude "
+                "{cd}{name}\" && env {CLAUDE_DROP} {hand}REEVE_HOME=\"{h}\" XDG_CONFIG_HOME=\"{h}/xdg-config\" XDG_STATE_HOME=\"{h}/xdg-state\" HALL_SOCKET_PATH=\"<socket-of-{SESSION}>\" claude --model {MODEL}'"
             )),
             "{c}"
         );
-        assert!(c.contains(&format!("claude --model {MODEL}")), "{c}");
-        assert!(c.contains(&format!("cd \"{h}/work/")), "{c}");
+        assert_eq!(
+            c.matches("REEVE_HAND=").count(),
+            usize::from(!hand.is_empty()),
+            "{c}"
+        );
     }
 }
 
@@ -158,6 +204,8 @@ fn up() {
     assert_eq!(count(&cmds, &format!("--session {SESSION} server &")), 1);
     assert_eq!(count(&cmds, "+ write "), 1);
     assert_eq!(count(&cmds, "/xdg-config"), 1 + ROSTER);
+    assert_eq!(count(&cmds, "/xdg-state"), 1 + ROSTER);
+    assert_eq!(count(&cmds, "REEVE_HAND=\""), ERRANDS);
     assert_eq!(count(&cmds, "cargo build"), 0);
     // Each test hand opens in its own reeve's workspace.
     for (hand, owner) in [
@@ -223,7 +271,7 @@ fn up() {
     let server = format!("/target/debug/hall --session {SESSION} server &");
     assert!(
         cmds.iter()
-            .any(|c| c.starts_with(CLEAN_ENV) && c.ends_with(&server)),
+            .any(|c| c.starts_with(&format!("{CLEAN_ENV}{SERVER_DROP} ")) && c.ends_with(&server)),
         "{stdout}"
     );
     assert!(!h.exists());

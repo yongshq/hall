@@ -4,7 +4,9 @@
 //! file, placing each test hand as a tab in its reeve's workspace, recording
 //! panes so the stand-in's session locations match, and the status checks. A
 //! fake `herdr` sits first on PATH and records any call: there must be none
-//! (decision 33). No real hall or herdr server, reeve home or claude is involved.
+//! (decision 33). A fake `claude` beside it records the environment each claude
+//! line gives it (decision 48). No real hall or herdr server, reeve home or
+//! claude is involved.
 
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -14,8 +16,10 @@ use serde_json::Value;
 
 /// Logs each call (and whether the HALL_* names hall reads leaked through) and
 /// answers like hall does for the calls the scripts make. `--session <s>
-/// server` marks the session running and exits, as a detached server would
-/// return control; `session stop` marks it stopped.
+/// server` logs the identity names it was started with (decision 48), marks
+/// the session running and exits, as a detached server would return control;
+/// `session stop` marks it stopped. `pane run` runs the line in a shell, with
+/// the HERDR_* names hall sets into a pane, as a pane's shell would.
 const FAKE_HALL: &str = r#"#!/usr/bin/env bash
 set -euo pipefail
 dir=$(dirname "$0")
@@ -25,6 +29,7 @@ printf '%s|socket=%s|session=%s|pane=%s|env=%s|config=%s|client=%s\n' "$*" \
 next() { n=$(( $(cat "$dir/n" 2>/dev/null || echo 0) + 1 )); echo "$n" >"$dir/n"; }
 case "$*" in
   "--session hall-dev server")
+    env | sed -nE 's/^((REEVE_HAND|CLAUDECODE|CLAUDE_[A-Z_]*|HERDR_[A-Z_]*)=.*)/\1/p' | sort >>"$dir/server-env.log"
     [ -e "$dir/no-start" ] || touch "$dir/running"
     ;;
   "session list --json")
@@ -50,6 +55,10 @@ case "$*" in
     read -r _ ws tab < <(grep "^$3 " "$dir/panes") || exit 1
     printf '{"result":{"type":"pane_info","pane":{"pane_id":"%s","workspace_id":"%s","tab_id":"%s"}}}\n' "$3" "$ws" "$tab"
     ;;
+  "pane run "*)
+    HERDR_ENV=1 HERDR_PANE_ID=$3 HERDR_SOCKET_PATH="$dir/cfg/sessions/hall-dev/herdr.sock" bash -c "$4"
+    echo '{"result":{}}'
+    ;;
   "session stop "*) rm -f "$dir/running"; echo '{"result":{}}' ;;
   # A blocked file stands for a dialog, which Esc clears.
   "agent explain "*)
@@ -62,6 +71,16 @@ case "$*" in
   "agent send-keys "*" esc --session "*) rm -f "$dir/blocked"; echo '{"result":{}}' ;;
   *) echo '{"result":{}}' ;;
 esac
+"#;
+
+/// Records, per claude line it is started from, its working directory's name and
+/// the names that say who it is or where it writes.
+const FAKE_CLAUDE: &str = r#"#!/usr/bin/env bash
+printf '%s|hand=%s|ident=%s|reeve_home=%s|xdg_config=%s|xdg_state=%s|hall_socket=%s|herdr_pane=%s\n' \
+  "$(basename "$PWD")" "${REEVE_HAND-unset}" \
+  "$(env | sed -nE 's/^((CLAUDECODE|CLAUDE_[A-Z_]*|HERDR_[A-Z_]*)=.*)/\1/p' | grep -v -e '^HERDR_PANE_ID=' -e '^HERDR_SOCKET_PATH=' -e '^HERDR_ENV=' | sort | tr '\n' ' ')" \
+  "${REEVE_HOME-unset}" "${XDG_CONFIG_HOME-unset}" "${XDG_STATE_HOME-unset}" "${HALL_SOCKET_PATH-unset}" \
+  "${HERDR_PANE_ID-unset}" >>"$(dirname "$0")/claude.log"
 "#;
 
 /// Any herdr call at all is a failure: this one only records it.
@@ -99,6 +118,7 @@ impl Rig {
         std::fs::create_dir_all(&var_tmp).unwrap();
         executable(&bin.join("hall"), FAKE_HALL);
         executable(&bin.join("herdr"), FAKE_HERDR);
+        executable(&bin.join("claude"), FAKE_CLAUDE);
         let home = user.join(".reeve-hall-dev");
         // Claude's folder trust: granted for one test reeve's directory only.
         let trusted = home.join("work/ansel");
@@ -120,34 +140,55 @@ impl Rig {
     }
 
     fn run(&self, script: &str, args: &[&str]) -> Output {
+        self.run_with(script, args, &[])
+    }
+
+    fn run_with(&self, script: &str, args: &[&str], envs: &[(&str, &str)]) -> Output {
         let path = format!("{}:{}", self.bin.display(), std::env::var("PATH").unwrap());
-        Command::new("bash")
-            .arg(
-                Path::new(env!("CARGO_MANIFEST_DIR"))
-                    .join("../../scripts")
-                    .join(script),
-            )
-            .arg("--home")
-            .arg(&self.home)
-            .args(args)
-            .env("HOME", &self.user)
-            .env("PATH", path)
-            .env("HALL_STANDIN_BIN", &self.standin)
-            .env("HALL_DEBUG_BIN", self.bin.join("hall"))
-            // scripts/live-check, which status runs, reads this instead of /var/tmp.
-            .env("HALL_LIVE_CHECK_VAR_TMP", &self.var_tmp)
-            // As inside a hall pane, and a live herdr pane before it: the
-            // scripts must not pass the HALL_* names on.
-            .env("HALL_SOCKET_PATH", "/live/hall.sock")
-            .env("HALL_SESSION", "default")
-            .env("HALL_PANE_ID", "w9:p9")
-            .env("HALL_ENV", "1")
-            .env("HALL_CONFIG_PATH", "/live/config.toml")
-            .env("HALL_CLIENT_SOCKET_PATH", "/live/hall-client.sock")
-            .env("HERDR_SOCKET_PATH", "/live/herdr.sock")
-            .env("HERDR_SESSION", "default")
-            .output()
-            .unwrap()
+        let mut c = Command::new("bash");
+        // Who runs the tests does not matter: their own identity names go.
+        for (k, _) in std::env::vars() {
+            if k.starts_with("CLAUDE") || k.starts_with("HERDR_") || k == "REEVE_HAND" {
+                c.env_remove(k);
+            }
+        }
+        c.arg(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../scripts")
+                .join(script),
+        )
+        .arg("--home")
+        .arg(&self.home)
+        .args(args)
+        .env("HOME", &self.user)
+        .env("PATH", path)
+        .env("HALL_STANDIN_BIN", &self.standin)
+        .env("HALL_DEBUG_BIN", self.bin.join("hall"))
+        // scripts/live-check, which status runs, reads this instead of /var/tmp.
+        .env("HALL_LIVE_CHECK_VAR_TMP", &self.var_tmp)
+        // As inside a hall pane, and a live herdr pane before it: the
+        // scripts must not pass the HALL_* names on.
+        .env("HALL_SOCKET_PATH", "/live/hall.sock")
+        .env("HALL_SESSION", "default")
+        .env("HALL_PANE_ID", "w9:p9")
+        .env("HALL_ENV", "1")
+        .env("HALL_CONFIG_PATH", "/live/config.toml")
+        .env("HALL_CLIENT_SOCKET_PATH", "/live/hall-client.sock")
+        .env("HERDR_SOCKET_PATH", "/live/herdr.sock")
+        .env("HERDR_SESSION", "default")
+        .env("HERDR_PANE_ID", "w9:p9")
+        // As run from a live claude, itself a hand (decision 48): none of
+        // this may reach the test hall server or a test claude.
+        .env("REEVE_HAND", "starter-hand")
+        .env("CLAUDECODE", "1")
+        .env("CLAUDE_PID", "4242")
+        .env("CLAUDE_EFFORT", "high")
+        .env("CLAUDE_CODE_SESSION_ID", "starter-session")
+        .env("CLAUDE_CODE_MESSAGING_SOCKET", "/live/cc.sock")
+        .env("CLAUDE_CODE_MESSAGING_TOKEN", "starter-token")
+        .envs(envs.iter().copied())
+        .output()
+        .unwrap()
     }
 
     fn ok(&self, script: &str, args: &[&str]) -> String {
@@ -167,6 +208,10 @@ impl Rig {
             .lines()
             .map(String::from)
             .collect()
+    }
+
+    fn read_bin(&self, name: &str) -> String {
+        std::fs::read_to_string(self.bin.join(name)).unwrap_or_default()
     }
 
     fn herdr_calls(&self) -> String {
@@ -235,12 +280,47 @@ fn up_status_drive_down() {
     for r in &runs {
         assert!(
             r.contains(&format!(
-                "REEVE_HOME=\"{h}\" XDG_CONFIG_HOME=\"{h}/xdg-config\" HALL_SOCKET_PATH=\"{socket}\" claude --model claude-haiku-4-5-20251001"
+                "REEVE_HOME=\"{h}\" XDG_CONFIG_HOME=\"{h}/xdg-config\" XDG_STATE_HOME=\"{h}/xdg-state\" HALL_SOCKET_PATH=\"{socket}\" claude --model claude-haiku-4-5-20251001"
             )),
             "{r}"
         );
     }
     assert!(rig.home.join("xdg-config").is_dir());
+    assert!(rig.home.join("xdg-state").is_dir());
+
+    // The test hall server started with none of the starter's identity names
+    // (decision 48).
+    assert_eq!(rig.read_bin("server-env.log"), "");
+    // Each claude line, run as a pane's shell runs it, gave claude none of them
+    // either, though the shell had them all: a test hand has its own errand id
+    // as REEVE_HAND, a test reeve none; each has the test home's folders and
+    // the session's socket, and the pane id hall set.
+    let claudes = rig.read_bin("claude.log");
+    let mut seen: Vec<&str> = claudes.lines().collect();
+    seen.sort();
+    let pane_of = |name: &str| {
+        let world = rig.listing();
+        world["reeves"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .chain(world["errands"].as_array().unwrap())
+            .find(|e| e["name"] == name || e["id"] == name)
+            .map(|e| e["session"]["pane_id"].as_str().unwrap().to_string())
+            .unwrap()
+    };
+    let mut want: Vec<String> = ["ansel", "ansel-fix", "ansel-review", "bertil", "bertil-probe"]
+        .iter()
+        .map(|name| {
+            let hand = if name.contains('-') { name } else { "unset" };
+            format!(
+                "{name}|hand={hand}|ident=|reeve_home={h}|xdg_config={h}/xdg-config|xdg_state={h}/xdg-state|hall_socket={socket}|herdr_pane={}",
+                pane_of(name)
+            )
+        })
+        .collect();
+    want.sort();
+    assert_eq!(seen, want);
     assert!(!rig.home.join("standin/live-baseline.json").exists());
 
     // The listing's session locations are the panes hall handed out: each test
@@ -545,6 +625,29 @@ fn up_keeps_a_running_test_session() {
         "{:?}",
         rig.calls()
     );
+    assert_eq!(rig.herdr_calls(), "");
+}
+
+#[test]
+fn up_names_the_session_folder_when_the_session_does_not_start() {
+    let rig = Rig::new("no-start");
+    std::fs::write(rig.bin.join("no-start"), "").unwrap();
+    let out = rig.run_with("test-setup", &["up"], &[("HALL_START_WAIT", "3")]);
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains(&format!(
+            "hall session hall-dev did not start within 0.3s; its server log is in its session folder, {}/cfg/sessions/hall-dev\n",
+            rig.bin.display()
+        )),
+        "{err}"
+    );
+    assert!(
+        !rig.calls().iter().any(|c| c.starts_with("pane run ")),
+        "{:?}",
+        rig.calls()
+    );
+    assert_eq!(rig.read_bin("claude.log"), "");
     assert_eq!(rig.herdr_calls(), "");
 }
 

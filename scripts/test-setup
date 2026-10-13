@@ -39,8 +39,10 @@ case $CMD in down | status) HOME_WALK=warn ;; esac
 load_inputs
 
 WORLD="$HALL_DEV_HOME/standin/world.toml"
-# How long up waits for a hall server it started to answer, in tenths of a second.
-START_WAIT=150
+# How long up waits for a hall server it started to answer, in tenths of a
+# second. HALL_START_WAIT overrides it (the tests do).
+START_WAIT=${HALL_START_WAIT:-150}
+[[ $START_WAIT =~ ^[0-9]+$ ]] || die "HALL_START_WAIT $START_WAIT: give tenths of a second, as a whole number"
 
 # session_running <json> <name>: 0 when hall's session list shows it running.
 session_running() {
@@ -53,23 +55,33 @@ session_socket() {
   printf '%s' "$1" | jq -r --arg n "$2" '.sessions[]? | select(.name == $n) | .socket_path // empty'
 }
 
+# session_dir <json> <name>: the session's folder from hall's session list, or,
+# for a session not listed yet, where hall puts it: under the default session's
+# folder, in sessions/<name>.
+session_dir() {
+  printf '%s' "$1" | jq -r --arg n "$2" 'first(.sessions[]? | select(.name == $n) | .session_dir) // first(.sessions[]? | select(.default) | .session_dir + "/sessions/" + $n) // empty'
+}
+
 # start_session <name>: starts the hall server for that session, detached, and
 # waits until hall's session list shows it running. Leaves the list in SESSIONS.
+# The server runs without the STARTER_DROP names, so no pane or claude in it
+# inherits them from whoever ran up (decision 48).
 start_session() {
-  local s=$1 i
+  local s=$1 i dir
   check_session "$s"
-  detach "${HALL_CLI[@]}" --session "$s" server
+  detach "${HALL_CLEAN_ENV[@]}" "${SERVER_DROP[@]}" "$HALL_BIN" --session "$s" server
   if [ "$DRY_RUN" = 1 ]; then
     hall_session_list SESSIONS
     return 0
   fi
-  say "+ $(q "${HALL_CLI[@]}" session list --json) (until $s is running, up to $((START_WAIT / 10))s)"
+  say "+ $(q "${HALL_CLI[@]}" session list --json) (until $s is running, up to $((START_WAIT / 10)).$((START_WAIT % 10))s)"
   for ((i = 0; i < START_WAIT; i++)); do
     SESSIONS=$("${HALL_CLI[@]}" session list --json) || die "hall session list failed"
     session_running "$SESSIONS" "$s" && return 0
     sleep 0.1
   done
-  die "hall session $s did not start within $((START_WAIT / 10))s; see $HALL_DEV_HOME and hall's server log"
+  dir=$(session_dir "$SESSIONS" "$s")
+  die "hall session $s did not start within $((START_WAIT / 10)).$((START_WAIT % 10))s; its server log is in its session folder, ${dir:-not given by the session list}"
 }
 
 seed_world() {
@@ -171,7 +183,7 @@ up_line() {
       WS_IDS+=("$(printf '%s' "$created" | jq -r '.result.root_pane.workspace_id // empty')")
     fi
   fi
-  hd "$R_SESSION" pane run "$pane" "$(claude_line "$R_NAME")"
+  hd "$R_SESSION" pane run "$pane" "$(claude_line "$R_KIND" "$R_NAME")"
   standin place "$R_NAME" "$R_SESSION" "$pane"
 }
 
@@ -214,6 +226,7 @@ cmd_up() {
 
   make_dir "$HALL_DEV_HOME/standin"
   make_dir "$(xdg_dir)"
+  make_dir "$(xdg_state_dir)"
   if [ "$DRY_RUN" = 1 ] || [ ! -e "$WORLD" ]; then
     seed_world
   else
