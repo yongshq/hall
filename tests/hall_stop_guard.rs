@@ -392,6 +392,12 @@ fn status_says_hall_cannot_confirm_a_silent_listener() {
         );
         assert!(!stderr.contains("os error"), "hall {args:?}: {stderr}");
         assert!(!stderr.contains("server stop"), "hall {args:?}: {stderr}");
+        // Hall's two sentences, not Rust's Debug of the io::Error.
+        assert!(!stderr.contains("Custom {"), "hall {args:?}: {stderr}");
+        assert!(
+            stderr.contains("hall server.\nHall will not attach"),
+            "hall {args:?}: {stderr}"
+        );
         assert!(
             !stdout.contains("restart_needed"),
             "hall {args:?}: {stdout}"

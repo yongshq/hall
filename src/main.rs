@@ -491,6 +491,19 @@ where
 }
 
 fn main() -> io::Result<()> {
+    // hall: an error of kind Other carries hall's own message, so it is printed
+    // as that message, not as Rust's Debug of the io::Error (`Custom { .. }`).
+    // Exit status 1 either way, as before.
+    match run() {
+        Err(err) if err.kind() == io::ErrorKind::Other => {
+            eprintln!("Error: {err}");
+            std::process::exit(1);
+        }
+        result => result,
+    }
+}
+
+fn run() -> io::Result<()> {
     let raw_args: Vec<String> = match args_as_utf8(std::env::args_os()) {
         Ok(args) => args,
         Err(err) => {
