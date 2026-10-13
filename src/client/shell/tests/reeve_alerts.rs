@@ -1,4 +1,4 @@
-//! hall: alerts on the reeve tree (plan step 4, decisions 62 and 63).
+//! hall: alerts on the reeve tree (plan step 4, decisions 62 to 64).
 
 use super::reeve_tree::{
     compose, errand_mut, hall_dev_snapshot, listing, picked_method, reeve_state, tree_rows,
@@ -208,6 +208,8 @@ fn a_focused_reeve_ending_its_turn_alerts_with_the_setting_on() {
     // Ansel's tab is the focused active one, so herdr marks the pane seen: idle, not done.
     let mut state = alert_state(listing(), &[("p_a0", AgentStatus::Idle)]);
     assert!(state.config.reeve_alert_focused_reply, "on by default");
+    // The hall window has lost focus: the liege is not looking at ansel's pane.
+    state.outer_focused = Some(false);
     let effects = notify(
         &mut state,
         SemanticNotificationKind::Finished,
@@ -238,6 +240,87 @@ fn a_focused_reeve_ending_its_turn_alerts_with_the_setting_on() {
         "ws_a_t0",
     );
     assert!(sounds(&effects).is_empty());
+}
+
+#[test]
+fn a_reply_on_the_pane_the_liege_looks_at_rings_and_leaves_no_highlight() {
+    // Decision 64: ansel's pane is the focused one, in a window that has focus or cannot say.
+    for outer_focused in [Some(true), None] {
+        let mut state = alert_state(listing(), &[("p_a0", AgentStatus::Idle)]);
+        state.outer_focused = outer_focused;
+        let effects = notify(
+            &mut state,
+            SemanticNotificationKind::Finished,
+            "p_a0",
+            "ws_a_t0",
+        );
+        assert_eq!(
+            sounds(&effects),
+            [crate::sound::Sound::Done],
+            "{outer_focused:?}"
+        );
+        assert!(alerting(&mut state).is_empty(), "{outer_focused:?}");
+    }
+    // A reply on another reeve's pane, out of view, keeps its highlight.
+    let mut state = alert_state(listing(), &[("p_b0", AgentStatus::Done)]);
+    state.outer_focused = Some(true);
+    notify(
+        &mut state,
+        SemanticNotificationKind::Finished,
+        "p_b0",
+        "ws_b_t0",
+    );
+    assert_eq!(alerting(&mut state), ["bertil"]);
+    // A dialog on the pane in view keeps its highlight: only a reply clears at once.
+    let mut state = alert_state(listing(), &[("p_a0", AgentStatus::Blocked)]);
+    state.outer_focused = Some(true);
+    notify(
+        &mut state,
+        SemanticNotificationKind::NeedsAttention,
+        "p_a0",
+        "ws_a_t0",
+    );
+    assert_eq!(alerting(&mut state), ["ansel"]);
+}
+
+#[test]
+fn a_dialog_rung_before_the_snapshot_reads_it_blocked_keeps_its_highlight() {
+    // `[ui.toast] delay_seconds = 0` (alert_state's): herdr's request reaches the client
+    // before its snapshot reads the hand's pane blocked.
+    let mut state = alert_state(listing(), &[("p_b1", AgentStatus::Working)]);
+    assert_eq!(state.config.toast_delay_seconds, 0);
+    let now = std::time::Instant::now();
+    let effects = notify(
+        &mut state,
+        SemanticNotificationKind::NeedsAttention,
+        "p_b1",
+        "ws_b_t1",
+    );
+    assert!(effects.is_empty(), "waits for the snapshot");
+    assert!(alerting(&mut state).is_empty());
+    set_statuses(&mut state, &[("p_b1", AgentStatus::Blocked)]);
+    let (effects, repaint) = state.tick_notifications(now + std::time::Duration::from_millis(100));
+    assert!(repaint);
+    assert_eq!(sounds(&effects), [crate::sound::Sound::Request]);
+    assert_eq!(alerting(&mut state), ["bertil", "bertil-probe"]);
+    // Composed again, still reading blocked: the highlight stands.
+    assert_eq!(alerting(&mut state), ["bertil", "bertil-probe"]);
+    set_statuses(&mut state, &[("p_b1", AgentStatus::Working)]);
+    assert!(alerting(&mut state).is_empty(), "answered");
+
+    // A request whose pane never reads blocked within herdr's grace rings nothing.
+    let mut state = alert_state(listing(), &[("p_b0", AgentStatus::Working)]);
+    let now = std::time::Instant::now();
+    notify(
+        &mut state,
+        SemanticNotificationKind::NeedsAttention,
+        "p_b0",
+        "ws_b_t0",
+    );
+    let (effects, _) = state.tick_notifications(now + std::time::Duration::from_secs(2));
+    assert!(effects.is_empty());
+    assert!(alerting(&mut state).is_empty());
+    assert!(state.pending_notifications.is_empty());
 }
 
 #[test]
@@ -399,6 +482,65 @@ fn waiting_on_a_pane_already_read_at_a_dialog_is_not_rung_twice() {
     // On a pane hall does not read blocked, waiting rings.
     errand_mut(&mut listing, "ansel-fix").waiting = true;
     assert_eq!(state.set_reeve_listing(Ok(listing)).len(), 1);
+}
+
+#[test]
+fn waiting_rings_on_a_dialog_this_client_did_not_ring() {
+    // A client attached after the hand's dialog opened: herdr's request rang before it was
+    // there, so the listing's waiting is the first this client hears of it.
+    let mut listing = listing();
+    let mut state = alert_state(listing.clone(), &[("p_b1", AgentStatus::Blocked)]);
+    errand_mut(&mut listing, "bertil-probe").waiting = true;
+    assert_eq!(
+        sounds(&state.set_reeve_listing(Ok(listing))),
+        [crate::sound::Sound::Request]
+    );
+    assert_eq!(alerting(&mut state), ["bertil", "bertil-probe"]);
+}
+
+#[test]
+fn waiting_on_a_rung_dialog_the_liege_has_shown_is_not_rung_again() {
+    let mut listing = listing();
+    let mut state = alert_state(listing.clone(), &[("p_b1", AgentStatus::Blocked)]);
+    notify(
+        &mut state,
+        SemanticNotificationKind::NeedsAttention,
+        "p_b1",
+        "ws_b_t1",
+    );
+    state.show_reeve_alerts("p_b1");
+    assert!(alerting(&mut state).is_empty());
+    errand_mut(&mut listing, "bertil-probe").waiting = true;
+    assert!(state.set_reeve_listing(Ok(listing.clone())).is_empty());
+    // The dialog answered, a later one this client did not ring: waiting rises again.
+    set_statuses(&mut state, &[("p_b1", AgentStatus::Working)]);
+    compose(&mut state);
+    errand_mut(&mut listing, "bertil-probe").waiting = false;
+    state.set_reeve_listing(Ok(listing.clone()));
+    set_statuses(&mut state, &[("p_b1", AgentStatus::Blocked)]);
+    compose(&mut state);
+    errand_mut(&mut listing, "bertil-probe").waiting = true;
+    assert_eq!(state.set_reeve_listing(Ok(listing)).len(), 1);
+}
+
+#[test]
+fn a_hand_coming_back_with_the_same_question_does_not_ring_it_again() {
+    let mut listing = listing();
+    let mut state = alert_state(listing.clone(), &[]);
+    errand_mut(&mut listing, "bertil-probe").question = Some("Which branch?".into());
+    assert_eq!(state.set_reeve_listing(Ok(listing.clone())).len(), 1);
+    let mut gone = listing.clone();
+    gone.errands.retain(|errand| errand.id != "bertil-probe");
+    assert!(state.set_reeve_listing(Ok(gone.clone())).is_empty());
+    assert!(
+        state.set_reeve_listing(Ok(listing.clone())).is_empty(),
+        "the same unanswered question"
+    );
+    // Gone and back with another question: that one rings.
+    assert!(state.set_reeve_listing(Ok(gone)).is_empty());
+    errand_mut(&mut listing, "bertil-probe").question = Some("Which base?".into());
+    assert_eq!(state.set_reeve_listing(Ok(listing)).len(), 1);
+    assert_eq!(alerting(&mut state), ["bertil", "bertil-probe"]);
 }
 
 #[test]

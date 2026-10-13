@@ -115,7 +115,7 @@ The last row matters: a dialog claude paints over the whole screen can read as `
 
 ## Alerts
 
-Attached with the client config, hall alerts on the reeve tree (plan step 4, decisions 62 and 63). Each alert plays a sound and marks the row with a bar `▌` in its first column and its label in the alert colour:
+Attached with the client config, hall alerts on the reeve tree (plan step 4, decisions 62 to 64). Each alert plays a sound and marks the row with a bar `▌` in its first column and its label in the alert colour:
 
 | trigger | how to raise it | sound | marked rows |
 |---|---|---|---|
@@ -125,9 +125,10 @@ Attached with the client config, hall alerts on the reeve tree (plan step 4, dec
 | a test hand blocked, needs-decision, idle, wedged or waiting | `hall-standin set ansel-fix state=blocked` (or `idle=true`, ...) | hall's request | the hand and its reeve |
 | a test hand with a new question | `hall-standin set ansel-fix question="Which base?"` | hall's request | the hand and its reeve |
 
-- Hall's listing alerts ring on a rise only: the first read after attaching seeds them, a failed or stale read rings nothing, a hand leaving the listing rings nothing, a question rings when its text changes to another non-empty one, and `waiting` rises silently while hall already reads that hand's pane at a dialog. One read rings once however many hands rose.
+- Hall's listing alerts ring on a rise only: the first read after attaching seeds them, a failed or stale read rings nothing, a hand leaving the listing rings nothing, a question rings when its text changes to another non-empty one (a hand that leaves and comes back with the same question rings nothing), and `waiting` rises silently while that hand's pane stands at a dialog this client rang for. A client attached after the dialog opened did not ring for it, so there `waiting` rings. One read rings once however many hands rose.
 - A test hand ending its turn rings nothing: herdr's done for a listed hand's pane is dropped.
-- A test reeve ending its turn in the focused tab of a focused hall window alerts too, while `[reeve] alert_focused_reply` is on (the default); with it off, herdr's suppression stands.
+- A test reeve ending its turn in the focused tab of a focused hall window alerts too, while `[reeve] alert_focused_reply` is on (the default); with it off, herdr's suppression stands. On the pane the liege is looking at (focused, in a window with focus) the reply plays its sound and leaves no mark; the log line says `in_view=true`.
+- With `[ui.toast] delay_seconds = 0` a dialog's sound and mark wait for the client to read the pane blocked, a few tens of milliseconds, so the mark is not lost.
 - A mark clears when the reeve's or the hand's pane is shown (enter, a click on its row, or the focus moving onto it), or when its trigger clears: the reeve working again, the dialog gone, the hand no longer waiting on the liege.
 - `[ui.sound] enabled = false` in the client config mutes every alert's sound and a reload (ctrl+b shift+r) applies it; the marks still show. `request_path`, `done_path` and `path` change the sounds.
 - A sound cannot be heard in a test run: start the client with `HERDR_LOG=hall=info` and each sound asked for is logged in `~/.config/hall-dev/sessions/hall-dev/herdr-client.log` as `event="sound.play"` with `played=true` or `false` (muted), beside an `event="reeve.alert"` line for each alert raised.

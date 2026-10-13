@@ -184,11 +184,17 @@ impl ClientShellState {
             }
             let reeve_reply_lifted = alert_role == Some(super::reeve_alerts::AlertRole::Reeve)
                 && self.config.reeve_alert_focused_reply;
-            if pending.validate_state {
+            // hall: a listed pane's dialog is taken once this client reads the pane blocked,
+            // whatever the toast delay, so its highlight is not pruned before the snapshot
+            // catches up with herdr's request (decision 64).
+            let listed_dialog = alert_role.is_some()
+                && pending.event.kind == SemanticNotificationKind::NeedsAttention;
+            if pending.validate_state || listed_dialog {
                 match self.notification_validation(
                     &pending.endpoint_id,
                     &pending.event,
                     reeve_reply_lifted,
+                    listed_dialog,
                 ) {
                     NotificationValidation::Current => {}
                     NotificationValidation::AwaitingSnapshot if now < pending.expires_at => {
@@ -295,12 +301,14 @@ impl ClientShellState {
     }
 
     /// `reeve_reply_lifted`: hall takes a reeve's Finished as current while its pane reads
-    /// idle too, as the focused active tab reads it (decision 62).
+    /// idle too, as the focused active tab reads it (decision 62). `listed_dialog`: hall waits
+    /// for a listed pane's NeedsAttention to read blocked rather than dropping it (decision 64).
     fn notification_validation(
         &self,
         endpoint_id: &ClientEndpointId,
         event: &SemanticNotification,
         reeve_reply_lifted: bool,
+        listed_dialog: bool,
     ) -> NotificationValidation {
         let Some(pane_id) = event.pane_id.as_deref() else {
             // Finished notifications carry no independently trustworthy completion state. Without
@@ -345,6 +353,9 @@ impl ClientShellState {
             SemanticNotificationKind::Finished
                 if agent.agent_status == crate::api::schema::AgentStatus::Working =>
             {
+                NotificationValidation::AwaitingSnapshot
+            }
+            SemanticNotificationKind::NeedsAttention if listed_dialog => {
                 NotificationValidation::AwaitingSnapshot
             }
             SemanticNotificationKind::UpdateInstalled | SemanticNotificationKind::Custom => {

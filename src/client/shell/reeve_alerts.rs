@@ -1,4 +1,4 @@
-//! hall: alerts on the reeve tree (plan step 4, decisions 19, 22, 35, 62 and 63).
+//! hall: alerts on the reeve tree (plan step 4, decisions 19, 22, 35 and 62 to 64).
 //!
 //! Herdr's own notifications ring for a reeve's pane at a dialog (request) or ending its turn
 //! (done), and for a hand's pane at a dialog (request); herdr's done for a hand's pane is
@@ -53,14 +53,14 @@ impl HandFacts {
         }
     }
 
-    /// What rose from `before` to `self`, by name. A rise of `waiting` is left out when hall
-    /// already reads the hand's pane at a dialog: herdr's request rang for it (decision 62).
-    fn rises(&self, before: &Self, pane_blocked: bool) -> Vec<&'static str> {
+    /// What rose from `before` to `self`, by name. A rise of `waiting` is left out when this
+    /// client rang herdr's request for the dialog the hand's pane stands at (decisions 62, 64).
+    fn rises(&self, before: &Self, dialog_rung: bool) -> Vec<&'static str> {
         let mut rises = Vec::new();
         for (now, was, name) in [
             (self.blocked, before.blocked, "blocked"),
             (self.needs_decision, before.needs_decision, "needs-decision"),
-            (self.waiting && !pane_blocked, before.waiting, "waiting"),
+            (self.waiting && !dialog_rung, before.waiting, "waiting"),
             (self.idle, before.idle, "idle"),
             (self.wedged, before.wedged, "wedged"),
         ] {
@@ -73,14 +73,27 @@ impl HandFacts {
         }
         rises
     }
+
+    /// What is kept of a hand that a read no longer lists: its question, so a hand coming
+    /// back with the same question does not ring it again (decision 64).
+    fn kept(&self) -> Option<Self> {
+        self.question.as_ref().map(|question| Self {
+            question: Some(question.clone()),
+            ..Self::default()
+        })
+    }
 }
 
 #[derive(Debug, Default)]
 pub(in crate::client) struct ReeveAlerts {
-    /// The hands as the last good read listed them; None until the first good read seeds it.
+    /// The hands as the last good read listed them, and the question of each hand that has
+    /// left it; None until the first good read seeds it.
     seen: Option<HashMap<String, HandFacts>>,
     /// Reeve and hand panes alerting from herdr's notifications, by pane id.
     panes: HashMap<String, PaneAlert>,
+    /// Panes whose dialog this client rang for, while they read blocked, apart from whether
+    /// the liege has since shown them.
+    dialogs: HashSet<String>,
     /// Hands alerting from the listing, by errand id.
     hands: HashSet<String>,
     /// The focused pane as last composed, to see the liege move to an alerting pane; None
@@ -127,17 +140,38 @@ impl ClientShellState {
             .map(|errand| AlertRole::Hand(errand.id.clone()))
     }
 
-    /// Raises the highlight for a reeve's or a hand's pane from a notification that rings.
+    /// Raises the highlight for a reeve's or a hand's pane from a notification that rings. A
+    /// reply on the pane the liege is looking at rings with no highlight left (decision 64).
     pub(super) fn raise_pane_alert(&mut self, pane_id: &str, role: &AlertRole, alert: PaneAlert) {
+        let in_view = self.pane_in_view(pane_id);
         tracing::info!(
             event = "reeve.alert",
             source = "herdr",
             pane_id,
             role = ?role,
             alert = ?alert,
+            in_view,
             "hall alert raised"
         );
+        if alert == PaneAlert::Dialog {
+            self.reeve_alerts.dialogs.insert(pane_id.to_owned());
+        }
+        if alert == PaneAlert::Reply && in_view {
+            return;
+        }
         self.reeve_alerts.panes.insert(pane_id.to_owned(), alert);
+    }
+
+    /// Whether the liege is looking at the pane: the focused pane of this client's active
+    /// endpoint, in a window that has focus or cannot say (herdr's rule for its own
+    /// focused-tab suppression).
+    fn pane_in_view(&self, pane_id: &str) -> bool {
+        self.outer_focused != Some(false)
+            && self
+                .snapshot
+                .as_deref()
+                .and_then(|snapshot| snapshot.focused_pane_id.as_deref())
+                == Some(pane_id)
     }
 
     /// Takes a good read for the alerts: the first seeds them and raises nothing; after that,
@@ -148,14 +182,15 @@ impl ClientShellState {
         let Some((listing, session)) = self.alert_listing() else {
             return Vec::new();
         };
-        let pane_blocked = |pane_id: Option<&String>| {
+        let dialog_rung = |pane_id: Option<&String>| {
             pane_id.is_some_and(|pane_id| {
-                self.snapshot.as_deref().is_some_and(|snapshot| {
-                    snapshot.agents.iter().any(|agent| {
-                        &agent.pane_id == pane_id
-                            && agent.agent_status == crate::api::schema::AgentStatus::Blocked
+                self.reeve_alerts.dialogs.contains(pane_id)
+                    && self.snapshot.as_deref().is_some_and(|snapshot| {
+                        snapshot.agents.iter().any(|agent| {
+                            &agent.pane_id == pane_id
+                                && agent.agent_status == crate::api::schema::AgentStatus::Blocked
+                        })
                     })
-                })
             })
         };
         let errands = listing
@@ -163,7 +198,7 @@ impl ClientShellState {
             .iter()
             .filter(|errand| errand.session.herdr_session == session)
             .collect::<Vec<_>>();
-        let facts = errands
+        let mut facts = errands
             .iter()
             .map(|errand| (errand.id.clone(), HandFacts::of(errand)))
             .collect::<HashMap<_, _>>();
@@ -172,9 +207,16 @@ impl ClientShellState {
             for errand in &errands {
                 let before = seen.get(&errand.id).cloned().unwrap_or_default();
                 let rises =
-                    facts[&errand.id].rises(&before, pane_blocked(errand.session.pane_id.as_ref()));
+                    facts[&errand.id].rises(&before, dialog_rung(errand.session.pane_id.as_ref()));
                 if !rises.is_empty() {
                     risen.push((errand.id.clone(), rises));
+                }
+            }
+            for (id, before) in seen {
+                if !facts.contains_key(id) {
+                    if let Some(kept) = before.kept() {
+                        facts.insert(id.clone(), kept);
+                    }
                 }
             }
         }
@@ -227,8 +269,8 @@ impl ClientShellState {
             .filter(|pane_id| self.pane_alert_role(pane_id).is_some())
             .cloned()
             .collect::<HashSet<_>>();
+        use crate::api::schema::AgentStatus;
         self.reeve_alerts.panes.retain(|pane_id, alert| {
-            use crate::api::schema::AgentStatus;
             listed.contains(pane_id)
                 && match alert {
                     PaneAlert::Reply => {
@@ -237,6 +279,9 @@ impl ClientShellState {
                     PaneAlert::Dialog => status(pane_id) == Some(AgentStatus::Blocked),
                 }
         });
+        self.reeve_alerts
+            .dialogs
+            .retain(|pane_id| status(pane_id) == Some(AgentStatus::Blocked));
         let moved = self
             .reeve_alerts
             .focused_pane

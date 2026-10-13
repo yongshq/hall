@@ -981,6 +981,39 @@ fn claude_numbered_consent_without_a_known_footer_is_blocked() {
 }
 
 #[test]
+fn claude_rewind_menu_is_not_a_consent() {
+    // hall (decision 64): Claude's own rewind menu, verbatim from a live capture (claude
+    // 2.1.287, esc esc and a message picked), hides the composer behind numbered choices too.
+    // None of them answers a consent, so it stays idle, as it read before the overlay rule.
+    let screen = concat!(
+        "\u{2594}\u{2594}\u{2594}\u{2594}\u{2594}\u{2594}\u{2594}\u{2594}\n",
+        "   Rewind\n",
+        "\n",
+        "   Confirm you want to restore to the point before you sent this message:\n",
+        "\n",
+        "   \u{2502} What is 2 + 2? Reply with the number only, without using any tools.\n",
+        "   \u{2502} (19s ago)\n",
+        "\n",
+        "   The conversation will be forked.\n",
+        "   The code will be unchanged.\n",
+        "\n",
+        "   \u{276f} 1. Restore conversation\n",
+        "     2. Summarize from here\n",
+        "     3. Summarize up to here\n",
+        "     4. Never mind\n",
+    );
+    let result = with_manifest_dirs("claude-rewind-menu", || {
+        osc_explain(Agent::Claude, screen, "\u{2733} Claude Code", "")
+    });
+    assert_eq!(result.state, AgentState::Idle, "{result:#?}");
+    assert_ne!(
+        result.matched_rule.as_ref().map(|r| r.id.as_str()),
+        Some("numbered_choice_overlay"),
+        "{result:#?}"
+    );
+}
+
+#[test]
 fn claude_numbered_list_above_a_visible_composer_stays_idle() {
     // hall (decision 62): a finished reply that ends in a numbered list, or that quotes the
     // consent, sits above the composer, which outranks the overlay rule.

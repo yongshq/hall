@@ -126,17 +126,17 @@ Hall is a modified version of herdr v0.9.0 (commit b99002ac99b09e00b4ca692436cb1
 | `README.md` | Status line for step 3. |
 | `docs/next/website/src/data/config-reference.json` | The `[reeve]` keys, so `scripts/config_reference_check.py` stays in sync. |
 
-## Step 4: alerts (decisions 61 to 63)
+## Step 4: alerts (decisions 61 to 64)
 
 | File | Change |
 |---|---|
-| `src/detect/manifests/claude.toml` | Rule `numbered_choice_overlay` (blocked, priority 845): numbered choices with the cursor on one and no composer, a consent whose footer no other rule knows (Claude in Chrome's `2. Deny (esc)`); manifest version `2026.10.14.1`. |
-| `src/detect/manifest/tests.rs` | The Chrome consent reads blocked by that rule; a numbered list or the quoted consent above a visible composer stays idle. |
+| `src/detect/manifests/claude.toml` | Rule `numbered_choice_overlay` (blocked, priority 845): numbered choices with the cursor on one and no composer, a consent whose footer no other rule knows (Claude in Chrome's `2. Deny (esc)`), with one choice that answers a consent (yes, no, allow, deny, ...) so Claude's own numbered menus stay idle; manifest version `2026.10.14.2`. |
+| `src/detect/manifest/tests.rs` | The Chrome consent reads blocked by that rule; a numbered list or the quoted consent above a visible composer stays idle; Claude's rewind menu stays idle. |
 | `src/config/model.rs` | `[reeve] alert_focused_reply`, default true. |
 | `src/client/shell.rs` | The `reeve_alerts` module. |
 | `src/client/shell/state.rs` | `ClientShellConfig::reeve_alert_focused_reply`; the shell keeps the alerts standing on the reeve tree. |
 | `src/client/shell/config.rs` | `apply_reeve_config` takes `alert_focused_reply`, at startup and on reload. |
-| `src/client/shell/notification_policy.rs` | For a pane the listing names: herdr's done for a hand's pane is dropped, toast and all; with `alert_focused_reply` a reeve's done is current while its pane reads idle and its sound is not skipped for the focused active tab; every alert that passes raises the reeve tree's highlight, apart from the sound. |
+| `src/client/shell/notification_policy.rs` | For a pane the listing names: herdr's done for a hand's pane is dropped, toast and all; with `alert_focused_reply` a reeve's done is current while its pane reads idle and its sound is not skipped for the focused active tab; every alert that passes raises the reeve tree's highlight, apart from the sound; a dialog on such a pane waits for the snapshot to read it blocked whatever the toast delay. |
 | `src/client/shell/composition.rs` | Alerts whose trigger has cleared, or whose pane the focus moved onto, are cleared before each frame. |
 | `src/client/shell/mouse.rs` | A click on an agent row (the reeve tree's reeve and hand rows among them) clears that pane's alert. |
 | `src/client/mod.rs` | A read of the listing gives the sound for hands newly stuck or asking, played through the shell's notification effects. |

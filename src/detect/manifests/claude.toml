@@ -1,5 +1,5 @@
 id = "claude"
-version = "2026.10.14.1"
+version = "2026.10.14.2"
 min_engine_version = 2
 updated_at = "2026-10-14T00:00:00Z"
 aliases = ["claude-code"]
@@ -182,13 +182,19 @@ all = [
 # of the footers above, such as Claude in Chrome's "❯ 1. Allow / 2. Deny (esc)",
 # read idle with no rule matched (decision 62). Below the composer and working
 # rules, so a visible composer still wins and only an overlay reads blocked.
+# One choice must answer the consent (yes, no, allow, deny, ...), so Claude's own
+# numbered menus, such as rewind's "❯ 1. Restore conversation / ... / Never
+# mind", stay idle (decision 64).
 [[rules]]
 id = "numbered_choice_overlay"
 state = "blocked"
 priority = 845
 region = "bottom_non_empty_lines(12)"
 visible_blocker = true
-line_regex = ['^\s*❯\s*\d+\.\s+\S']
+line_regex = [
+  '^\s*❯\s*\d+\.\s+\S',
+  '(?i)^\s*❯?\s*\d+\.\s+(yes|no|allow|deny|accept|decline|approve|reject|grant|trust|always)\b',
+]
 not = [
   { regex = ['(?m)^\s*❯\s*$'] },
 ]
