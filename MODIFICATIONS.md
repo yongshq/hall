@@ -103,7 +103,7 @@ Hall is a modified version of herdr v0.9.0 (commit b99002ac99b09e00b4ca692436cb1
 | `src/cli.rs` | Every CLI request's protocol ping (`ensure_server_protocol_compatible`) is bounded as `hall status`'s is, and a listener that does not answer it gets the same message, instead of hanging; the request itself stays unbounded (`agent wait`). `tests/hall_stop_guard.rs` tests `pane list` and `workspace list`. |
 | `src/main.rs` | `main` runs the old body as `run` and prints an error of kind `Other` as its message (`Error: <message>`), not as Rust's `Debug` of the `io::Error`; exit status 1 as before. |
 
-## Step 3: reeve tree (decisions 49 to 59)
+## Step 3: reeve tree (decisions 49 to 60)
 
 | File | Change |
 |---|---|

@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
+#[cfg(not(unix))]
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -124,8 +125,8 @@ const POLL: Duration = Duration::from_millis(10);
 /// How long stopping the reader waits for it to kill and reap a running command.
 const STOP_WAIT: Duration = Duration::from_secs(2);
 /// How long the output may stay open once the command has exited: then whatever it left behind
-/// holding the output is killed with its group, and what the command printed is read
-/// (decision 58).
+/// in its group is killed, the output is closed and what the command printed is read
+/// (decisions 58 and 60).
 const EXIT_GRACE: Duration = Duration::from_millis(100);
 
 /// Runs the listing command once and parses what it prints, killing it after `timeout`.
@@ -139,8 +140,9 @@ pub(super) fn read_listing(command: &[String], timeout: Duration) -> ReeveListin
 /// When the command outlasts `timeout`, or `stop` says to stop (None then), the command and
 /// everything it started in its group are killed and the command is reaped: nothing is left.
 /// When the command exits but something it started holds its output past `EXIT_GRACE`, that
-/// group is killed and what the command printed is read. While it runs, a record of it sits in
-/// `runs`, for the next client should this one be killed (decision 58).
+/// group is killed, the output closed and what the command printed is read (on Unix; on
+/// Windows the run times out). While it runs, a record of it sits in `runs`, for the next
+/// client should this one be killed (decision 58).
 fn read_listing_until(
     command: &[String],
     timeout: Duration,
@@ -174,13 +176,22 @@ fn read_listing_until(
     let deadline = Instant::now() + timeout;
     let mut status = None;
     let mut exited = None;
-    let mut group_killed = false;
     loop {
         if status.is_none() {
             status = child.try_wait().ok().flatten();
             if status.is_some() {
                 exited = Some(Instant::now());
             }
+        }
+        #[cfg(unix)]
+        if exited.is_some_and(|exited| exited.elapsed() >= EXIT_GRACE) {
+            // The command is gone and something it started still holds its output. A child it
+            // left in its group is killed with the group (the group id stays reserved while
+            // that member exists); a daemon that left the group (setsid) is out of reach, so
+            // the output is closed on it. Either way what the command printed is read.
+            kill_group(&child);
+            stdout.close();
+            stderr.close();
         }
         stdout.collect();
         stderr.collect();
@@ -196,13 +207,7 @@ fn read_listing_until(
         {
             return Some(listing_from_output(status, stdout, stderr));
         }
-        if !group_killed && exited.is_some_and(|exited| exited.elapsed() >= EXIT_GRACE) {
-            // The command is gone; what holds its output is in its group (a child it left
-            // behind), and the group id stays reserved while that member exists.
-            kill_group(&child);
-            group_killed = true;
-        }
-        let stopped = !matches!(stop.recv_timeout(POLL), Err(RecvTimeoutError::Timeout));
+        let stopped = wait(&stdout, &stderr, stop);
         if stopped || Instant::now() >= deadline {
             kill_and_reap(&mut child);
             return (!stopped).then(|| Err(format!("timed out after {}", seconds(timeout))));
@@ -227,12 +232,98 @@ fn listing_from_output(
     serde_json::from_slice(stdout).map_err(|error| format!("unreadable JSON: {error}"))
 }
 
-/// One of the command's output pipes, read to its end (or past the size cap) on a thread.
+/// One of the command's output pipes, read without blocking as it fills, on the reader's own
+/// thread: no thread of its own waits on a pipe that something past the command's reach (a
+/// daemon) holds open. Read to its end, past the size cap or until closed.
+#[cfg(unix)]
+struct Pipe {
+    pipe: Option<std::fs::File>,
+    output: Vec<u8>,
+}
+
+#[cfg(unix)]
+impl Pipe {
+    fn read(pipe: Option<impl Into<std::os::fd::OwnedFd>>) -> Self {
+        use std::os::fd::AsRawFd;
+        let pipe = pipe.map(Into::into).map(std::fs::File::from);
+        // A pipe that cannot be read without blocking is not read at all: a blocking read here
+        // would hold the reader past its deadline.
+        Self {
+            pipe: pipe.filter(|pipe| crate::pty::fd::set_nonblocking(pipe.as_raw_fd()).is_ok()),
+            output: Vec::new(),
+        }
+    }
+
+    fn collect(&mut self) {
+        let mut buffer = [0; 64 << 10];
+        while let Some(pipe) = self.pipe.as_mut() {
+            match pipe.read(&mut buffer) {
+                Ok(0) => self.pipe = None,
+                Ok(read) => {
+                    self.output.extend_from_slice(&buffer[..read]);
+                    if self.output.len() > MAX_LISTING_BYTES {
+                        self.pipe = None;
+                    }
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return,
+                Err(_) => self.pipe = None,
+            }
+        }
+    }
+
+    /// Reads what the pipe holds now and closes it, whoever else still holds it open.
+    fn close(&mut self) {
+        self.collect();
+        self.pipe = None;
+    }
+
+    fn output(&self) -> Option<&[u8]> {
+        self.pipe.is_none().then_some(self.output.as_slice())
+    }
+
+    fn poll_fd(&self) -> libc::pollfd {
+        use std::os::fd::AsRawFd;
+        libc::pollfd {
+            // A negative descriptor is skipped by poll.
+            fd: self.pipe.as_ref().map_or(-1, AsRawFd::as_raw_fd),
+            events: libc::POLLIN,
+            revents: 0,
+        }
+    }
+}
+
+/// Waits up to `POLL` for output on either pipe or for a stop. True when told to stop.
+#[cfg(unix)]
+fn wait(stdout: &Pipe, stderr: &Pipe, stop: &mpsc::Receiver<()>) -> bool {
+    let mut pipes = [stdout.poll_fd(), stderr.poll_fd()];
+    // SAFETY: `pipes` is an array of two `pollfd`s, as its length says.
+    unsafe {
+        libc::poll(
+            pipes.as_mut_ptr(),
+            pipes.len() as libc::nfds_t,
+            POLL.as_millis() as libc::c_int,
+        );
+    }
+    !matches!(stop.try_recv(), Err(mpsc::TryRecvError::Empty))
+}
+
+/// Waits up to `POLL` for a stop. True when told to stop.
+#[cfg(not(unix))]
+fn wait(_stdout: &Pipe, _stderr: &Pipe, stop: &mpsc::Receiver<()>) -> bool {
+    !matches!(stop.recv_timeout(POLL), Err(RecvTimeoutError::Timeout))
+}
+
+/// One of the command's output pipes, read to its end (or past the size cap) on a thread. On
+/// Windows, where nothing kills what the command left behind, a child holding the output keeps
+/// this thread until that child exits (decision 60).
+#[cfg(not(unix))]
 enum Pipe {
     Reading(JoinHandle<Vec<u8>>),
     Read(Vec<u8>),
 }
 
+#[cfg(not(unix))]
 impl Pipe {
     fn read(pipe: Option<impl Read + Send + 'static>) -> Self {
         let Some(pipe) = pipe else {
@@ -265,7 +356,7 @@ impl Pipe {
 }
 
 /// Kills the command's whole process group, so a child it left behind holding the output pipe
-/// goes too, then reaps the command. The pipe readers end once the group is gone.
+/// goes too, then reaps the command. On Windows the command alone is killed.
 fn kill_and_reap(child: &mut Child) {
     kill_group(child);
     let _ = child.kill();
@@ -281,6 +372,7 @@ fn kill_group(child: &Child) {
             libc::kill(-group, libc::SIGKILL);
         }
     }
+    // Windows: nothing is killed here (decision 60).
     #[cfg(not(unix))]
     let _ = child;
 }
@@ -399,19 +491,29 @@ impl Drop for RunRecord {
 
 /// Kills every run in `runs` that a client no longer running left behind, when its command
 /// still runs: the very process the run started (same pid, same start time), still leading its
-/// group. Its record goes either way. A run of a client still running is that client's own.
+/// group. Its record goes either way. A run of a client still running is that client's own. A
+/// record a client was killed while writing (`.partial`) is read as a record when it is whole,
+/// and removed when it is not and no process has its client's pid.
 fn kill_leftover_runs(runs: &Path) {
     let Ok(entries) = std::fs::read_dir(runs) else {
         return;
     };
     for path in entries.flatten().map(|entry| entry.path()) {
-        if path.extension().is_none_or(|extension| extension != "json") {
-            continue;
-        }
+        let partial = match path.extension().and_then(|extension| extension.to_str()) {
+            Some("json") => false,
+            Some("partial") => true,
+            _ => continue,
+        };
         let Some(run) = std::fs::read(&path)
             .ok()
             .and_then(|bytes| serde_json::from_slice::<ListingRun>(&bytes).ok())
         else {
+            let client = path
+                .file_stem()
+                .and_then(|stem| stem.to_str()?.split_once('-')?.0.parse().ok());
+            if partial && client.is_some_and(|client| process_start(client).is_none()) {
+                let _ = std::fs::remove_file(&path);
+            }
             continue;
         };
         if run.client.alive() {
@@ -713,6 +815,38 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn a_daemon_holding_the_output_outside_the_group_does_not_hold_the_read() {
+        let pid_file = pid_file();
+        let started = Instant::now();
+        // The daemon leaves the group (setsid) and writes its pid; the command waits for that
+        // pid before it exits, so the daemon is out of the group before the grace ends.
+        let read = read_listing(
+            &sh(&format!(
+                "echo '{{}}'; perl -MPOSIX -e 'setsid(); open my $f, \">\", $ARGV[0]; \
+                 print $f $$; close $f; exec \"sleep\", \"1000\"' '{file}' & \
+                 while [ ! -s '{file}' ]; do sleep 0.01; done",
+                file = pid_file.display()
+            )),
+            TIMEOUT,
+        );
+        assert_eq!(read, Ok(ReeveListing::default()), "read after the grace");
+        assert!(
+            started.elapsed() < TIMEOUT / 2,
+            "not held to the timeout: {:?}",
+            started.elapsed()
+        );
+        let daemon = pid_in(&pid_file);
+        // Out of the reader's reach, so still running: the test ends it.
+        assert!(in_process_table(daemon), "the daemon is not in the group");
+        // SAFETY: the daemon is this test's own, and its pid is held while it runs.
+        unsafe {
+            libc::kill(daemon, libc::SIGKILL);
+        }
+        assert!(leaves_process_table(daemon));
+    }
+
     #[cfg(windows)]
     #[test]
     fn a_listing_command_runs_on_windows() {
@@ -834,6 +968,25 @@ mod tests {
         assert_eq!(records(&runs), ["2-live.json", "3-unreadable.json"]);
         let _ = child.kill();
         let _ = child.wait();
+        let _ = std::fs::remove_dir_all(&runs);
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn a_record_left_half_written_goes_with_its_client() {
+        use std::os::unix::process::ExitStatusExt;
+        let runs = runs();
+        // Killed between writing and renaming: a whole record, read as one.
+        let (mut child, group) = hung_run();
+        record(&runs, "1-2.partial", gone_client(), group);
+        // Killed while writing: a client no process has (pids stay far below this), and this
+        // very client, still running and still writing.
+        std::fs::write(runs.join("999999999-3.partial"), "{\"cli").unwrap();
+        let live = format!("{}-4.partial", std::process::id());
+        std::fs::write(runs.join(&live), "{\"cli").unwrap();
+        kill_leftover_runs(&runs);
+        assert_eq!(child.wait().expect("wait").signal(), Some(libc::SIGKILL));
+        assert_eq!(records(&runs), [live]);
         let _ = std::fs::remove_dir_all(&runs);
     }
 
