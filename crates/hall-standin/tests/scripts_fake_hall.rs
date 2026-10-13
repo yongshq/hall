@@ -619,8 +619,8 @@ fn up_and_drive_go_on_past_a_link_inside_the_xdg_folders() {
     let rig = Rig::new("xdg-links");
     rig.ok("test-setup", &["up"]);
     // What fnm makes per shell under a test claude's XDG_STATE_HOME: a link
-    // out of the home. The stand-in does not walk inside either folder
-    // (decision 48's amendment).
+    // out of the home. The stand-in walks only herdr's folder inside either
+    // folder (decision 48's amendments).
     for name in ["xdg-config", "xdg-state"] {
         let dir = rig.home.join(name).join("fnm_multishells");
         std::fs::create_dir_all(&dir).unwrap();
@@ -648,6 +648,53 @@ fn up_and_drive_go_on_past_a_link_inside_the_xdg_folders() {
         std::fs::remove_file(&dir).unwrap();
         std::fs::rename(rig.bin.join(name), &dir).unwrap();
     }
+}
+
+#[test]
+fn up_and_drive_refuse_a_link_in_herdrs_folder_inside_the_xdg_folders() {
+    let rig = Rig::new("xdg-herdr-links");
+    rig.ok("test-setup", &["up"]);
+    let live = rig.user.join(".config/herdr");
+    std::fs::create_dir_all(&live).unwrap();
+    std::fs::write(live.join("endpoints.json"), "").unwrap();
+    // Herdr's own folder under a test claude's XDG_CONFIG_HOME or XDG_STATE_HOME
+    // is walked in full (decision 48's second amendment): herdr's folder itself
+    // a link to the live herdr's, or a hard link to a live herdr file in it.
+    for name in ["xdg-config", "xdg-state"] {
+        let herdr = rig.home.join(name).join("herdr");
+        let _ = std::fs::remove_dir_all(&herdr);
+        std::os::unix::fs::symlink(&live, &herdr).unwrap();
+        for (script, args) in [
+            ("test-setup", &["up"][..]),
+            ("test-drive", &["ansel", "turn-end"]),
+        ] {
+            let out = rig.run(script, args);
+            assert_eq!(out.status.code(), Some(1), "{name} {script}: {out:?}");
+            let err = String::from_utf8_lossy(&out.stderr);
+            assert!(err.contains("herdr is a symlink"), "{name} {script}: {err}");
+        }
+        std::fs::remove_file(&herdr).unwrap();
+
+        std::fs::create_dir(&herdr).unwrap();
+        std::fs::hard_link(live.join("endpoints.json"), herdr.join("endpoints.json")).unwrap();
+        for (script, args) in [
+            ("test-setup", &["up"][..]),
+            ("test-drive", &["ansel", "turn-end"]),
+        ] {
+            let out = rig.run(script, args);
+            assert_eq!(out.status.code(), Some(1), "{name} {script}: {out:?}");
+            let err = String::from_utf8_lossy(&out.stderr);
+            assert!(
+                err.contains("herdr/endpoints.json is a hard link"),
+                "{name} {script}: {err}"
+            );
+        }
+        std::fs::remove_dir_all(&herdr).unwrap();
+    }
+    // With herdr's folders plain again, both go on.
+    let again = rig.ok("test-setup", &["up"]);
+    assert_eq!(again.matches("already up in pane").count(), 5, "{again}");
+    rig.ok("test-drive", &["ansel", "turn-end"]);
 }
 
 #[test]

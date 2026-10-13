@@ -228,11 +228,16 @@ pub const MAX_DEPTH: usize = 32;
 
 /// The throwaway XDG config and state folders every test claude runs with
 /// (decisions 47 and 48). Third-party tools write there (fnm makes a symlink
-/// per shell under `xdg-state`), and nothing of the scripts, the stand-in or
-/// reeve reads or writes inside them, so [`check_inner_links`] does not walk
-/// their contents (decision 48's amendment). Each must still be a real
-/// directory, not a link.
+/// per shell under `xdg-state`), so [`check_inner_links`] does not walk their
+/// contents, save [`WALKED_XDG_DIR`] in each (decision 48's amendments). Each
+/// must still be a real directory, not a link.
 pub const UNWALKED_DIRS: [&str; 2] = ["xdg-config", "xdg-state"];
+
+/// Herdr's own folder inside each of [`UNWALKED_DIRS`], walked in full: herdr,
+/// and reeve's herdr backend through it, finds its config, sessions and state
+/// there, so a link there would lead a test pane's herdr call to the live
+/// herdr (decision 48's second amendment).
+pub const WALKED_XDG_DIR: &str = "herdr";
 
 /// Refuses a test reeve home with a symlink anywhere inside it. The world file,
 /// the live baseline, each claude's working directory and whatever reeve and
@@ -245,8 +250,8 @@ pub const UNWALKED_DIRS: [&str; 2] = ["xdg-config", "xdg-state"];
 /// only real directories. Whatever it cannot look at is refused, not skipped;
 /// only what is not there is fine, so a home that does not exist yet passes. A
 /// home past [`MAX_ENTRIES`] entries or [`MAX_DEPTH`] directories deep is
-/// refused rather than walked in part. The contents of [`UNWALKED_DIRS`],
-/// directly under the home, are not walked.
+/// refused rather than walked in part. Of [`UNWALKED_DIRS`], directly under
+/// the home, only [`WALKED_XDG_DIR`] is walked.
 pub fn check_inner_links(home: &Path) -> Result<(), HomeError> {
     walk_for_links(home, MAX_DEPTH, MAX_ENTRIES)
 }
@@ -264,9 +269,11 @@ fn walk_for_links(home: &Path, max_depth: usize, max_entries: usize) -> Result<(
         Ok(m) if !m.is_dir() => return Err(HomeError::OddEntry(home.to_path_buf())),
         Ok(_) => {}
     }
-    let mut dirs = vec![(home.to_path_buf(), 0)];
+    // Each directory to walk, with the one name it is walked for when only
+    // that entry of it is.
+    let mut dirs = vec![(home.to_path_buf(), 0, None)];
     let mut seen = 0;
-    while let Some((dir, depth)) = dirs.pop() {
+    while let Some((dir, depth, only)) = dirs.pop() {
         if depth > max_depth {
             return Err(HomeError::TooBig(home.to_path_buf()));
         }
@@ -277,6 +284,9 @@ fn walk_for_links(home: &Path, max_depth: usize, max_entries: usize) -> Result<(
         };
         for entry in entries {
             let entry = entry.map_err(|e| unchecked(&dir, e))?;
+            if only.is_some_and(|name| entry.file_name() != std::ffi::OsStr::new(name)) {
+                continue;
+            }
             seen += 1;
             if seen > max_entries {
                 return Err(HomeError::TooBig(home.to_path_buf()));
@@ -290,9 +300,8 @@ fn walk_for_links(home: &Path, max_depth: usize, max_entries: usize) -> Result<(
                     && UNWALKED_DIRS
                         .iter()
                         .any(|d| entry.file_name() == std::ffi::OsStr::new(d));
-                if !unwalked {
-                    dirs.push((path, depth + 1));
-                }
+                let only = unwalked.then_some(WALKED_XDG_DIR);
+                dirs.push((path, depth + 1, only));
             } else if kind.is_file() {
                 match entry.metadata() {
                     Err(e) if e.kind() == ErrorKind::NotFound => {}
@@ -568,6 +577,47 @@ mod tests {
             assert_eq!(
                 check_inner_links(&h),
                 Err(HomeError::InnerLink(h.join("work").join(name).join("up"))),
+                "{name}"
+            );
+            std::fs::remove_dir_all(&h).unwrap();
+            std::fs::remove_dir_all(&outside).unwrap();
+        }
+    }
+
+    #[test]
+    fn the_walk_walks_herdrs_folder_inside_the_xdg_folders_in_full() {
+        for name in UNWALKED_DIRS {
+            let h = scratch(&format!("walk-{name}-herdr"));
+            let outside = scratch(&format!("walk-{name}-herdr-outside"));
+            std::fs::write(outside.join("endpoints.json"), "").unwrap();
+            let herdr = h.join(name).join(WALKED_XDG_DIR);
+            std::fs::create_dir_all(herdr.join("sessions")).unwrap();
+            std::fs::write(herdr.join("sessions/own.json"), "").unwrap();
+            // A link beside it is still skipped.
+            std::os::unix::fs::symlink("/", h.join(name).join("fnm")).unwrap();
+            assert_eq!(check_inner_links(&h), Ok(()), "{name}");
+            // A symlink anywhere inside herdr's folder is refused.
+            std::os::unix::fs::symlink(&outside, herdr.join("sessions/default")).unwrap();
+            assert_eq!(
+                check_inner_links(&h),
+                Err(HomeError::InnerLink(herdr.join("sessions/default"))),
+                "{name}"
+            );
+            std::fs::remove_file(herdr.join("sessions/default")).unwrap();
+            // So is a hard link to a file outside the home.
+            std::fs::hard_link(outside.join("endpoints.json"), herdr.join("endpoints.json"))
+                .unwrap();
+            assert_eq!(
+                check_inner_links(&h),
+                Err(HomeError::HardLink(herdr.join("endpoints.json"), 2)),
+                "{name}"
+            );
+            // And herdr's folder itself a link, to the live herdr's place say.
+            std::fs::remove_dir_all(&herdr).unwrap();
+            std::os::unix::fs::symlink(&outside, &herdr).unwrap();
+            assert_eq!(
+                check_inner_links(&h),
+                Err(HomeError::InnerLink(herdr.clone())),
                 "{name}"
             );
             std::fs::remove_dir_all(&h).unwrap();
