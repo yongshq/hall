@@ -144,8 +144,17 @@ fn client_protocol_accepts_hello(socket_path: &Path) -> io::Result<bool> {
 
 fn validate_running_server_compatibility(saved_federation: bool) -> io::Result<()> {
     // hall: a server hall cannot confirm as its own gets no stop command
-    // (decision 45); `hall server stop` would refuse it anyway.
-    let Some(status) = read_server_status()? else {
+    // (decision 45); `hall server stop` would refuse it anyway. A listener that
+    // never answers (on macOS a read timeout is WouldBlock, os error 35) gets
+    // the same message, not the raw error (decision 46).
+    let status = read_server_status().map_err(|err| {
+        tracing::warn!(err = %err, "server status check failed");
+        io::Error::other(format!(
+            "a server is listening at {}, but it did not answer a status check, so hall cannot confirm it is a hall server.\nHall will not attach to it, stop it or hand it off.",
+            crate::api::socket_path().display()
+        ))
+    })?;
+    let Some(status) = status else {
         return Err(io::Error::other(format!(
             "a server is listening at {}, but its status API is unavailable, so hall cannot confirm it is a hall server.\nHall will not attach to it, stop it or hand it off.",
             crate::api::socket_path().display()
@@ -555,6 +564,40 @@ test "$sid" = "$$"
         assert!(
             err.to_string().contains("status API is unavailable"),
             "unexpected error: {err}"
+        );
+        std::env::remove_var(crate::api::SOCKET_PATH_ENV_VAR);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn validate_running_server_compatibility_says_hall_cannot_confirm_a_silent_listener() {
+        let _guard = env_lock().lock().unwrap();
+        let dir = unique_test_dir("silent");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("api.sock");
+        std::env::set_var(crate::api::SOCKET_PATH_ENV_VAR, &path);
+        crate::session::clear_explicit_session_for_test();
+        let listener = UnixListener::bind(&path).unwrap();
+        // Accepts the ping and never answers it.
+        let handle = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            std::thread::sleep(STATUS_REQUEST_TIMEOUT + Duration::from_secs(1));
+            drop(stream);
+        });
+
+        let message = validate_running_server_compatibility(false)
+            .unwrap_err()
+            .to_string();
+
+        let _ = handle.join();
+        assert!(
+            message.contains("hall cannot confirm it is a hall server"),
+            "unexpected error: {message}"
+        );
+        assert!(!message.contains("os error"), "unexpected error: {message}");
+        assert!(
+            !message.contains("server stop"),
+            "unexpected error: {message}"
         );
         std::env::remove_var(crate::api::SOCKET_PATH_ENV_VAR);
         let _ = std::fs::remove_dir_all(dir);

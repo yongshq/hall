@@ -92,3 +92,10 @@ Hall is a modified version of herdr v0.9.0 (commit b99002ac99b09e00b4ca692436cb1
 | `src/server/autodetect.rs` | The client launch says a server that is not hall's, or whose status is unavailable, is not one hall will attach to, stop or hand off, with no stop command; tests. |
 | `src/update.rs` | The (refused) update flow's stop and handoff also refuse a server that is not hall's. |
 | `tests/cli/surface.rs` | The help test asserts no herdr.dev link. |
+
+## Step 2 (decision 46)
+
+| File | Change |
+|---|---|
+| `src/cli/status.rs` | `hall status` says `hall_server: no` and why for a server that is not hall's (`hall_server` in the JSON), and gives `restart_needed` and `server_binary_stale` no value for it instead of restart guidance; tests. |
+| `src/server/autodetect.rs` | The client launch says hall cannot confirm a server is hall's when the server does not answer its status check (a silent listener, `WouldBlock` on macOS), instead of the raw error; a test. |

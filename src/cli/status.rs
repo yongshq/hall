@@ -79,6 +79,29 @@ enum ServerRuntimeStatus {
     NotRunning,
 }
 
+impl ServerRuntimeStatus {
+    /// hall: whether the running server is hall's (decision 45); `None` when
+    /// none is running.
+    fn hall_server(&self) -> Option<bool> {
+        self.runtime_status().map(|status| status.is_hall_server())
+    }
+
+    fn runtime_status(&self) -> Option<api::RuntimeStatus> {
+        match self {
+            ServerRuntimeStatus::Running {
+                version,
+                protocol,
+                capabilities,
+            } => Some(api::RuntimeStatus {
+                version: version.clone(),
+                protocol: *protocol,
+                capabilities: capabilities.clone(),
+            }),
+            ServerRuntimeStatus::NotRunning => None,
+        }
+    }
+}
+
 fn print_full_status(json: bool) -> std::io::Result<i32> {
     let server = read_server_runtime_status()?;
 
@@ -154,6 +177,20 @@ fn print_server_status_body(server: &ServerRuntimeStatus, indent: &str) {
             capabilities,
         } => {
             println!("{indent}status: running");
+            // hall: a server that is not hall's is named as such, with no
+            // restart or stop guidance (decision 45).
+            let hall_server = server.hall_server() == Some(true);
+            println!(
+                "{indent}hall_server: {}",
+                if hall_server { "yes" } else { "no" }
+            );
+            if let (false, Some(status)) = (hall_server, server.runtime_status()) {
+                for line in
+                    crate::session::not_hall_server_message(&api::socket_path(), &status).lines()
+                {
+                    println!("{indent}  {line}");
+                }
+            }
             println!("{indent}version: {}", option_label(version.as_deref()));
             println!(
                 "{indent}endpoint_compatible: {}",
@@ -226,7 +263,13 @@ fn endpoint_compatibility_label(
     }
 }
 
+/// hall: what the update lines say for a server that is not hall's.
+const NOT_HALL_LABEL: &str = "n/a (not a hall server)";
+
 fn restart_needed_label(server: &ServerRuntimeStatus) -> &'static str {
+    if server.hall_server() == Some(false) {
+        return NOT_HALL_LABEL;
+    }
     match restart_needed_bool(server) {
         Some(true) => "yes",
         Some(false) => "no",
@@ -235,6 +278,9 @@ fn restart_needed_label(server: &ServerRuntimeStatus) -> &'static str {
 }
 
 fn server_binary_stale_label(server: &ServerRuntimeStatus) -> &'static str {
+    if server.hall_server() == Some(false) {
+        return NOT_HALL_LABEL;
+    }
     match server_binary_stale_bool(server) {
         Some(true) => "yes",
         Some(false) => "no",
@@ -264,6 +310,7 @@ struct ClientStatusJson {
 struct ServerStatusJson {
     status: &'static str,
     running: bool,
+    hall_server: Option<bool>,
     version: Option<String>,
     protocol: Option<u32>,
     capabilities: Option<ServerCapabilitiesJson>,
@@ -315,6 +362,7 @@ fn server_status_json(server: &ServerRuntimeStatus) -> ServerStatusJson {
         } => ServerStatusJson {
             status: "running",
             running: true,
+            hall_server: server.hall_server(),
             version: version.clone(),
             protocol: *protocol,
             capabilities: capabilities
@@ -340,6 +388,7 @@ fn server_status_json(server: &ServerRuntimeStatus) -> ServerStatusJson {
         ServerRuntimeStatus::NotRunning => ServerStatusJson {
             status: "not_running",
             running: false,
+            hall_server: None,
             version: None,
             protocol: None,
             capabilities: None,
@@ -360,7 +409,12 @@ fn update_status_json(server: &ServerRuntimeStatus) -> UpdateStatusJson {
     }
 }
 
+/// hall: `None` for a server that is not hall's: restarting it is not hall's
+/// to suggest (decision 45).
 fn restart_needed_bool(server: &ServerRuntimeStatus) -> Option<bool> {
+    if server.hall_server() == Some(false) {
+        return None;
+    }
     match server {
         ServerRuntimeStatus::Running { capabilities, .. } => Some(
             capabilities
@@ -373,6 +427,9 @@ fn restart_needed_bool(server: &ServerRuntimeStatus) -> Option<bool> {
 }
 
 fn server_binary_stale_bool(server: &ServerRuntimeStatus) -> Option<bool> {
+    if server.hall_server() == Some(false) {
+        return None;
+    }
     match server {
         ServerRuntimeStatus::Running { version, .. } => version
             .as_deref()
@@ -432,10 +489,44 @@ mod tests {
     }
 
     #[test]
-    fn server_without_endpoint_baseline_requires_restart() {
-        let server = running_server(Some(crate::build_info::version().as_str()), None);
+    fn hall_server_with_another_endpoint_generation_requires_restart() {
+        let server = running_server(
+            Some(crate::build_info::version().as_str()),
+            Some(crate::api::HALL_NUMBER_FLOOR),
+        );
 
+        assert_eq!(server.hall_server(), Some(true));
         assert_eq!(restart_needed_bool(&server), Some(true));
         assert_eq!(server_binary_stale_bool(&server), Some(false));
+    }
+
+    /// hall: a server with no endpoint generation, or herdr's numbers, is not
+    /// confirmed as hall's, so no restart is suggested for it (decisions 45, 46).
+    #[test]
+    fn server_that_is_not_hall_gets_no_restart_guidance() {
+        let herdr = ServerRuntimeStatus::Running {
+            version: Some("0.9.0".to_owned()),
+            protocol: Some(22),
+            capabilities: Some(crate::api::schema::ServerCapabilities {
+                live_handoff: true,
+                detached_server_daemon: true,
+                endpoint_protocol_generation: Some(1),
+                surface_interest: true,
+                health_check: true,
+            }),
+        };
+        let no_generation = running_server(Some(crate::build_info::version().as_str()), None);
+        for server in [herdr, no_generation] {
+            assert_eq!(server.hall_server(), Some(false));
+            assert_eq!(restart_needed_bool(&server), None);
+            assert_eq!(server_binary_stale_bool(&server), None);
+            assert_eq!(restart_needed_label(&server), NOT_HALL_LABEL);
+            assert_eq!(server_status_json(&server).hall_server, Some(false));
+        }
+        assert_eq!(ServerRuntimeStatus::NotRunning.hall_server(), None);
+        assert_eq!(
+            restart_needed_bool(&ServerRuntimeStatus::NotRunning),
+            Some(false)
+        );
     }
 }
