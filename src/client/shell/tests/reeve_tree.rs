@@ -825,6 +825,34 @@ fn enter_on_a_hand_that_finished_while_selected_shows_its_tab() {
 }
 
 #[test]
+fn a_selected_tab_that_the_listing_names_a_hand_keeps_the_selection() {
+    let full = listing();
+    let mut listing = full.clone();
+    listing.errands.retain(|errand| errand.id != "ansel-review");
+    // The hand's tab is open before the listing names the errand: a tab row of its reeve.
+    let mut state = reeve_state(listing);
+    compose(&mut state);
+    state.handle_input_bytes(b"\x02w\x1b[B\x1b[B");
+    assert_eq!(
+        state.navigate_reeve_key,
+        Some(ReeveTreeKey::Tab("ws_a_t2".into()))
+    );
+    // The next read lists it: the row becomes the hand's, and the selection follows.
+    state.set_reeve_listing(Ok(full));
+    let frame = compose(&mut state);
+    assert_eq!(tree_rows(&frame)[3], "  └ ● ansel-review");
+    assert_eq!(
+        state.navigate_reeve_key,
+        Some(ReeveTreeKey::Hand("ansel-review".into()))
+    );
+    let pick = state.handle_input_bytes(b"\r");
+    assert!(matches!(
+        picked_method(&pick),
+        Some(crate::api::schema::Method::PaneFocus(target)) if target.pane_id == "p_a2"
+    ));
+}
+
+#[test]
 fn enter_on_a_hand_that_is_gone_from_the_tree_does_nothing() {
     let mut listing = listing();
     let mut state = reeve_state(listing.clone());

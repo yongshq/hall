@@ -743,10 +743,12 @@ impl ClientShellState {
     }
 
     /// Takes a read: a good one replaces the tree, a failed one leaves the last good tree,
-    /// marked stale with the reason (decision 56). A hand selected in the walk that the read
-    /// drops leaves its tab behind as a tab row (decision 55): the selection moves to that row.
+    /// marked stale with the reason (decision 56). A row selected in the walk that the read
+    /// turns into another kind of row for the same tab keeps the selection: a hand the read
+    /// drops leaves its tab behind as a tab row (decision 55), and a tab row the read lists as
+    /// a hand becomes that hand's row (decision 61).
     pub(in crate::client) fn set_reeve_listing(&mut self, read: ReeveListingRead) {
-        let selected_hand_tab = self.selected_hand_tab();
+        let selected_tab = self.selected_row_tab();
         match read {
             Ok(listing) => {
                 self.reeve_listing = Some(listing);
@@ -756,29 +758,50 @@ impl ClientShellState {
         }
         if let (Some(key), Some(tab_id), Some(tree)) = (
             self.navigate_reeve_key.as_ref(),
-            selected_hand_tab,
+            selected_tab,
             self.current_reeve_tree(),
         ) {
-            let tab = ReeveTreeKey::Tab(tab_id);
-            if tree.position(key).is_none() && tree.position(&tab).is_some() {
-                self.navigate_reeve_key = Some(tab);
+            if tree.position(key).is_none() {
+                if let Some(item) = self.tree_row_for_tab(&tree, &tab_id) {
+                    self.navigate_reeve_key = Some(item.key.clone());
+                }
             }
         }
     }
 
-    /// The tab that holds the pane of the hand selected in the walk, if a hand is selected.
-    fn selected_hand_tab(&self) -> Option<String> {
+    /// The tab a hand's or a tab's row selected in the walk stands for, if one is selected.
+    fn selected_row_tab(&self) -> Option<String> {
         let key = self.navigate_reeve_key.as_ref()?;
-        if !matches!(key, ReeveTreeKey::Hand(_)) {
-            return None;
+        match key {
+            ReeveTreeKey::Tab(tab_id) => Some(tab_id.clone()),
+            ReeveTreeKey::Hand(_) => {
+                let tree = self.current_reeve_tree()?;
+                let pane_id = tree.items.get(tree.position(key)?)?.pane_id.as_ref()?;
+                self.pane_tab(pane_id)
+            }
+            ReeveTreeKey::Reeve(_) | ReeveTreeKey::Workspace(_) => None,
         }
-        let tree = self.current_reeve_tree()?;
-        let pane_id = tree.items.get(tree.position(key)?)?.pane_id.as_ref()?;
+    }
+
+    /// The hand's or the tab's row that stands for `tab_id` in `tree`.
+    fn tree_row_for_tab<'a>(&self, tree: &'a ReeveTree, tab_id: &str) -> Option<&'a ReeveTreeItem> {
+        tree.items.iter().find(|item| match &item.key {
+            ReeveTreeKey::Tab(tab) => tab == tab_id,
+            ReeveTreeKey::Hand(_) => item
+                .pane_id
+                .as_ref()
+                .and_then(|pane_id| self.pane_tab(pane_id))
+                .is_some_and(|tab| tab == tab_id),
+            ReeveTreeKey::Reeve(_) | ReeveTreeKey::Workspace(_) => false,
+        })
+    }
+
+    fn pane_tab(&self, pane_id: &str) -> Option<String> {
         self.snapshot
             .as_deref()?
             .panes
             .iter()
-            .find(|pane| &pane.pane_id == pane_id)
+            .find(|pane| pane.pane_id == pane_id)
             .map(|pane| pane.tab_id.clone())
     }
 

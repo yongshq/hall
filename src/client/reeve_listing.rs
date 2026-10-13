@@ -748,17 +748,56 @@ mod tests {
 
     #[cfg(unix)]
     fn pid_in(path: &std::path::Path) -> i32 {
+        let pid = read_pid(path);
+        let _ = std::fs::remove_file(path);
+        pid.unwrap_or_else(|| panic!("no pid in {}", path.display()))
+    }
+
+    /// The pid a test command writes to `path`, waiting up to `TIMEOUT` for it.
+    #[cfg(unix)]
+    fn read_pid(path: &std::path::Path) -> Option<i32> {
         let deadline = Instant::now() + TIMEOUT;
         loop {
             if let Some(pid) = std::fs::read_to_string(path)
                 .ok()
                 .and_then(|text| text.trim().parse().ok())
             {
-                let _ = std::fs::remove_file(path);
-                return pid;
+                return Some(pid);
             }
-            assert!(Instant::now() < deadline, "no pid in {}", path.display());
+            if Instant::now() >= deadline {
+                return None;
+            }
             std::thread::sleep(POLL);
+        }
+    }
+
+    /// A daemon a test command starts out of the reader's reach, which writes its pid to
+    /// `pid_file`: killed when the guard drops, however the test ends, so a failing test leaves
+    /// no daemon behind either.
+    #[cfg(unix)]
+    struct Daemon {
+        pid_file: std::path::PathBuf,
+    }
+
+    #[cfg(unix)]
+    impl Daemon {
+        fn pid(&self) -> i32 {
+            read_pid(&self.pid_file)
+                .unwrap_or_else(|| panic!("no pid in {}", self.pid_file.display()))
+        }
+    }
+
+    #[cfg(unix)]
+    impl Drop for Daemon {
+        fn drop(&mut self) {
+            if let Some(pid) = read_pid(&self.pid_file) {
+                // SAFETY: the daemon is this test's own; its pid was written by the daemon
+                // itself, and a signal to a pid gone since kills nothing of this test's.
+                unsafe {
+                    libc::kill(pid, libc::SIGKILL);
+                }
+            }
+            let _ = std::fs::remove_file(&self.pid_file);
         }
     }
 
@@ -818,7 +857,9 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_daemon_holding_the_output_outside_the_group_does_not_hold_the_read() {
-        let pid_file = pid_file();
+        let daemon = Daemon {
+            pid_file: pid_file(),
+        };
         let started = Instant::now();
         // The daemon leaves the group (setsid) and writes its pid; the command waits for that
         // pid before it exits, so the daemon is out of the group before the grace ends.
@@ -827,24 +868,22 @@ mod tests {
                 "echo '{{}}'; perl -MPOSIX -e 'setsid(); open my $f, \">\", $ARGV[0]; \
                  print $f $$; close $f; exec \"sleep\", \"1000\"' '{file}' & \
                  while [ ! -s '{file}' ]; do sleep 0.01; done",
-                file = pid_file.display()
+                file = daemon.pid_file.display()
             )),
             TIMEOUT,
         );
+        let elapsed = started.elapsed();
+        let pid = daemon.pid();
+        // Out of the reader's reach, so still running: the guard ends it, also when an assert
+        // below fails first.
+        assert!(in_process_table(pid), "the daemon is not in the group");
         assert_eq!(read, Ok(ReeveListing::default()), "read after the grace");
         assert!(
-            started.elapsed() < TIMEOUT / 2,
-            "not held to the timeout: {:?}",
-            started.elapsed()
+            elapsed < TIMEOUT / 2,
+            "not held to the timeout: {elapsed:?}"
         );
-        let daemon = pid_in(&pid_file);
-        // Out of the reader's reach, so still running: the test ends it.
-        assert!(in_process_table(daemon), "the daemon is not in the group");
-        // SAFETY: the daemon is this test's own, and its pid is held while it runs.
-        unsafe {
-            libc::kill(daemon, libc::SIGKILL);
-        }
-        assert!(leaves_process_table(daemon));
+        drop(daemon);
+        assert!(leaves_process_table(pid));
     }
 
     #[cfg(windows)]
