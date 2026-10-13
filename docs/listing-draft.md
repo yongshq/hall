@@ -16,8 +16,8 @@ hall-standin --home ~/.reeve-hall-dev
 - a home with a symlink anywhere inside it (the world file, the live baseline, each claude's working directory, what reeve and claude write there), since it could carry a read, a write or a claude session out of the home; the home is walked without following links, and whatever cannot be listed or looked at is refused, as is a home of more than 20000 entries or 32 directories deep;
 - a `HOME` or user database home with a `..` in it, since where its `.reeve` sits then depends on who reads the path;
 - any home whose directory name does not start with `.reeve-hall-dev`;
-- a world file that places a reeve or an errand in the herdr session `default` (any letter case);
-- a world file or `place` with a pane id that is not `^[A-Za-z0-9:_-]+$` or that starts with `-`, so it can never reach herdr as an option.
+- a world file that places a reeve or an errand in the session `default` (any letter case);
+- a world file or `place` with a pane id that is not `^[A-Za-z0-9:_-]+$` or that starts with `-`, so it can never reach hall as an option.
 
 A missing `--home` is a usage error (exit status 2).
 
@@ -66,7 +66,7 @@ JSON on stdout:
 | `errands[].waiting`, `idle`, `wedged` | One flag each, as the reeve judges them. |
 | `errands[].session` | The hand's session location (below). |
 
-A session location is `{ "herdr_session": <name>, "pane_id": <id or null> }`: the herdr session, and the pane inside it that holds the session. `pane_id` is `null` until the test setup has recorded one. `herdr_session` is never `default`.
+A session location is `{ "herdr_session": <name>, "pane_id": <id or null> }`: the hall session, and the pane inside it that holds the session. The field keeps its draft name; since step 2 it holds a hall session name, `hall-dev` in the test setup (plan, step 2). `pane_id` is `null` until the test setup has recorded one. `herdr_session` is never `default`.
 
 ## The world file
 

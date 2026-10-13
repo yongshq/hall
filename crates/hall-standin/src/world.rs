@@ -178,7 +178,7 @@ fn check_location(who: &str, herdr_session: &str, pane_id: Option<&str>) -> Resu
     }
     if is_live_herdr_session(herdr_session) {
         return err(format!(
-            "refusing {who}: herdr session {herdr_session} belongs to the live setup"
+            "refusing {who}: hall session {herdr_session} belongs to the live setup"
         ));
     }
     if let Some(pane) = pane_id.filter(|p| !is_pane_id(p)) {

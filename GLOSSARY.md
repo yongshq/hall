@@ -31,7 +31,7 @@ One hall server with its own socket, holding many sessions. Once hall is in use 
 _Avoid_: server, instance, session (alone)
 
 **Herdr session**:
-One server of the liege's installed herdr, with its own socket: `default` holds the live setup. Until plan step 2, the test setup is written for herdr sessions `hall-dev` and `hall-dev-2`; from step 2 on it creates no herdr session.
+One server of the liege's installed herdr, with its own socket: `default` holds the live setup. The test setup creates no herdr session and makes no herdr call (plan step 2).
 _Avoid_: server, instance, session (alone)
 
 **Backend**:

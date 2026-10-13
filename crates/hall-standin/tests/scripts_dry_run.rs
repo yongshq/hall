@@ -1,21 +1,32 @@
 //! scripts/test-setup and scripts/test-drive, run in --dry-run only: every
 //! command they would run is printed, and checked here against the test setup's
-//! rules (ADR 0003, decisions 24 and 26). Nothing is started and no herdr
-//! session is touched.
+//! rules (ADR 0003, decisions 26, 33, 38 and 47). Nothing is started, no hall
+//! session is touched, and no herdr call is printed at all.
 
 use std::fs::Permissions;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-const SESSIONS: [&str; 2] = ["hall-dev", "hall-dev-2"];
+const SESSION: &str = "hall-dev";
 const MODEL: &str = "claude-haiku-4-5-20251001";
-const HERDR: &str = "+ env -u HERDR_SOCKET_PATH -u HERDR_SESSION herdr ";
+const CLEAN_ENV: &str = "+ env -u HALL_SOCKET_PATH -u HALL_CLIENT_SOCKET_PATH -u HALL_SESSION -u HALL_CONFIG_PATH -u HALL_ENV -u HALL_PANE_ID ";
 const REEVES: [&str; 2] = ["ansel", "bertil"];
+const ERRANDS: usize = 3;
 const ROSTER: usize = 5;
 
 fn scripts() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts")
+}
+
+/// The hall binary the dry runs name. Never run: a dry run runs nothing.
+fn hall_bin() -> PathBuf {
+    Path::new(env!("CARGO_TARGET_TMPDIR")).join("scripts-dry-run/no-such-hall")
+}
+
+/// How every hall call starts: the HALL_* names hall reads dropped, then hall.
+fn hall_prefix() -> String {
+    format!("{CLEAN_ENV}{} ", hall_bin().display())
 }
 
 /// This test's scratch directory under target/, as resolved on disk, since the
@@ -40,7 +51,8 @@ fn command(name: &str, args: &[&str]) -> Command {
     let mut c = Command::new("bash");
     c.arg(scripts().join(name))
         .args(args)
-        .env("HALL_STANDIN_BIN", env!("CARGO_BIN_EXE_hall-standin"));
+        .env("HALL_STANDIN_BIN", env!("CARGO_BIN_EXE_hall-standin"))
+        .env("HALL_DEBUG_BIN", hall_bin());
     c
 }
 
@@ -73,7 +85,11 @@ fn dry_output(name: &str, home: &Path, args: &[&str], out: Output) -> Vec<String
     let first: Vec<&str> = stdout.lines().take(3).collect();
     assert_eq!(first[0], "test setup inputs:");
     assert!(first[1].contains(home.to_str().unwrap()), "{stdout}");
-    assert!(first[2].ends_with("hall-dev hall-dev-2"), "{stdout}");
+    assert_eq!(
+        first[2],
+        format!("  hall session:    {SESSION}"),
+        "{stdout}"
+    );
 
     assert!(
         !stdout.to_lowercase().contains("default"),
@@ -93,25 +109,32 @@ fn dry_output(name: &str, home: &Path, args: &[&str], out: Output) -> Vec<String
 
 fn check_command(c: &str, home: &Path) {
     assert!(!c.contains("server stop"), "{c}");
-    if c.split_whitespace().any(|w| w == "herdr") {
-        assert!(c.starts_with(HERDR), "herdr without a clean env: {c}");
-        let rest = &c[HERDR.len()..];
-        let named = SESSIONS
-            .iter()
-            .any(|s| rest.ends_with(&format!(" --session {s}")));
+    // No herdr call at all (decision 33).
+    assert!(
+        !c.split_whitespace()
+            .any(|w| w == "herdr" || w.ends_with("/herdr")),
+        "a herdr call: {c}"
+    );
+    let hall = hall_bin().display().to_string();
+    if c.split_whitespace().any(|w| w == hall) {
+        let prefix = hall_prefix();
+        assert!(c.starts_with(&prefix), "hall without a clean env: {c}");
+        let rest = &c[prefix.len()..];
+        let named = rest.ends_with(&format!(" --session {SESSION}"));
         let session_cmd = rest == "session list --json"
-            || SESSIONS.iter().any(|s| {
-                rest == format!("session stop {s} --json")
-                    || rest == format!("session delete {s} --json")
-            });
-        assert!(
-            named || session_cmd,
-            "herdr call names no test session: {c}"
-        );
+            || rest == format!("session stop {SESSION} --json")
+            || rest == format!("session delete {SESSION} --json")
+            || rest == format!("--session {SESSION} server &");
+        assert!(named || session_cmd, "hall call names no test session: {c}");
     }
     if c.contains("claude ") {
         let h = home.to_str().unwrap();
-        assert!(c.contains(&format!("REEVE_HOME=\"{h}\" claude ")), "{c}");
+        assert!(
+            c.contains(&format!(
+                "REEVE_HOME=\"{h}\" XDG_CONFIG_HOME=\"{h}/xdg-config\" HALL_SOCKET_PATH=\"<socket-of-{SESSION}>\" claude "
+            )),
+            "{c}"
+        );
         assert!(c.contains(&format!("claude --model {MODEL}")), "{c}");
         assert!(c.contains(&format!("cd \"{h}/work/")), "{c}");
     }
@@ -126,16 +149,34 @@ fn up() {
     let h = home("up");
     let cmds = dry("test-setup", &h, &["up"]);
     assert_eq!(count(&cmds, "claude --model"), ROSTER);
-    assert_eq!(count(&cmds, " workspace create "), ROSTER);
+    assert_eq!(count(&cmds, " workspace create "), REEVES.len());
+    assert_eq!(
+        count(&cmds, " tab create --workspace '<workspace-of-"),
+        ERRANDS
+    );
     assert_eq!(count(&cmds, " place "), ROSTER);
-    for s in SESSIONS {
-        assert!(
-            count(&cmds, &format!("--session {s}")) > 0,
-            "nothing in {s}"
+    assert_eq!(count(&cmds, &format!("--session {SESSION} server &")), 1);
+    assert_eq!(count(&cmds, "+ write "), 1);
+    assert_eq!(count(&cmds, "/xdg-config"), 1 + ROSTER);
+    assert_eq!(count(&cmds, "cargo build"), 0);
+    // Each test hand opens in its own reeve's workspace.
+    for (hand, owner) in [
+        ("ansel-fix", "ansel"),
+        ("ansel-review", "ansel"),
+        ("bertil-probe", "bertil"),
+    ] {
+        assert_eq!(
+            count(
+                &cmds,
+                &format!(
+                    " tab create --workspace '<workspace-of-{owner}>' --cwd {}/work/{hand} --label {hand} ",
+                    h.display()
+                ),
+            ),
+            1,
+            "{hand}: {cmds:?}"
         );
     }
-    assert_eq!(count(&cmds, "+ write "), 2);
-    assert_eq!(count(&cmds, "cargo build"), 0);
 
     // Without HALL_STANDIN_BIN, up builds the stand-in it found in target/debug.
     let built = scripts().join("../target/debug/hall-standin");
@@ -152,21 +193,53 @@ fn up() {
         .output()
         .unwrap();
         let cmds = dry_output("test-setup", &h, &["up"], out);
-        assert_eq!(count(&cmds, "+ cargo build "), 1);
+        assert_eq!(count(&cmds, " cargo build "), 1);
+        assert_eq!(count(&cmds, " -p hall-standin"), 1);
+        assert_eq!(count(&cmds, " -p hall "), 0);
         assert_eq!(count(&cmds, "claude --model"), ROSTER);
     }
+
+    // Without HALL_DEBUG_BIN, up builds the debug hall, with the HALL_* names
+    // dropped, and names target/debug/hall in every call.
+    let out = command(
+        "test-setup",
+        &["--dry-run", "--home", h.to_str().unwrap(), "up"],
+    )
+    .env_remove("HALL_DEBUG_BIN")
+    .output()
+    .unwrap();
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(out.status.success(), "{stdout}");
+    let cmds: Vec<&str> = stdout.lines().filter(|l| l.starts_with("+ ")).collect();
+    let built: Vec<&&str> = cmds
+        .iter()
+        .filter(|c| c.contains(" cargo build "))
+        .collect();
+    assert_eq!(built.len(), 1, "{stdout}");
+    assert!(
+        built[0].starts_with(CLEAN_ENV) && built[0].ends_with(" -p hall"),
+        "{stdout}"
+    );
+    let server = format!("/target/debug/hall --session {SESSION} server &");
+    assert!(
+        cmds.iter()
+            .any(|c| c.starts_with(CLEAN_ENV) && c.ends_with(&server)),
+        "{stdout}"
+    );
+    assert!(!h.exists());
 }
 
 #[test]
 fn down() {
     let h = home("down");
     let cmds = dry("test-setup", &h, &["down"]);
-    for s in SESSIONS {
-        assert_eq!(count(&cmds, &format!("herdr session stop {s} --json")), 1);
-    }
+    assert_eq!(
+        count(&cmds, &format!("hall session stop {SESSION} --json")),
+        1
+    );
     assert_eq!(count(&cmds, "session delete"), 0);
     let cmds = dry("test-setup", &h, &["down", "--delete"]);
-    assert_eq!(count(&cmds, "session delete"), 2);
+    assert_eq!(count(&cmds, "session delete"), 1);
 }
 
 #[test]
@@ -175,19 +248,21 @@ fn status_is_read_only() {
     let cmds = dry("test-setup", &h, &["status"]);
     for c in &cmds {
         let read = [
-            "herdr session list --json",
+            "hall session list --json",
             " pane get ",
             " agent explain ",
-            "+ grep ",
             "+ jq ",
             " locate ",
             " listing",
+            "/scripts/live-check",
         ]
         .iter()
         .any(|r| c.contains(r));
         assert!(read, "status runs something that is not a read: {c}");
     }
-    assert!(count(&cmds, ".reeve/state") >= 2);
+    // The live setup check is scripts/live-check, not one of the scripts' own.
+    assert_eq!(count(&cmds, "/scripts/live-check"), 1);
+    assert_eq!(count(&cmds, ".reeve/state"), 0);
 }
 
 #[test]
@@ -436,20 +511,18 @@ fn down_and_status_go_on_past_a_dirtied_home() {
     plant_npm_link(&h.join("work/ansel"));
     refused_inside(&user, &h, "is a symlink");
 
-    // down still stops, and with --delete deletes, both test herdr sessions by name.
+    // down still stops, and with --delete deletes, the test hall session by name.
     let hs = h.to_str().unwrap();
     for (args, verb) in [
         (&["--dry-run", "--home", hs, "down"][..], "stop"),
         (&["--dry-run", "--home", hs, "down", "--delete"], "delete"),
     ] {
         let cmds = warned(&script_as(&user, "test-setup", args), &h, "is a symlink");
-        for s in SESSIONS {
-            assert_eq!(
-                count(&cmds, &format!("herdr session {verb} {s} --json")),
-                1,
-                "{cmds:?}"
-            );
-        }
+        assert_eq!(
+            count(&cmds, &format!("hall session {verb} {SESSION} --json")),
+            1,
+            "{cmds:?}"
+        );
     }
     let out = script_as(&user, "test-setup", &["--dry-run", "--home", hs, "status"]);
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -501,10 +574,7 @@ fn up_refuses_to_write_through_a_symlink() {
     // Dangling links first: a plain -e test reads them as absent.
     for (name, target) in [
         ("standin/world.toml", live.join("world.toml")),
-        (
-            "standin/live-baseline.json",
-            live.join("live-baseline.json"),
-        ),
+        ("xdg-config", live.join("xdg-config")),
         ("standin", live.join("standin")),
         ("work/ansel", live.join("ansel")),
         ("work", live.clone()),
@@ -585,30 +655,44 @@ fn refuses_without_the_stand_in() {
 }
 
 #[test]
-fn refuses_the_live_herdr_session() {
+fn refuses_the_default_hall_session() {
     let h = home("refuse-default");
     for cmd in ALL {
-        for (flag, name) in [
-            ("--session-1", "default"),
-            ("--session-2", "default"),
-            ("--session-1", "Default"),
-        ] {
-            let mut args = vec!["--dry-run", "--home", h.to_str().unwrap(), flag, name];
+        for name in ["default", "Default"] {
+            let mut args = vec![
+                "--dry-run",
+                "--home",
+                h.to_str().unwrap(),
+                "--session",
+                name,
+            ];
             args.extend_from_slice(&cmd[1..]);
-            refused(&script(cmd[0], &args), "belongs to the live setup");
+            refused(&script(cmd[0], &args), "never the test setup's");
         }
         let mut args = vec![
             "--dry-run",
             "--home",
             h.to_str().unwrap(),
-            "--session-2",
+            "--session",
             "work",
         ];
         args.extend_from_slice(&cmd[1..]);
         refused(
             &script(cmd[0], &args),
-            "test herdr sessions are named hall-dev*",
+            "test hall sessions are named hall-dev*",
         );
+        // The second session is gone (decision 38).
+        let mut args = vec![
+            "--dry-run",
+            "--home",
+            h.to_str().unwrap(),
+            "--session-2",
+            "hall-dev-2",
+        ];
+        args.extend_from_slice(&cmd[1..]);
+        let out = script(cmd[0], &args);
+        assert_eq!(out.status.code(), Some(2), "{out:?}");
+        assert!(String::from_utf8_lossy(&out.stderr).contains("unknown option --session-2"));
     }
 }
 
@@ -619,7 +703,7 @@ fn inputs_are_required() {
     let conf = dir.join("no-home.conf");
     std::fs::write(
         &conf,
-        "HALL_DEV_SESSION_1=hall-dev\nHALL_DEV_SESSION_2=hall-dev-2\nHALL_DEV_ROSTER=(\"reeve ansel 1\")\n",
+        "HALL_DEV_SESSION=hall-dev\nHALL_DEV_ROSTER=(\"reeve ansel\")\n",
     )
     .unwrap();
     let out = script(

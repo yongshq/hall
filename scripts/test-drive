@@ -7,15 +7,15 @@ HALL_PROG=test-drive
 HALL_USAGE="usage: scripts/test-drive [options] <test reeve> dialog|turn-end|deny
 
   dialog    prompt the test reeve to create a file, which its default
-            permissions ask about, wait for herdr to read it as blocked, and
-            print herdr's reading; the dialog is left standing
+            permissions ask about, wait for hall to read it as blocked, and
+            print hall's reading; the dialog is left standing
   turn-end  deny any standing dialog with Esc, prompt a direct question, wait
-            for the turn to end, and print herdr's reading
-  deny      deny a standing dialog with Esc and print herdr's reading
+            for the turn to end, and print hall's reading
+  deny      deny a standing dialog with Esc and print hall's reading
 
 A dialog is never answered with allow.
 
-options: --home, --session-1, --session-2, --config, --dry-run, as for
+options: --home, --session, --config, --dry-run, as for
 scripts/test-setup"
 
 # shellcheck source=test-setup-lib.sh

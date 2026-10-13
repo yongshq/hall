@@ -6,7 +6,9 @@ use serde::Serialize;
 
 use crate::world::{HandState, World};
 
-/// Which herdr session, and which session (pane) inside it, holds a reeve or a hand.
+/// Which hall session, and which session (pane) inside it, holds a reeve or a hand.
+/// The field keeps its draft name, `herdr_session`; since step 2 it holds a hall
+/// session name (plan, "Listing format hall needs from reeve").
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SessionLocation {
     pub herdr_session: String,

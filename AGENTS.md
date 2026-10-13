@@ -64,4 +64,4 @@ Never build, test or run a commit before `237d5cf` (feat: separate hall from her
 
 Run `scripts/live-check` (with `HERDR_*` and `HALL_*` unset) and include its output in your report. It must exit 0. It fails on any entry in the live herdr's places that is not in its baseline: never accept an entry yourself (`scripts/live-check accept ...`); report it with what the check printed and let the liege decide. Never delete its baseline (`~/.local/state/hall-live-check/baseline.json`): that is the only reset, and it re-baselines over anything new.
 
-Do not run `scripts/test-setup` or `scripts/test-drive` until step 2 retargets them: they call `herdr session list`, which connects to the live `default`.
+`scripts/test-setup` and `scripts/test-drive` run the debug hall and the one hall session `hall-dev` and make no herdr call ([docs/test-setup.md](docs/test-setup.md)). Run them with `HERDR_*` and `HALL_*` unset too. Every test claude they start carries `XDG_CONFIG_HOME=~/.reeve-hall-dev/xdg-config` (decision 47), so no herdr call from a test pane finds the live herdr. Run `scripts/live-check` after `up` and after `down`.

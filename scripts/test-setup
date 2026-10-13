@@ -5,18 +5,19 @@ set -euo pipefail
 HALL_PROG=test-setup
 HALL_USAGE="usage: scripts/test-setup [options] up|down|status
 
-  up      seed the world file, start a claude session per roster line in the
-          test herdr sessions, record where each one sits, print the listing
-  down    stop the two test herdr sessions and forget the recorded panes
-  status  read only: the test herdr sessions, each session's herdr reading,
-          and a check that the live setup is untouched
+  up      start the test hall session if it is not running, seed the world
+          file, start a claude session per roster line (each test reeve in a
+          workspace of its own, each test hand a tab in its reeve's workspace),
+          record where each one sits, print the listing
+  down    stop the test hall session and forget the recorded panes
+  status  read only: the test hall session, each recorded pane's hall reading,
+          and scripts/live-check, the check that the live setup is untouched
 
 options:
   --home <path>        test reeve home (else HALL_DEV_HOME from the config)
-  --session-1 <name>   first test herdr session (else HALL_DEV_SESSION_1)
-  --session-2 <name>   second test herdr session (else HALL_DEV_SESSION_2)
+  --session <name>     test hall session (else HALL_DEV_SESSION)
   --config <file>      config to source (default scripts/test-setup.conf)
-  --delete             with down: also delete the stopped herdr sessions' saved state
+  --delete             with down: also delete the stopped hall session's saved state
   --dry-run            print every command, run none"
 
 # shellcheck source=test-setup-lib.sh
@@ -33,22 +34,42 @@ CMD=${REST[0]}
 case $CMD in up | down | status) ;; *) usage_die "unknown command $CMD" ;; esac
 [ "$DELETE" = 0 ] || [ "$CMD" = down ] || usage_die "--delete goes with down only"
 # down and status still run on a home that fails only the walk inside it, so the
-# test sessions can always be seen and stopped; up writes and launches, so it blocks.
+# test session can always be seen and stopped; up writes and launches, so it blocks.
 case $CMD in down | status) HOME_WALK=warn ;; esac
 load_inputs
 
 WORLD="$HALL_DEV_HOME/standin/world.toml"
-BASELINE="$HALL_DEV_HOME/standin/live-baseline.json"
+# How long up waits for a hall server it started to answer, in tenths of a second.
+START_WAIT=150
 
-# session_running <json> <name>: 0 when the session list shows it running.
+# session_running <json> <name>: 0 when hall's session list shows it running.
 session_running() {
   [ "$DRY_RUN" = 1 ] && return 0
   [ "$(printf '%s' "$1" | jq -r --arg n "$2" '.sessions[]? | select(.name == $n) | .running')" = true ]
 }
 
-# The session list entry of the herdr session that is the live one, as one line of JSON.
-live_entry() {
-  printf '%s' "$1" | jq -c '[.sessions[]? | select(.default == true) | {name, running, socket_path, session_dir}] | first // empty'
+# session_socket <json> <name>: the session's API socket path from hall's session list.
+session_socket() {
+  printf '%s' "$1" | jq -r --arg n "$2" '.sessions[]? | select(.name == $n) | .socket_path // empty'
+}
+
+# start_session <name>: starts the hall server for that session, detached, and
+# waits until hall's session list shows it running. Leaves the list in SESSIONS.
+start_session() {
+  local s=$1 i
+  check_session "$s"
+  detach "${HALL_CLI[@]}" --session "$s" server
+  if [ "$DRY_RUN" = 1 ]; then
+    hall_session_list SESSIONS
+    return 0
+  fi
+  say "+ $(q "${HALL_CLI[@]}" session list --json) (until $s is running, up to $((START_WAIT / 10))s)"
+  for ((i = 0; i < START_WAIT; i++)); do
+    SESSIONS=$("${HALL_CLI[@]}" session list --json) || die "hall session list failed"
+    session_running "$SESSIONS" "$s" && return 0
+    sleep 0.1
+  done
+  die "hall session $s did not start within $((START_WAIT / 10))s; see $HALL_DEV_HOME and hall's server log"
 }
 
 seed_world() {
@@ -56,6 +77,7 @@ seed_world() {
   text="# hall test setup world file: what the stand-in serves as the draft listing.
 # Seeded by scripts/test-setup up from the roster. Edit freely, or use
 # hall-standin --home <home> set <name> <key>=<value>. Format: docs/listing-draft.md.
+# herdr_session holds the hall session's name.
 "
   for line in "${HALL_DEV_ROSTER[@]}"; do
     roster_read "$line"
@@ -82,102 +104,149 @@ in_flight = true
 herdr_session = \"$R_SESSION\"
 "
         ;;
-      *) die "roster line '$line': kind is reeve or errand" ;;
     esac
   done
   write_file "$WORLD" "$text"
 }
 
+# check_pane_id <id> <what>: the stand-in's pane id rule (is_pane_id), checked
+# before the id reaches hall's command line, where a leading '-' would read as
+# an option.
+check_pane_id() {
+  [[ $1 =~ ^[A-Za-z0-9:_][A-Za-z0-9:_-]*$ ]] || die "refusing pane id $(q "$1") from $2: not letters, digits, ':', '_' and '-', starting with no '-'"
+}
+
+# The workspace each test reeve sits in, by name, so its test hands open as
+# tabs there. Parallel arrays: macOS bash 3.2 has no associative ones.
+WS_NAMES=()
+WS_IDS=()
+
+ws_of() {
+  local i
+  for ((i = 0; i < ${#WS_NAMES[@]}; i++)); do
+    [ "${WS_NAMES[$i]}" = "$1" ] && { printf '%s\n' "${WS_IDS[$i]}"; return 0; }
+  done
+  return 1
+}
+
+# up_line: brings up the test reeve or test hand in R_*, unless the world file
+# already records a pane hall still has in the right session.
+up_line() {
+  local loc pane out ws created
+  say "$R_KIND $R_NAME in $R_SESSION:"
+  make_dir "$(work_dir "$R_NAME")"
+  trust_report "$(work_dir "$R_NAME")"
+
+  loc=""
+  if run_into loc "" "$HALL_STANDIN" --home "$HALL_DEV_HOME" locate "$R_NAME" 2>/dev/null && [ -n "$loc" ]; then
+    pane=${loc#* }
+    if [ "${loc%% *}" = "$R_SESSION" ] && hd_into out "" "$R_SESSION" pane get "$pane" 2>/dev/null; then
+      say "  already up in pane $pane"
+      if [ "$R_KIND" = reeve ] && [ "$DRY_RUN" = 0 ]; then
+        WS_NAMES+=("$R_NAME")
+        WS_IDS+=("$(printf '%s' "$out" | jq -r '.result.pane.workspace_id // empty')")
+      fi
+      return 0
+    fi
+  fi
+
+  if [ "$R_KIND" = reeve ]; then
+    hd_into created '{}' "$R_SESSION" workspace create --cwd "$(work_dir "$R_NAME")" --label "$R_NAME" --no-focus
+  else
+    if [ "$DRY_RUN" = 1 ]; then
+      ws="<workspace-of-$R_OWNER>"
+    else
+      ws=$(ws_of "$R_OWNER") && [ -n "$ws" ] || die "errand $R_NAME: its owner $R_OWNER is not a test reeve that is up, so it has no workspace to open a tab in"
+    fi
+    hd_into created '{}' "$R_SESSION" tab create --workspace "$ws" --cwd "$(work_dir "$R_NAME")" --label "$R_NAME" --no-focus
+  fi
+  if [ "$DRY_RUN" = 1 ]; then
+    pane="<pane-of-$R_NAME>"
+  else
+    pane=$(printf '%s' "$created" | jq -r '.result.root_pane.pane_id // empty')
+    [ -n "$pane" ] || die "$R_KIND $R_NAME: hall gave no pane id: $created"
+    check_pane_id "$pane" "hall's reply for $R_KIND $R_NAME"
+    if [ "$R_KIND" = reeve ]; then
+      WS_NAMES+=("$R_NAME")
+      WS_IDS+=("$(printf '%s' "$created" | jq -r '.result.root_pane.workspace_id // empty')")
+    fi
+  fi
+  hd "$R_SESSION" pane run "$pane" "$(claude_line "$R_NAME")"
+  standin place "$R_NAME" "$R_SESSION" "$pane"
+}
+
 cmd_up() {
-  local sessions line pane loc ws out missing=0 s
+  local line
   if [ "$DRY_RUN" = 0 ]; then
-    command -v herdr >/dev/null || die "herdr is not on PATH"
     command -v jq >/dev/null || die "jq is not on PATH"
+    command -v perl >/dev/null || die "perl is not on PATH"
   fi
   if [ -n "${HALL_STANDIN_BIN:-}" ]; then
     say "  stand-in: $HALL_STANDIN (HALL_STANDIN_BIN, not built here)"
-  else
-    say "  cargo: $HALL_RUSTUP_BIN put first on PATH (keg-only rustup)"
-    PATH="$HALL_RUSTUP_BIN:$PATH"
-    run cargo build --quiet --manifest-path "$HALL_REPO/Cargo.toml" -p hall-standin
   fi
+  if [ -n "${HALL_DEBUG_BIN:-}" ]; then
+    say "  hall: $HALL_BIN (HALL_DEBUG_BIN, not built here)"
+  fi
+  local build=()
+  [ -n "${HALL_DEBUG_BIN:-}" ] || build+=(-p hall)
+  [ -n "${HALL_STANDIN_BIN:-}" ] || build+=(-p hall-standin)
+  if [ "${#build[@]}" -gt 0 ]; then
+    say "  cargo: $HALL_RUSTUP_BIN and $HALL_ZIG_BIN put first on PATH (keg-only rustup and zig)"
+    PATH="$HALL_RUSTUP_BIN:$HALL_ZIG_BIN:$PATH"
+    run "${HALL_CLEAN_ENV[@]}" cargo build --quiet --manifest-path "$HALL_REPO/Cargo.toml" "${build[@]}"
+  fi
+  [ "$DRY_RUN" = 1 ] || [ -x "$HALL_BIN" ] || die "hall $HALL_BIN is not built"
 
-  herdr_session_list sessions
-  for s in "$HALL_DEV_SESSION_1" "$HALL_DEV_SESSION_2"; do
-    if [ "$DRY_RUN" = 1 ]; then
-      say "  (dry run: if $s is not running, up stops here and asks the liege to run, in a spare terminal:"
-      say "     $(q "${HALL_HERDR[@]}" --session "$s")"
-      say "   then detach with ctrl+b q and run up again)"
-    elif ! session_running "$sessions" "$s"; then
-      missing=1
-      say "herdr session $s is not running. Herdr documents no way to start a named session"
-      say "without a client attached, so start it yourself, in a spare terminal:"
-      say "  $(q "${HALL_HERDR[@]}" --session "$s")"
-      say "then detach with ctrl+b q (the server keeps running) and run up again."
-    fi
-  done
-  [ "$missing" = 0 ] || exit 3
+  hall_session_list SESSIONS
+  if session_running "$SESSIONS" "$HALL_DEV_SESSION" && [ "$DRY_RUN" = 0 ]; then
+    say "  hall session $HALL_DEV_SESSION is running"
+  else
+    start_session "$HALL_DEV_SESSION"
+  fi
+  if [ "$DRY_RUN" = 1 ]; then
+    HALL_DEV_SOCKET="<socket-of-$HALL_DEV_SESSION>"
+  else
+    HALL_DEV_SOCKET=$(session_socket "$SESSIONS" "$HALL_DEV_SESSION")
+    # It goes into the command line each pane runs, so it must be plain.
+    [[ $HALL_DEV_SOCKET =~ ^/[A-Za-z0-9_./-]+$ ]] || die "refusing hall session $HALL_DEV_SESSION's socket $(q "$HALL_DEV_SOCKET"): use letters, digits, '.', '_', '-' and '/' only"
+  fi
+  say "  socket: $HALL_DEV_SOCKET"
 
   make_dir "$HALL_DEV_HOME/standin"
+  make_dir "$(xdg_dir)"
   if [ "$DRY_RUN" = 1 ] || [ ! -e "$WORLD" ]; then
     seed_world
   else
     say "  world file $WORLD exists, kept as it is"
   fi
-  if [ "$DRY_RUN" = 0 ] && [ -z "$(live_entry "$sessions")" ]; then
-    die "the herdr session list shows no live session to take a baseline of"
-  fi
-  if [ "$DRY_RUN" = 1 ] || [ ! -e "$BASELINE" ]; then
-    write_file "$BASELINE" "$(live_entry "$sessions")"
-  fi
 
+  # Test reeves first, so each test hand has its reeve's workspace to open in.
   for line in "${HALL_DEV_ROSTER[@]}"; do
     roster_read "$line"
-    say "$R_KIND $R_NAME in $R_SESSION:"
-    make_dir "$(work_dir "$R_NAME")"
-    trust_report "$(work_dir "$R_NAME")"
-
-    loc=""
-    if run_into loc "" "$HALL_STANDIN" --home "$HALL_DEV_HOME" locate "$R_NAME" 2>/dev/null && [ -n "$loc" ]; then
-      pane=${loc#* }
-      if [ "${loc%% *}" = "$R_SESSION" ] && hd_into out "" "$R_SESSION" pane get "$pane" 2>/dev/null; then
-        say "  already up in pane $pane"
-        continue
-      fi
-    fi
-    hd_into ws '{}' "$R_SESSION" workspace create --cwd "$(work_dir "$R_NAME")" --label "$R_NAME" --no-focus
-    if [ "$DRY_RUN" = 1 ]; then
-      pane="<pane-of-$R_NAME>"
-    else
-      pane=$(printf '%s' "$ws" | jq -r '.result.root_pane.pane_id // empty')
-      [ -n "$pane" ] || die "workspace create in $R_SESSION gave no pane id: $ws"
-      # The stand-in's pane id rule (is_pane_id), checked before the id reaches
-      # herdr's command line, where a leading '-' would read as an option.
-      [[ $pane =~ ^[A-Za-z0-9:_][A-Za-z0-9:_-]*$ ]] || die "refusing pane id $(q "$pane") from workspace create in $R_SESSION: not letters, digits, ':', '_' and '-', starting with no '-'"
-    fi
-    hd "$R_SESSION" pane run "$pane" "$(claude_line "$R_NAME")"
-    standin place "$R_NAME" "$R_SESSION" "$pane"
+    [ "$R_KIND" = reeve ] && up_line
+  done
+  for line in "${HALL_DEV_ROSTER[@]}"; do
+    roster_read "$line"
+    [ "$R_KIND" = errand ] && up_line
   done
 
   say "listing:"
   standin listing
-  say "next: answer any folder trust dialog yourself, then scripts/test-setup status"
+  say "next: answer any folder trust dialog yourself (attach with $(q "${HALL_CLI[@]}" --session "$HALL_DEV_SESSION")), then scripts/test-setup status"
 }
 
 cmd_down() {
-  local sessions line s
-  herdr_session_list sessions
-  for s in "$HALL_DEV_SESSION_1" "$HALL_DEV_SESSION_2"; do
-    check_session "$s"
-    if session_running "$sessions" "$s"; then
-      run "${HALL_HERDR[@]}" session stop "$s" --json
-    else
-      say "  $s is not running"
-    fi
-    if [ "$DELETE" = 1 ]; then
-      run "${HALL_HERDR[@]}" session delete "$s" --json
-    fi
-  done
+  local sessions line s=$HALL_DEV_SESSION
+  hall_session_list sessions
+  check_session "$s"
+  if session_running "$sessions" "$s"; then
+    run "${HALL_CLI[@]}" session stop "$s" --json
+  else
+    say "  $s is not running"
+  fi
+  if [ "$DELETE" = 1 ]; then
+    run "${HALL_CLI[@]}" session delete "$s" --json
+  fi
   if [ "$HOME_WALKED" = 0 ]; then
     say "  recorded panes not forgotten: the test reeve home fails the check inside it, so its world file is left alone"
   elif [ "$DRY_RUN" = 1 ] || [ -e "$WORLD" ]; then
@@ -190,35 +259,12 @@ cmd_down() {
 }
 
 cmd_status() {
-  local sessions s line loc pane live base hits out
-  herdr_session_list sessions
-  if [ "$DRY_RUN" = 0 ]; then
-    for s in "$HALL_DEV_SESSION_1" "$HALL_DEV_SESSION_2"; do
-      say "  $s: $(printf '%s' "$sessions" | jq -c --arg n "$s" '[.sessions[]? | select(.name == $n) | {running, socket_path}] | first // "not listed"')"
-    done
-    live=$(live_entry "$sessions")
-    say "live setup:"
-    if [ -z "$live" ]; then
-      say "  CHECK: the session list shows no live herdr session"
-    else
-      say "  live herdr session: $live"
-      if [ "$HOME_WALKED" = 0 ]; then
-        say "  CHECK: up's baseline not read: the test reeve home fails the check inside it"
-      elif [ -e "$BASELINE" ]; then
-        base=$(jq -c . "$BASELINE")
-        if [ "$base" = "$live" ]; then say "  live session entry (name, socket, dir, running) unchanged since up's baseline; its panes are not checked"; else say "  CHECK: differs from up's baseline $base"; fi
-      else
-        say "  no baseline yet (up writes one)"
-      fi
-      for s in "$HALL_DEV_SESSION_1" "$HALL_DEV_SESSION_2"; do
-        if [ "$(printf '%s' "$sessions" | jq -r --arg n "$s" '.sessions[]? | select(.name == $n) | .socket_path')" = "$(printf '%s' "$live" | jq -r .socket_path)" ]; then
-          say "  CHECK: $s shares the live session's socket"
-        fi
-      done
-    fi
-  fi
+  local sessions s line loc pane out rc=0
+  hall_session_list sessions
+  [ "$DRY_RUN" = 1 ] ||
+    say "  $HALL_DEV_SESSION: $(printf '%s' "$sessions" | jq -c --arg n "$HALL_DEV_SESSION" '[.sessions[]? | select(.name == $n) | {running, socket_path}] | first // "not listed"')"
 
-  say "test sessions:"
+  say "test session:"
   [ "$HOME_WALKED" = 1 ] || say "  CHECK: recorded panes not read: the test reeve home fails the check inside it"
   for line in "${HALL_DEV_ROSTER[@]}"; do
     [ "$HOME_WALKED" = 1 ] || break
@@ -230,7 +276,7 @@ cmd_status() {
     pane=${loc#* }
     s=${loc%% *}
     if ! (check_session "$s") 2>/dev/null; then
-      say "  CHECK: $R_KIND $R_NAME is recorded in herdr session $s, which is not a test herdr session"
+      say "  CHECK: $R_KIND $R_NAME is recorded in hall session $s, which is not a test hall session"
       continue
     fi
     if ! session_running "$sessions" "$s"; then
@@ -238,25 +284,12 @@ cmd_status() {
       continue
     fi
     if hd_into out "{}" "$s" pane get "$pane" 2>/dev/null; then
-      [ "$DRY_RUN" = 1 ] || say "  $R_KIND $R_NAME: pane $pane is in $s, not in the live session"
+      [ "$DRY_RUN" = 1 ] || say "  $R_KIND $R_NAME: pane $pane is in $s, $(printf '%s' "$out" | jq -r '"workspace \(.result.pane.workspace_id), tab \(.result.pane.tab_id)"')"
       explain_report "$s" "$pane"
     else
       say "  CHECK: $R_KIND $R_NAME: pane $pane not found in $s"
     fi
   done
-
-  say "live reeve state (~/.reeve/state) mentions of the test setup:"
-  local names=()
-  for line in "${HALL_DEV_ROSTER[@]}"; do
-    roster_read "$line"
-    names+=(-e "$R_NAME")
-  done
-  hits=""
-  run_into hits "" grep -rlF -e "$HALL_DEV_HOME" "$HOME/.reeve/state" || true
-  [ "$DRY_RUN" = 1 ] || say "  test home: ${hits:-none}"
-  hits=""
-  run_into hits "" grep -rlwF "${names[@]}" "$HOME/.reeve/state" || true
-  [ "$DRY_RUN" = 1 ] || say "  test names: ${hits:-none}"
 
   say "folder trust:"
   for line in "${HALL_DEV_ROSTER[@]}"; do
@@ -269,6 +302,14 @@ cmd_status() {
   elif [ "$DRY_RUN" = 1 ] || { [ -x "$HALL_STANDIN" ] && [ -e "$WORLD" ]; }; then
     say "listing:"
     standin listing || true
+  fi
+
+  # The live setup check is its own tool, which makes no herdr call (decision 40).
+  say "live setup:"
+  run "$HALL_REPO/scripts/live-check" || rc=$?
+  if [ "$rc" != 0 ]; then
+    say "  CHECK: scripts/live-check failed (exit status $rc); see above"
+    return 1
   fi
 }
 

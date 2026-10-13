@@ -1,28 +1,40 @@
 # shellcheck shell=bash
 # Shared by scripts/test-setup and scripts/test-drive. Sourced, never run.
 #
-# The rules every function here keeps (ADR 0003, decisions 24 and 26):
-# - every herdr call names its herdr session with --session on the command line
-#   and runs under `env -u HERDR_SOCKET_PATH -u HERDR_SESSION`, because a process
-#   inside a live herdr pane inherits a HERDR_SOCKET_PATH pointing at default;
-# - the herdr session default and the reeve home ~/.reeve are refused, the home
+# The rules every function here keeps (ADR 0003, decisions 26, 33, 38 and 47):
+# - no herdr call at all: every call runs the debug hall binary, names the one
+#   hall session with --session on the command line, and runs under `env -u` of
+#   the HALL_* names hall reads, because a process inside a hall pane inherits
+#   HALL_SESSION, HALL_PANE_ID and the rest;
+# - the hall session default and the reeve home ~/.reeve are refused, the home
 #   by the stand-in's check-root before anything else happens;
-# - every test reeve and test hand claude starts with REEVE_HOME=<test home> on
-#   its own command line;
+# - every test reeve and test hand claude starts with REEVE_HOME=<test home>
+#   and XDG_CONFIG_HOME=<test home>/xdg-config on its own command line, so no
+#   herdr call from a test pane can find the live herdr's config, sessions or
+#   sockets; and with HALL_SOCKET_PATH=<the hall session's socket>, so a hall
+#   call from a test pane still reaches that session;
 # - --dry-run prints every command and runs none.
 
 HALL_REPO=$(cd -P "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 HALL_MODEL=claude-haiku-4-5-20251001
 HALL_RUSTUP_BIN=/opt/homebrew/opt/rustup/bin
+HALL_ZIG_BIN=/opt/homebrew/opt/zig@0.15/bin
 # A prebuilt stand-in may be named here (the tests do); otherwise up builds it.
 HALL_STANDIN="${HALL_STANDIN_BIN:-$HALL_REPO/target/debug/hall-standin}"
-HALL_HERDR=(env -u HERDR_SOCKET_PATH -u HERDR_SESSION herdr)
+# A prebuilt hall may be named here (the tests name a fake one); otherwise up
+# builds the debug hall, whose folders are ~/.config/hall-dev and the rest.
+HALL_BIN="${HALL_DEBUG_BIN:-$HALL_REPO/target/debug/hall}"
+# The HALL_* names hall reads, dropped from every hall call and build.
+HALL_CLEAN_ENV=(env -u HALL_SOCKET_PATH -u HALL_CLIENT_SOCKET_PATH -u HALL_SESSION -u HALL_CONFIG_PATH -u HALL_ENV -u HALL_PANE_ID)
+HALL_CLI=("${HALL_CLEAN_ENV[@]}" "$HALL_BIN")
 
 DRY_RUN=0
 CONFIG="$HALL_REPO/scripts/test-setup.conf"
 ARG_HOME=""
-ARG_SESSION_1=""
-ARG_SESSION_2=""
+ARG_SESSION=""
+# The hall session's API socket, from hall's session list; the test claudes'
+# HALL_SOCKET_PATH. Set by up.
+HALL_DEV_SOCKET=""
 
 die() {
   printf '%s: %s\n' "$HALL_PROG" "$*" >&2
@@ -54,6 +66,15 @@ run() {
   say "+ $(q "$@")"
   [ "$DRY_RUN" = 1 ] && return 0
   "$@"
+}
+
+# detach <cmd...>: print the command, then, unless this is a dry run, start it
+# in a session of its own (setsid) with stdio on /dev/null, as hall's own launch
+# starts its server, so it outlives this script and the terminal it ran in.
+detach() {
+  say "+ $(q "$@") &"
+  [ "$DRY_RUN" = 1 ] && return 0
+  perl -MPOSIX=setsid -e 'setsid() != -1 or die "setsid: $!\n"; exec @ARGV or die "exec $ARGV[0]: $!\n"' "$@" </dev/null >/dev/null 2>&1 &
 }
 
 # run_into <var> <placeholder> <cmd...>: like run, keeping stdout in <var>. A dry
@@ -103,31 +124,32 @@ check_session() {
   shopt -s nocasematch
   if [[ $s == default ]]; then
     shopt -u nocasematch
-    die "refusing herdr session $s: it belongs to the live setup"
+    die "refusing hall session $s: the default session is never the test setup's; it is the live one once hall is in use"
   fi
   shopt -u nocasematch
-  [[ $s =~ ^hall-dev[a-z0-9-]*$ ]] || die "refusing herdr session $s: test herdr sessions are named hall-dev*"
+  [[ $s =~ ^hall-dev[a-z0-9-]*$ ]] || die "refusing hall session $s: test hall sessions are named hall-dev*"
 }
 
-# hd <herdr session> <herdr args...>: one herdr call against that session.
+# hd <hall session> <hall args...>: one hall call against that session.
 hd() {
   local s=$1
   shift
   check_session "$s"
-  run "${HALL_HERDR[@]}" "$@" --session "$s"
+  run "${HALL_CLI[@]}" "$@" --session "$s"
 }
 
-# hd_into <var> <placeholder> <herdr session> <herdr args...>
+# hd_into <var> <placeholder> <hall session> <hall args...>
 hd_into() {
   local __v=$1 __p=$2 s=$3
   shift 3
   check_session "$s"
-  run_into "$__v" "$__p" "${HALL_HERDR[@]}" "$@" --session "$s"
+  run_into "$__v" "$__p" "${HALL_CLI[@]}" "$@" --session "$s"
 }
 
-# The one herdr call that names no session: the read-only list of all of them.
-herdr_session_list() {
-  run_into "$1" '{"sessions":[]}' "${HALL_HERDR[@]}" session list --json
+# The one hall call that names no session: the read-only list of hall's
+# sessions, from hall's own folder. It never sees herdr's.
+hall_session_list() {
+  run_into "$1" '{"sessions":[]}' "${HALL_CLI[@]}" session list --json
 }
 
 # What a home that passes the root check but fails the stand-in's walk inside it
@@ -170,8 +192,7 @@ parse_common() {
     case $1 in
       --dry-run) DRY_RUN=1 ;;
       --home) [ $# -ge 2 ] || usage_die "--home needs a path"; ARG_HOME=$2; shift ;;
-      --session-1) [ $# -ge 2 ] || usage_die "--session-1 needs a name"; ARG_SESSION_1=$2; shift ;;
-      --session-2) [ $# -ge 2 ] || usage_die "--session-2 needs a name"; ARG_SESSION_2=$2; shift ;;
+      --session) [ $# -ge 2 ] || usage_die "--session needs a name"; ARG_SESSION=$2; shift ;;
       --config) [ $# -ge 2 ] || usage_die "--config needs a file"; CONFIG=$2; shift ;;
       -h | --help) say "$HALL_USAGE"; exit 0 ;;
       --*) usage_die "unknown option $1" ;;
@@ -184,7 +205,7 @@ parse_common() {
 # load_inputs: the config file, then the flags over it; then every input checked and printed.
 load_inputs() {
   : "${HOME:?HOME must be set, to rule out the live reeve home}"
-  HALL_DEV_HOME="" HALL_DEV_SESSION_1="" HALL_DEV_SESSION_2=""
+  HALL_DEV_HOME="" HALL_DEV_SESSION=""
   HALL_DEV_ROSTER=()
   if [ -n "$CONFIG" ]; then
     [ -f "$CONFIG" ] || die "config file $CONFIG not found"
@@ -192,35 +213,25 @@ load_inputs() {
     . "$CONFIG"
   fi
   [ -n "$ARG_HOME" ] && HALL_DEV_HOME=$ARG_HOME
-  [ -n "$ARG_SESSION_1" ] && HALL_DEV_SESSION_1=$ARG_SESSION_1
-  [ -n "$ARG_SESSION_2" ] && HALL_DEV_SESSION_2=$ARG_SESSION_2
+  [ -n "$ARG_SESSION" ] && HALL_DEV_SESSION=$ARG_SESSION
   case $HALL_DEV_HOME in "~/"*) HALL_DEV_HOME="$HOME/${HALL_DEV_HOME#"~/"}" ;; esac
 
   [ -n "$HALL_DEV_HOME" ] || usage_die "no reeve home: pass --home or set HALL_DEV_HOME in the config"
-  [ -n "$HALL_DEV_SESSION_1" ] || usage_die "no first herdr session: pass --session-1 or set HALL_DEV_SESSION_1"
-  [ -n "$HALL_DEV_SESSION_2" ] || usage_die "no second herdr session: pass --session-2 or set HALL_DEV_SESSION_2"
+  [ -n "$HALL_DEV_SESSION" ] || usage_die "no hall session: pass --session or set HALL_DEV_SESSION"
   check_home "$HALL_DEV_HOME"
-  check_session "$HALL_DEV_SESSION_1"
-  check_session "$HALL_DEV_SESSION_2"
-  [ "$HALL_DEV_SESSION_1" != "$HALL_DEV_SESSION_2" ] || die "the two herdr sessions must differ"
+  check_session "$HALL_DEV_SESSION"
   [ "${#HALL_DEV_ROSTER[@]}" -gt 0 ] || die "no roster: set HALL_DEV_ROSTER in the config"
+  local line
+  for line in "${HALL_DEV_ROSTER[@]}"; do roster_read "$line"; done
 
   say "test setup inputs:"
   say "  reeve home:      $HALL_DEV_HOME"
-  say "  herdr sessions:  $HALL_DEV_SESSION_1 $HALL_DEV_SESSION_2"
+  say "  hall session:    $HALL_DEV_SESSION"
+  say "  hall:            $HALL_BIN"
   say "  config:          ${CONFIG:-none}"
   [ "$HOME_WALKED" = 1 ] || say "  WARNING:         the test reeve home fails the check inside it (see stderr); nothing inside it is read or written"
   [ "$DRY_RUN" = 1 ] && say "  dry run:         printing commands, running none"
   return 0
-}
-
-# roster_session <1|2>: the herdr session name for a roster session number.
-roster_session() {
-  case $1 in
-    1) printf '%s\n' "$HALL_DEV_SESSION_1" ;;
-    2) printf '%s\n' "$HALL_DEV_SESSION_2" ;;
-    *) die "roster names herdr session $1; use 1 or 2" ;;
-  esac
 }
 
 # roster_find <name>: sets R_KIND R_NAME R_SESSION R_OWNER R_OFFICE for that line.
@@ -233,18 +244,31 @@ roster_find() {
   return 1
 }
 
+# roster_read <line>: `reeve <name>` or `errand <id> <owner reeve> <office>`.
+# Every line sits in the one hall session (decision 38), a test hand as a tab in
+# its owner's workspace.
 roster_read() {
-  local n
-  read -r R_KIND R_NAME n R_OWNER R_OFFICE <<<"$1"
-  R_SESSION=$(roster_session "$n")
+  local extra
+  read -r R_KIND R_NAME R_OWNER R_OFFICE extra <<<"$1"
+  R_SESSION=$HALL_DEV_SESSION
+  case $R_KIND in
+    reeve) [ -z "$R_OWNER" ] || die "roster line '$1': a reeve line is 'reeve <name>' (no session number since step 2)" ;;
+    errand) [ -n "$R_OFFICE" ] && [ -z "$extra" ] || die "roster line '$1': an errand line is 'errand <id> <owner reeve> <office>' (no session number since step 2)" ;;
+    *) die "roster line '$1': kind is reeve or errand" ;;
+  esac
   [[ $R_NAME =~ ^[a-z][a-z0-9-]{0,31}$ ]] || die "roster name $R_NAME: use a-z, 0-9 and '-', starting with a letter"
 }
 
 work_dir() { printf '%s/work/%s\n' "$HALL_DEV_HOME" "$1"; }
 
-# The command line a test reeve or test hand runs in its pane (decision 26).
+# The throwaway config folder every test claude runs with (decision 47).
+xdg_dir() { printf '%s/xdg-config\n' "$HALL_DEV_HOME"; }
+
+# The command line a test reeve or test hand runs in its pane (decisions 26 and
+# 47). HOME is never changed: that would move ~/.claude.
 claude_line() {
-  printf 'cd "%s" && REEVE_HOME="%s" claude --model %s' "$(work_dir "$1")" "$HALL_DEV_HOME" "$HALL_MODEL"
+  printf 'cd "%s" && REEVE_HOME="%s" XDG_CONFIG_HOME="%s" HALL_SOCKET_PATH="%s" claude --model %s' \
+    "$(work_dir "$1")" "$HALL_DEV_HOME" "$(xdg_dir)" "$HALL_DEV_SOCKET" "$HALL_MODEL"
 }
 
 standin() { run "$HALL_STANDIN" --home "$HALL_DEV_HOME" "$@"; }
@@ -273,11 +297,11 @@ trust_report() {
   if [ -n "$found" ]; then
     say "  folder trust for $dir: accepted (recorded for $found)"
   else
-    say "  folder trust for $dir: NOT accepted; claude will open its trust dialog, which is the liege's to answer (herdr reads it as blocked)"
+    say "  folder trust for $dir: NOT accepted; claude will open its trust dialog, which is the liege's to answer (hall reads it as blocked)"
   fi
 }
 
-# explain_report <herdr session> <pane>: herdr's reading of that agent, from the live screen.
+# explain_report <hall session> <pane>: hall's reading of that agent, from its screen.
 explain_report() {
   local s=$1 pane=$2 doc state box
   hd_into doc '{}' "$s" agent explain "$pane" --json || {
@@ -289,7 +313,7 @@ explain_report() {
   box=$(printf '%s' "$doc" | jq -r '[.evaluated_rules[]? | select(.id == "live_prompt_box") | .matched] | first // false')
   local reading
   case $state in
-    blocked) reading="at a dialog (herdr: blocked)" ;;
+    blocked) reading="at a dialog (hall: blocked)" ;;
     working) reading="working" ;;
     idle | done)
       if [ "$box" = true ]; then reading="ready for input (turn ended)"; else reading="covered composer: a dialog is likely on screen"; fi

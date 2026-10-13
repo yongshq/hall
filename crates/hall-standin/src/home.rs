@@ -11,7 +11,8 @@ use std::path::{Component, Path, PathBuf};
 /// Every test reeve home's directory name starts with this.
 pub const TEST_HOME_PREFIX: &str = ".reeve-hall-dev";
 
-/// The live setup's herdr session. Never part of the test setup.
+/// The default session: the live herdr's, and hall's once hall is in use. Never
+/// part of the test setup.
 pub const LIVE_HERDR_SESSION: &str = "default";
 
 #[derive(Debug, PartialEq, Eq)]

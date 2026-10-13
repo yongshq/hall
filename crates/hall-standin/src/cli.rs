@@ -16,10 +16,10 @@ usage: hall-standin --home <test reeve home> [command]
                                          errand keys: state, question, waiting, idle, wedged, in_flight
                                          reeve keys: live
                                          an empty question= clears it
-  place <name> <herdr-session> [pane]  record where a reeve's or errand's session sits;
+  place <name> <hall-session> [pane]   record where a reeve's or errand's session sits;
                                          no pane forgets the recorded one
-  locate <name>                        print `<herdr-session> <pane-id>` for a reeve or errand
-  sessions                             print `<kind> <name> <herdr-session> <pane-id|->` per
+  locate <name>                        print `<hall-session> <pane-id>` for a reeve or errand
+  sessions                             print `<kind> <name> <hall-session> <pane-id|->` per
                                          reeve and errand in flight
   check-home                           print the test reeve home as resolved on disk, or
                                          refuse it; lists its directories but
@@ -132,7 +132,7 @@ pub fn run(
             match locate(&world, target) {
                 Some((session, Some(pane))) => writeln!(out, "{session} {pane}").map_err(failed),
                 Some((session, None)) => Err(CliError::Failed(format!(
-                    "{target} has no pane recorded yet in herdr session {session}"
+                    "{target} has no pane recorded yet in hall session {session}"
                 ))),
                 None => Err(CliError::Failed(format!(
                     "no reeve or errand called {target} in the world file"
