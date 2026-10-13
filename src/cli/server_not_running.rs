@@ -45,10 +45,10 @@ fn startup_command(socket_path: &Path) -> String {
     if socket_path == session_socket {
         crate::session::local_attach_command()
     } else {
-        // A socket override wins over an inherited HERDR_SESSION. Keep the
+        // A socket override wins over an inherited HALL_SESSION. Keep the
         // command in the current environment so it starts the overridden
         // target instead of directing the user to an unrelated session.
-        "herdr".to_string()
+        "hall".to_string()
     }
 }
 
@@ -71,4 +71,19 @@ pub(super) fn reported_response(err: &std::io::Error) -> Option<&ErrorResponse> 
     err.get_ref()
         .and_then(|source| source.downcast_ref::<ServerNotRunningReported>())
         .map(|reported| &reported.response)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    #[test]
+    fn a_socket_override_is_told_to_run_hall() {
+        let socket = Path::new("/nonexistent/hall-override-test.sock");
+        let response = super::response("cli:workspace:create", socket);
+        assert_eq!(
+            response.error.message,
+            "no hall server is running at /nonexistent/hall-override-test.sock; run `hall` to start or attach it"
+        );
+    }
 }
