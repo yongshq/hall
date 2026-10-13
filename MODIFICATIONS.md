@@ -55,7 +55,7 @@ Hall is a modified version of herdr v0.9.0 (commit b99002ac99b09e00b4ca692436cb1
 | `src/app/tab_bar_status.rs` | A test's scratch files are `hall-`. |
 | `tests/support/mod.rs` | Protocol 1022, endpoint generation 1001; reads `HALL_SOCKET_PATH`. |
 | `tests/server_headless.rs` | As below; a test that a hall server rejects herdr's endpoint generation 1. |
-| `tests/api_ping.rs`, `tests/auto_detect.rs`, `tests/broken_pipe.rs`, `tests/client_mode.rs`, `tests/cross_area.rs`, `tests/detach_reattach.rs`, `tests/multi_client.rs`, `tests/cli/agents.rs`, `tests/cli/harness.rs`, `tests/cli/plugins.rs`, `tests/cli/sessions.rs`, `tests/cli/surface.rs` | Binary `hall`, inbound `HALL_*` names, `hall-dev` folders, protocol 1022. |
+| `tests/api_ping.rs`, `tests/auto_detect.rs`, `tests/broken_pipe.rs`, `tests/client_mode.rs`, `tests/cross_area.rs`, `tests/detach_reattach.rs`, `tests/multi_client.rs`, `tests/cli/agents.rs`, `tests/cli/harness.rs`, `tests/cli/plugins.rs`, `tests/cli/sessions.rs`, `tests/cli/surface.rs` | Binary `hall`, inbound `HALL_*` names, `hall-dev` folders (`hall` in a release build, in `tests/cli/harness.rs`), protocol 1022. |
 | `tests/live_handoff.rs` | As above; two tests ignored on macOS, where they fail by platform behaviour (SO_RCVTIMEO after the peer closes; another process's environment of `/bin/sleep`). |
 | `tests/machine_setup.rs` | As above; the explicit `--remote` handoff test now checks that `--remote` is refused. |
 

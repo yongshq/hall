@@ -148,7 +148,7 @@ pub(super) fn app_dir_name() -> &'static str {
     if cfg!(debug_assertions) {
         "hall-dev"
     } else {
-        "herdr"
+        "hall"
     }
 }
 
