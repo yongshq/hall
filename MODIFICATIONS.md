@@ -98,4 +98,6 @@ Hall is a modified version of herdr v0.9.0 (commit b99002ac99b09e00b4ca692436cb1
 | File | Change |
 |---|---|
 | `src/cli/status.rs` | `hall status` says `hall_server: no` and why for a server that is not hall's (`hall_server` in the JSON), and gives `restart_needed` and `server_binary_stale` no value for it instead of restart guidance; tests. |
-| `src/server/autodetect.rs` | The client launch says hall cannot confirm a server is hall's when the server does not answer its status check (a silent listener, `WouldBlock` on macOS), instead of the raw error; a test. |
+| `src/server/autodetect.rs` | The client launch says hall cannot confirm a server is hall's when the server does not answer its status check (a silent listener, `WouldBlock` on macOS), instead of the raw error; a test. That message is `unanswered_status_message`, and `STATUS_REQUEST_TIMEOUT` is crate-visible, both shared with `hall status`. |
+| `src/api/client.rs` | `ApiClient::status_with_timeout`: `status` with its wait bounded; `status` and it share the ping request and the reply's reading. |
+| `src/cli/status.rs` | `hall status` bounds its status request (2 seconds) and says of a listener that does not answer it what the client launch says, instead of hanging; `tests/hall_stop_guard.rs` tests it. |

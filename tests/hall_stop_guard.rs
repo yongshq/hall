@@ -368,6 +368,37 @@ fn client_launch_says_hall_cannot_confirm_a_silent_listener() {
     assert!(!stderr.contains("server stop"), "stderr: {stderr}");
 }
 
+#[test]
+fn status_says_hall_cannot_confirm_a_silent_listener() {
+    let rig = Rig::new("sst");
+    let _silent = SilentListener::bind(&rig.socket());
+    for args in [
+        &["status"][..],
+        &["status", "server"],
+        &["status", "--json"],
+    ] {
+        let mut cmd = rig.command(args);
+        cmd.env("HALL_SOCKET_PATH", rig.socket());
+        // Bounded: the status request gives up well inside this.
+        let output = run(cmd, Duration::from_secs(15));
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(1), "hall {args:?}: {stderr}");
+        assert!(
+            stderr.contains(
+                "did not answer a status check, so hall cannot confirm it is a hall server"
+            ),
+            "hall {args:?}: {stderr}"
+        );
+        assert!(!stderr.contains("os error"), "hall {args:?}: {stderr}");
+        assert!(!stderr.contains("server stop"), "hall {args:?}: {stderr}");
+        assert!(
+            !stdout.contains("restart_needed"),
+            "hall {args:?}: {stdout}"
+        );
+    }
+}
+
 /// Kills the real hall server if the test fails before it stops.
 struct ServerGuard(Child);
 

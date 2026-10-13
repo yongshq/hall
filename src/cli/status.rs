@@ -211,7 +211,11 @@ fn print_server_status_body(server: &ServerRuntimeStatus, indent: &str) {
 }
 
 fn read_server_runtime_status() -> std::io::Result<ServerRuntimeStatus> {
-    match ApiClient::local().status() {
+    // hall: the status request is bounded as the client launch's is, and a
+    // listener that does not answer it gets the launch's message, not a hang
+    // (decision 46).
+    let client = ApiClient::local();
+    match client.status_with_timeout(crate::server::autodetect::STATUS_REQUEST_TIMEOUT) {
         Ok(status) => Ok(ServerRuntimeStatus::Running {
             version: status.version,
             protocol: status.protocol,
@@ -219,6 +223,17 @@ fn read_server_runtime_status() -> std::io::Result<ServerRuntimeStatus> {
         }),
         Err(ApiClientError::Io(err)) if super::server_not_running_error(&err) => {
             Ok(ServerRuntimeStatus::NotRunning)
+        }
+        Err(ApiClientError::Io(err))
+            if matches!(
+                err.kind(),
+                std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+            ) =>
+        {
+            tracing::warn!(err = %err, "server status check failed");
+            Err(std::io::Error::other(
+                crate::server::autodetect::unanswered_status_message(&client.socket_path()),
+            ))
         }
         Err(err) => Err(api_client_error_to_io(err)),
     }

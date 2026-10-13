@@ -75,26 +75,44 @@ impl ApiClient {
     }
 
     pub fn status(&self) -> Result<crate::api::RuntimeStatus, ApiClientError> {
-        let response = self.request(Request {
-            id: "api-client:status".into(),
-            method: Method::Ping(PingParams::default()),
-        })?;
-        match response.result {
-            ResponseResult::Pong {
-                version,
-                protocol,
-                capabilities,
-            } => Ok(crate::api::RuntimeStatus {
-                version: Some(version),
-                protocol: Some(protocol),
-                capabilities,
-            }),
-            result => Err(ApiClientError::UnexpectedResult(format!("{result:?}"))),
-        }
+        let response = self.request(status_request())?;
+        runtime_status(response)
+    }
+
+    /// hall: `status`, with the wait for the answer bounded by `timeout`, so a
+    /// listener that never answers cannot hang the caller (decision 46).
+    pub fn status_with_timeout(
+        &self,
+        timeout: Duration,
+    ) -> Result<crate::api::RuntimeStatus, ApiClientError> {
+        let value = self.request_value_with_timeout(&status_request(), timeout)?;
+        runtime_status(parse_response_value(value)?)
     }
 
     fn connect(&self) -> io::Result<LocalStream> {
         crate::ipc::connect_local_stream(&self.socket_path())
+    }
+}
+
+fn status_request() -> Request {
+    Request {
+        id: "api-client:status".into(),
+        method: Method::Ping(PingParams::default()),
+    }
+}
+
+fn runtime_status(response: SuccessResponse) -> Result<crate::api::RuntimeStatus, ApiClientError> {
+    match response.result {
+        ResponseResult::Pong {
+            version,
+            protocol,
+            capabilities,
+        } => Ok(crate::api::RuntimeStatus {
+            version: Some(version),
+            protocol: Some(protocol),
+            capabilities,
+        }),
+        result => Err(ApiClientError::UnexpectedResult(format!("{result:?}"))),
     }
 }
 

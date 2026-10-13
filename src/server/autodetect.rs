@@ -23,7 +23,7 @@ const SERVER_READY_TIMEOUT: Duration = Duration::from_secs(15);
 const SOCKET_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 /// Timeout for checking the stable JSON API before attaching to the binary protocol socket.
-const STATUS_REQUEST_TIMEOUT: Duration = Duration::from_secs(2);
+pub(crate) const STATUS_REQUEST_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// Private daemon-start hint used to seed a fresh headless server from the
 /// directory where the user ran `herdr`.
@@ -142,6 +142,15 @@ fn client_protocol_accepts_hello(socket_path: &Path) -> io::Result<bool> {
     }
 }
 
+/// hall: what is said of a listener at `socket_path` that did not answer a
+/// status check (decision 46): hall cannot confirm it is a hall server.
+pub(crate) fn unanswered_status_message(socket_path: &Path) -> String {
+    format!(
+        "a server is listening at {}, but it did not answer a status check, so hall cannot confirm it is a hall server.\nHall will not attach to it, stop it or hand it off.",
+        socket_path.display()
+    )
+}
+
 fn validate_running_server_compatibility(saved_federation: bool) -> io::Result<()> {
     // hall: a server hall cannot confirm as its own gets no stop command
     // (decision 45); `hall server stop` would refuse it anyway. A listener that
@@ -149,10 +158,7 @@ fn validate_running_server_compatibility(saved_federation: bool) -> io::Result<(
     // the same message, not the raw error (decision 46).
     let status = read_server_status().map_err(|err| {
         tracing::warn!(err = %err, "server status check failed");
-        io::Error::other(format!(
-            "a server is listening at {}, but it did not answer a status check, so hall cannot confirm it is a hall server.\nHall will not attach to it, stop it or hand it off.",
-            crate::api::socket_path().display()
-        ))
+        io::Error::other(unanswered_status_message(&crate::api::socket_path()))
     })?;
     let Some(status) = status else {
         return Err(io::Error::other(format!(
