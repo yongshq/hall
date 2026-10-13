@@ -665,6 +665,10 @@ impl ClientShellState {
                 (KeyCode::Char(digit), KeyModifiers::empty()),
             )
         }) {
+            // hall: in the reeve tree, digits follow the tree's order (decision 57).
+            if self.pick_navigate_reeve_tree_number(index, outcome) {
+                return;
+            }
             let valid = self.snapshot.as_deref().is_some_and(|snapshot| {
                 self.navigation_workspace_entries(snapshot)
                     .get(index)
@@ -687,14 +691,7 @@ impl ClientShellState {
             match code {
                 KeyCode::Enter => {
                     // hall: picking a reeve or a hand shows its own pane (plan step 3).
-                    if let Some(method) = self.pick_navigate_reeve_target() {
-                        self.mode = ClientShellMode::Terminal;
-                        self.navigate_workspace_id = None;
-                        self.navigate_reeve_key = None;
-                        if let Some(method) = method {
-                            self.push_endpoint_method(method, outcome);
-                        }
-                        outcome.repaint = true;
+                    if self.pick_navigate_reeve_tree(outcome) {
                         return;
                     }
                     let selected = self.navigate_workspace_id.clone();

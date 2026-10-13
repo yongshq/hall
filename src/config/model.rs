@@ -1044,6 +1044,9 @@ pub struct ReeveConfig {
     pub listing_command: Vec<String>,
     /// How often the client runs the listing command, in milliseconds. Default: 1000.
     pub listing_interval_ms: u64,
+    /// How long one run of the listing command may take before it is killed, in milliseconds
+    /// (decision 56). Default: 5000.
+    pub listing_timeout_ms: u64,
 }
 
 impl Default for ReeveConfig {
@@ -1051,6 +1054,7 @@ impl Default for ReeveConfig {
         Self {
             listing_command: Vec::new(),
             listing_interval_ms: 1000,
+            listing_timeout_ms: 5000,
         }
     }
 }

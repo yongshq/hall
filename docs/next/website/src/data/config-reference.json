@@ -1454,6 +1454,12 @@
           "type": "integer",
           "default": "1000",
           "description": "hall: how often the client runs the listing command, in milliseconds (at least 100)."
+        },
+        {
+          "key": "reeve.listing_timeout_ms",
+          "type": "integer",
+          "default": "5000",
+          "description": "hall: how long one run of the listing command may take, in milliseconds (at least 100). A run past it is killed with everything it started; the last good tree stays on screen, marked stale."
         }
       ]
     },

@@ -23,8 +23,8 @@ pub(super) enum ClientLoopEvent {
     },
     EndpointSupervisor(endpoint::EndpointSupervisorEvent),
     EndpointCatalog(Result<Vec<endpoint::SavedSshEndpoint>, String>),
-    /// hall: a changed read of reeve's listing (plan step 3).
-    ReeveListing(reeve_listing::ReeveListingRead),
+    /// hall: a changed read of reeve's listing (plan step 3), from the reader of that generation.
+    ReeveListing(u64, reeve_listing::ReeveListingRead),
     ActivateEndpoint {
         endpoint_id: endpoint::ClientEndpointId,
         target: Option<shell::ClientEndpointFocusTarget>,

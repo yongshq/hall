@@ -2045,6 +2045,22 @@ impl ClientShellState {
                     );
                     return;
                 }
+                // hall: a click on a tab row of the reeve tree brings that tab forward.
+                let reeve_tab_id = self
+                    .hits
+                    .reeve_tabs
+                    .iter()
+                    .find(|(rect, _)| super::contains(*rect, point))
+                    .map(|(_, tab_id)| tab_id.clone());
+                if let Some(tab_id) = reeve_tab_id {
+                    self.push_endpoint_method(
+                        crate::api::schema::Method::TabFocus(crate::api::schema::TabTarget {
+                            tab_id,
+                        }),
+                        outcome,
+                    );
+                    return;
+                }
                 let scrollbar_hit = self
                     .hits
                     .panes

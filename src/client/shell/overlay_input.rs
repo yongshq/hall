@@ -313,6 +313,10 @@ impl ClientShellState {
     }
 
     pub(super) fn workspace_action_id(&self) -> Option<String> {
+        // hall: in the reeve tree walk, only a reeve's or a plain workspace's row names one.
+        if let Some(target) = self.reeve_walk_workspace_target() {
+            return target;
+        }
         self.navigate_workspace_id.clone().or_else(|| {
             self.snapshot
                 .as_deref()

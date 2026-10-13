@@ -103,22 +103,24 @@ Hall is a modified version of herdr v0.9.0 (commit b99002ac99b09e00b4ca692436cb1
 | `src/cli.rs` | Every CLI request's protocol ping (`ensure_server_protocol_compatible`) is bounded as `hall status`'s is, and a listener that does not answer it gets the same message, instead of hanging; the request itself stays unbounded (`agent wait`). `tests/hall_stop_guard.rs` tests `pane list` and `workspace list`. |
 | `src/main.rs` | `main` runs the old body as `run` and prints an error of kind `Other` as its message (`Error: <message>`), not as Rust's `Debug` of the `io::Error`; exit status 1 as before. |
 
-## Step 3: reeve tree (decisions 49 to 54)
+## Step 3: reeve tree (decisions 49 to 57)
 
 | File | Change |
 |---|---|
-| `src/config/model.rs` | `[reeve]` section (`ReeveConfig`): `listing_command` and `listing_interval_ms`. |
-| `src/config/io.rs` | `reeve` is a known section and reloads live like the others. |
-| `src/client/mod.rs` | The `reeve_listing` module; the client starts the listing reader when a listing command is configured, and redraws on each changed read. |
-| `src/client/events.rs` | `ClientLoopEvent::ReeveListing`. |
-| `src/client/loop_config.rs` | The listing command and interval. |
+| `src/config/model.rs` | `[reeve]` section (`ReeveConfig`): `listing_command`, `listing_interval_ms` and `listing_timeout_ms`. |
+| `src/config.rs` | Exports `ReeveConfig`. |
+| `src/config/io.rs` | `reeve` is a known section and reloads live like the others: on reload the client restarts the listing reader with the new command, or stops it and goes back to herdr's sidebar when the command is removed. |
+| `src/client/mod.rs` | The `reeve_listing` module; the client loop keeps the listing reader in step with the shell's config (started, restarted on a changed `[reeve]`, stopped when the command goes, and dropped with the loop, which kills and reaps a running listing command on detach), and redraws on each changed read of the current reader. |
+| `src/client/events.rs` | `ClientLoopEvent::ReeveListing`, tagged with the reader's generation. |
 | `src/client/shell.rs` | The `reeve_tree` module. |
-| `src/client/shell/state.rs` | `ClientShellConfig::reeve_tree_session`; `ClientShellLayout::key_help`; the shell keeps the latest listing read and the tree item a navigate walk has selected. |
-| `src/client/shell/config.rs` | `from_config` turns the reeve tree on for the client's session when a listing command is configured; `layout` keeps the bottom row for the key help line then. |
+| `src/client/shell/state.rs` | `ClientShellConfig::reeve_tree_session` and `reeve_listing`; `ClientShellLayout::key_help`, kept only while the tree is drawn (one machine); `ShellHitMap::reeve_tabs`; the shell keeps the last good listing, why the latest read failed, and the tree item a navigate walk has selected. |
+| `src/client/shell/config.rs` | `from_config` and `apply_live_config` turn the reeve tree on for the client's session when a listing command is configured, off when none is; a reload with a changed command forgets the old command's reads; `layout` keeps the bottom row for the key help line while the tree is shown. |
 | `src/client/shell/render.rs` | `ShellRenderState` carries the tree and its selection. |
 | `src/client/shell/sidebar.rs` | Herdr's spaces section moved, unchanged, into `render_spaces_section`; the reeve tree is drawn in its place when it is on. |
 | `src/client/shell/composition.rs` | The tree is built for each frame; the key help line is drawn. |
-| `src/client/shell/input.rs` | In navigate mode ↑ and ↓ walk the tree and enter picks its item when the tree is on. |
+| `src/client/shell/input.rs` | In navigate mode ↑ and ↓ walk the tree, enter picks its item and the digits follow the tree's order when the tree is on. |
+| `src/client/shell/overlay_input.rs` | `workspace_action_id`: in the tree walk, a hand's row, a tab's row or a pane-less reeve's row names no workspace, so workspace actions do nothing there. |
+| `src/client/shell/mouse.rs` | A click on a tab row of the reeve tree focuses that tab. |
 | `src/client/shell/actions.rs` | Opening navigate mode starts the tree walk at the focused item. |
 | `src/client/shell/tests/mod.rs` | The `reeve_tree` tests. |
 | `README.md` | Status line for step 3. |

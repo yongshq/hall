@@ -183,14 +183,6 @@ fn run_client_with_mode(
         endpoint_keybindings,
         remote_image_paste_key,
         shell_config,
-        reeve_listing: (client_rendered_shell
-            && !loaded_config.config.reeve.listing_command.is_empty())
-        .then(|| {
-            (
-                loaded_config.config.reeve.listing_command.clone(),
-                Duration::from_millis(loaded_config.config.reeve.listing_interval_ms.max(100)),
-            )
-        }),
     };
 
     crate::logging::startup("client");
@@ -569,13 +561,9 @@ async fn run_client_loop(
     if state.shell.is_some() && !is_remote_client && state.attach_escape.is_none() {
         catalog_reload::watch_profiles(event_tx.clone(), should_quit.clone());
     }
-    if let Some((command, interval)) = config
-        .reeve_listing
-        .clone()
-        .filter(|_| state.shell.is_some() && state.attach_escape.is_none())
-    {
-        reeve_listing::watch(command, interval, event_tx.clone(), should_quit.clone());
-    }
+    // hall: reeve's listing reader, kept in step with the client config below. Dropped with the
+    // loop, which kills and reaps a listing command still running (decision 56).
+    let mut reeve_watch: Option<reeve_listing::ReeveListingWatch> = None;
 
     // This (foreground) client owns the prefix ASCII input-source switch
     // (implemented on macOS and Windows; a no-op on other platforms).
@@ -675,6 +663,15 @@ async fn run_client_loop(
                 }
             }
         }
+        reeve_listing::follow(
+            &mut reeve_watch,
+            state
+                .shell
+                .as_ref()
+                .filter(|_| state.attach_escape.is_none())
+                .and_then(|shell| shell.reeve_listing_spec()),
+            &event_tx,
+        );
         if let Some(shell) = state.shell.as_ref() {
             supervisors.spawn_due(
                 std::time::Instant::now(),
@@ -734,8 +731,11 @@ async fn run_client_loop(
 
         match event {
             ClientLoopEvent::EndpointCatalog(reload) => pending_catalog = Some(reload),
-            ClientLoopEvent::ReeveListing(read) => {
-                if let Some(shell) = state.shell.as_mut() {
+            ClientLoopEvent::ReeveListing(generation, read) => {
+                let current = reeve_watch
+                    .as_ref()
+                    .is_some_and(|watch| watch.generation() == generation);
+                if let Some(shell) = state.shell.as_mut().filter(|_| current) {
                     shell.set_reeve_listing(read);
                     if let Some(frame) = shell.compose(state.reported_size.0, state.reported_size.1)
                     {

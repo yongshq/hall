@@ -109,6 +109,8 @@ pub(crate) struct ClientShellConfig {
     pub(super) startup_onboarding: bool,
     /// hall: the session whose reeves the reeve tree shows; None leaves herdr's sidebar.
     pub(super) reeve_tree_session: Option<String>,
+    /// hall: the listing command the client runs for the tree, from `[reeve]` (decision 49).
+    pub(super) reeve_listing: Option<crate::client::reeve_listing::ReeveListingSpec>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -154,6 +156,8 @@ pub(super) struct ShellHitMap {
     pub(super) popup: Option<PaneHit>,
     pub(super) pane_splits: Vec<PaneSplitHit>,
     pub(super) agents: Vec<(Rect, String)>,
+    /// hall: the reeve tree's tab rows (decision 55).
+    pub(super) reeve_tabs: Vec<(Rect, String)>,
     pub(super) endpoint_agents: Vec<(Rect, ClientEndpointId, String)>,
     pub(super) agent_body: Rect,
     pub(super) agent_scrollbar: Rect,
@@ -933,8 +937,10 @@ pub(crate) struct ClientShellState {
     pub(super) navigate_workspace_id: Option<String>,
     /// hall: the reeve tree item a navigate walk has selected.
     pub(super) navigate_reeve_key: Option<super::reeve_tree::ReeveTreeKey>,
-    /// hall: the latest read of reeve's listing, when the reeve tree is on.
-    pub(super) reeve_listing: Option<crate::client::reeve_listing::ReeveListingRead>,
+    /// hall: the last listing that read well, when the reeve tree is on.
+    pub(super) reeve_listing: Option<crate::client::reeve_listing::ReeveListing>,
+    /// hall: why the latest read of the listing failed, while it does (decision 56).
+    pub(super) reeve_listing_error: Option<String>,
     pub(super) overlay: Option<ClientShellOverlay>,
     pub(super) previous_pane_id: Option<String>,
     pub(super) pane_mouse_gesture: Option<ClientPaneMouseGesture>,
@@ -1080,6 +1086,7 @@ impl ClientShellState {
             navigate_workspace_id: None,
             navigate_reeve_key: None,
             reeve_listing: None,
+            reeve_listing_error: None,
             overlay,
             previous_pane_id: None,
             pane_mouse_gesture: None,
@@ -1188,6 +1195,8 @@ impl ClientShellState {
             self.sidebar_collapsed,
             self.focused_tab_count(),
             self.sidebar_width,
+            // hall: the key help row only with the tree; several machines keep herdr's sidebar.
+            self.config.reeve_tree_session.is_some() && self.endpoints.len() <= 1,
         )
     }
 

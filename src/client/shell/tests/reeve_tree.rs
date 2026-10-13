@@ -150,6 +150,21 @@ fn tree_rows(frame: &FrameData) -> Vec<String> {
         .collect()
 }
 
+/// The tree's rows at a sidebar 25 wide: the 24 columns left of its divider.
+fn narrow_tree_rows(frame: &FrameData) -> Vec<String> {
+    rows(frame)
+        .iter()
+        .map(|row| {
+            row.chars()
+                .take(24)
+                .collect::<String>()
+                .trim_end()
+                .to_owned()
+        })
+        .take(10)
+        .collect()
+}
+
 fn compose(state: &mut ClientShellState) -> FrameData {
     state.compose(100, 30).expect("composed frame")
 }
@@ -213,7 +228,8 @@ fn a_hand_state_sets_its_mark_and_what_waits_sets_the_reeve_badge() {
     let tree = tree_rows(&frame);
     assert_eq!(tree[1], " · ansel               2");
     assert_eq!(tree[2], "  ├ ! ansel-fix   blocked");
-    assert_eq!(tree[3], "  └ ● ansel-re… asks idle");
+    // The id first; of the notes, the ones that fit after it.
+    assert_eq!(tree[3], "  └ ● ansel-review   asks");
     assert_eq!(tree[4], " · bertil");
     assert_eq!(tree[5], "  └ ✓ bertil-probe   done");
 
@@ -239,8 +255,8 @@ fn each_flag_and_state_has_its_own_word_and_counts_once() {
     let mut state = reeve_state(listing);
     let tree = tree_rows(&compose(&mut state));
     assert_eq!(tree[4], " · bertil              1");
-    // A note too long for half the row ends in an ellipsis, as a long label does.
-    assert_eq!(tree[5], "  └ ? bertil-p… decide a…");
+    // At the default sidebar width the id stays whole and the notes that do not fit go.
+    assert_eq!(tree[5], "  └ ? bertil-probe decide");
     let tree_model = state.current_reeve_tree().expect("tree");
     let probe = &tree_model.items[tree_model
         .position(&ReeveTreeKey::Hand("bertil-probe".into()))
@@ -261,6 +277,15 @@ fn a_finished_and_cleaned_up_errand_drops_from_the_tree() {
         .any(|row| row.contains("ansel-review")));
     listing.errands.retain(|errand| errand.id != "ansel-review");
     state.set_reeve_listing(Ok(listing));
+    // Finished: the hand is gone; its tab, still open, shows as a tab of its reeve.
+    let tree = tree_rows(&compose(&mut state));
+    assert_eq!(tree[2], "  ├ ● ansel-fix");
+    assert_eq!(tree[3], "  └ tab ansel-review");
+    // Cleaned up: the tab closes and nothing of the errand is left.
+    let mut snapshot = hall_dev_snapshot();
+    snapshot.tabs.retain(|tab| tab.tab_id != "ws_a_t2");
+    snapshot.panes.retain(|pane| pane.tab_id != "ws_a_t2");
+    state.set_snapshot(Box::new(snapshot));
     let tree = tree_rows(&compose(&mut state));
     assert_eq!(tree[2], "  └ ● ansel-fix");
     assert_eq!(tree[3], " · bertil");
@@ -275,18 +300,93 @@ fn a_hand_without_a_pane_and_a_gone_reeve_show_dimmed_notes() {
     let mut state = reeve_state(listing);
     let tree = tree_rows(&compose(&mut state));
     assert_eq!(tree[2], "  ├ ● ansel-fix   no pane");
-    assert_eq!(tree[4], " · bertil            gone");
+    // Hall cannot tie the hand to its tab, so the tab shows as one of the reeve's.
+    assert_eq!(tree[4], "  └ tab ansel-fix");
+    assert_eq!(tree[5], " · bertil            gone");
+}
+
+fn no_listing_state() -> ClientShellState {
+    let mut state = reeve_state(listing());
+    state.reset_reeve_listing();
+    state
 }
 
 #[test]
-fn a_listing_error_shows_and_every_workspace_stays_reachable() {
-    let mut state = reeve_state(listing());
-    state.set_reeve_listing(Err("refusing home".into()));
+fn before_the_first_read_the_tree_says_it_is_reading() {
+    let mut state = no_listing_state();
     let tree = tree_rows(&compose(&mut state));
+    assert_eq!(tree[1], " reading listing");
+    assert_eq!(tree[3], " other");
+    assert_eq!(tree[4], " ○ ansel");
+}
+
+#[test]
+fn a_listing_error_with_no_good_read_shows_and_every_workspace_stays_reachable() {
+    let mut state = no_listing_state();
+    state.set_reeve_listing(Err("refusing home".into()));
+    let frame = compose(&mut state);
+    let tree = tree_rows(&frame);
     assert_eq!(tree[1], " listing: refusing home");
     assert_eq!(tree[3], " other");
     assert_eq!(tree[4], " ○ ansel");
     assert_eq!(tree[6], " ○ scratch");
+    let cell = frame.width as usize + 2;
+    assert_eq!(
+        frame.cells[cell].fg,
+        crate::protocol::color_to_u32(state.config.palette.yellow),
+        "the reason stands out"
+    );
+}
+
+#[test]
+fn a_failed_read_after_a_good_one_keeps_the_tree_marked_stale() {
+    let mut state = reeve_state(listing());
+    state.set_reeve_listing(Err("timed out after 5s".into()));
+    let tree = tree_rows(&compose(&mut state));
+    assert_eq!(tree[1], " stale: timed out after");
+    assert_eq!(tree[2], " 5s");
+    assert_eq!(tree[3], " · ansel");
+    assert_eq!(tree[4], "  ├ ● ansel-fix");
+    // The next good read clears the mark.
+    state.set_reeve_listing(Ok(listing()));
+    let tree = tree_rows(&compose(&mut state));
+    assert_eq!(tree[1], " · ansel");
+}
+
+#[test]
+fn at_width_25_a_long_reason_wraps_onto_rows_of_its_own() {
+    let mut state = no_listing_state();
+    state.sidebar_width = 25;
+    state.set_reeve_listing(Err("not found: /nonexistent/hall-listing".into()));
+    let tree = narrow_tree_rows(&compose(&mut state));
+    assert_eq!(state.layout(100, 30).sidebar.width, 25);
+    assert_eq!(tree[1], " listing: not found:");
+    assert_eq!(tree[2], " /nonexistent/hall-listi");
+    assert_eq!(tree[3], " ng");
+    assert_eq!(tree[5], " other");
+}
+
+#[test]
+fn at_width_25_a_hand_keeps_its_id_before_its_notes() {
+    let mut listing = listing();
+    {
+        let errand = errand_mut(&mut listing, "bertil-probe");
+        errand.hand_state = crate::client::reeve_listing::HandState::NeedsDecision;
+        errand.wedged = true;
+    }
+    {
+        let errand = errand_mut(&mut listing, "ansel-fix");
+        errand.id = "ansel-fix-the-long-one".into();
+        errand.hand_state = crate::client::reeve_listing::HandState::Blocked;
+    }
+    let mut state = reeve_state(listing);
+    state.sidebar_width = 25;
+    let tree = narrow_tree_rows(&compose(&mut state));
+    assert_eq!(state.layout(100, 30).sidebar.width, 25);
+    // Too long for the row: the id is cut, no note.
+    assert_eq!(tree[2], "  ├ ! ansel-fix-the-lon…");
+    // `decide wedged` does not fit beside the whole id: the id stays, the mark says decide.
+    assert_eq!(tree[5], "  └ ? bertil-probe");
 }
 
 #[test]
@@ -461,4 +561,251 @@ fn a_long_tree_scrolls_to_keep_the_selection_in_view() {
     };
     assert!(state.workspace_scroll > 0);
     assert!(rows(&frame).iter().any(|row| row.contains(&selected)));
+}
+
+fn picked_method(input: &ClientShellInput) -> Option<&crate::api::schema::Method> {
+    match &input.actions[..] {
+        [ClientShellAction::Endpoint { request, .. }] => Some(&request.method),
+        _ => None,
+    }
+}
+
+#[test]
+fn a_tab_of_a_reeve_that_holds_no_hand_shows_dimmed_under_its_reeve() {
+    let mut snapshot = hall_dev_snapshot();
+    snapshot.tabs.push(ClientShellTab {
+        tab_id: "ws_a_t3".into(),
+        workspace_id: "ws_a".into(),
+        number: 7,
+        label: "notes".into(),
+        custom_label: true,
+        zoomed: false,
+        focused: false,
+        agent_status: AgentStatus::Idle,
+    });
+    snapshot.panes.push(ClientShellPane {
+        pane_id: "p_a3".into(),
+        workspace_id: "ws_a".into(),
+        tab_id: "ws_a_t3".into(),
+        label: None,
+        cwd: None,
+        foreground_cwd: None,
+        focused: false,
+        right_click_passthrough: false,
+    });
+    let mut state = reeve_state(listing());
+    state.set_snapshot(Box::new(snapshot));
+    let frame = compose(&mut state);
+    let tree = tree_rows(&frame);
+    assert_eq!(tree[1], " · ansel");
+    assert_eq!(tree[2], "  ├ ● ansel-fix");
+    assert_eq!(tree[3], "  ├ ● ansel-review");
+    assert_eq!(tree[4], "  └ tab notes");
+    assert_eq!(tree[5], " · bertil");
+    let cell = 4 * frame.width as usize + 4;
+    assert_eq!(
+        frame.cells[cell].fg,
+        crate::protocol::color_to_u32(state.config.palette.overlay0),
+        "the tab row is dimmed"
+    );
+
+    // Walked to and picked, it brings the tab forward.
+    state.handle_input_bytes(b"\x02w\x1b[B\x1b[B\x1b[B");
+    assert_eq!(
+        state.navigate_reeve_key,
+        Some(ReeveTreeKey::Tab("ws_a_t3".into()))
+    );
+    let pick = state.handle_input_bytes(b"\r");
+    assert!(matches!(
+        picked_method(&pick),
+        Some(crate::api::schema::Method::TabFocus(target)) if target.tab_id == "ws_a_t3"
+    ));
+
+    // A click on its row does the same.
+    compose(&mut state);
+    let (rect, _) = state.hits.reeve_tabs[0].clone();
+    let click = state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: rect.x + 4,
+        row: rect.y,
+        modifiers: KeyModifiers::empty(),
+    })]);
+    assert!(matches!(
+        picked_method(&click),
+        Some(crate::api::schema::Method::TabFocus(target)) if target.tab_id == "ws_a_t3"
+    ));
+}
+
+#[test]
+fn the_walk_line_names_the_navigate_keys_as_bound() {
+    let mut config = Config::default();
+    config.reeve.listing_command = vec!["true".into()];
+    config.keys.navigate_workspace_up = crate::config::BindingConfig::one("k");
+    config.keys.navigate_workspace_down =
+        crate::config::BindingConfig::Many(vec!["down".into(), "j".into()]);
+    let mut shell_config = ClientShellConfig::from_config(&config);
+    shell_config.reeve_tree_session = Some("hall-dev".into());
+    let mut state = ClientShellState::new(shell_config);
+    state.set_snapshot(Box::new(hall_dev_snapshot()));
+    state.set_pane_surface(surface());
+    state.set_reeve_listing(Ok(listing()));
+    compose(&mut state);
+    state.handle_input_bytes(b"\x02w");
+    assert_eq!(
+        rows(&compose(&mut state))
+            .last()
+            .expect("bottom row")
+            .trim_end(),
+        " k/↓,j move  enter show  esc back"
+    );
+    // And k does move the walk.
+    state.handle_input_bytes(b"k");
+    assert_eq!(
+        state.navigate_reeve_key,
+        Some(ReeveTreeKey::Workspace("ws_p".into()))
+    );
+}
+
+#[test]
+fn digits_in_the_walk_follow_the_trees_order() {
+    // The listing names bertil before ansel, against hall's workspace order.
+    let mut listing = listing();
+    listing.reeves.swap(0, 1);
+    let mut state = reeve_state(listing);
+    let tree = tree_rows(&compose(&mut state));
+    assert_eq!(tree[1], " · bertil");
+
+    state.handle_input_bytes(b"\x02w");
+    let pick = state.handle_input_bytes(b"1");
+    assert_eq!(state.mode, ClientShellMode::Terminal);
+    assert!(matches!(
+        picked_method(&pick),
+        Some(crate::api::schema::Method::PaneFocus(target)) if target.pane_id == "p_b0"
+    ));
+
+    // Hands are not counted: 3 is the first workspace under `other`.
+    state.handle_input_bytes(b"\x02w");
+    let pick = state.handle_input_bytes(b"3");
+    assert!(matches!(
+        picked_method(&pick),
+        Some(crate::api::schema::Method::WorkspaceFocus(target)) if target.workspace_id == "ws_p"
+    ));
+
+    // A digit past the last row does nothing and stays in the walk.
+    state.handle_input_bytes(b"\x02w");
+    let pick = state.handle_input_bytes(b"9");
+    assert!(pick.actions.is_empty());
+    assert_eq!(state.mode, ClientShellMode::Navigate);
+}
+
+#[test]
+fn workspace_actions_from_a_hand_row_or_a_paneless_reeve_do_nothing() {
+    let mut listing = listing();
+    listing.reeves[1].session.pane_id = None;
+    let mut state = reeve_state(listing);
+    compose(&mut state);
+    state.handle_input_bytes(b"\x02w\x1b[B");
+    assert_eq!(
+        state.navigate_reeve_key,
+        Some(ReeveTreeKey::Hand("ansel-fix".into()))
+    );
+    // Shift+d closes the selected workspace in herdr's walk; on a hand it closes nothing.
+    let close = state.handle_input_bytes(b"D");
+    assert!(close.actions.is_empty());
+    assert!(
+        state.overlay.is_none(),
+        "no offer to close the reeve's workspace"
+    );
+
+    // bertil has no pane: its row names no workspace either.
+    state.handle_input_bytes(b"\x02w\x1b[B\x1b[B\x1b[B");
+    assert_eq!(
+        state.navigate_reeve_key,
+        Some(ReeveTreeKey::Reeve("bertil".into()))
+    );
+    let close = state.handle_input_bytes(b"D");
+    assert!(close.actions.is_empty());
+    assert!(state.overlay.is_none());
+
+    // A reeve's own row still acts on its workspace, behind herdr's confirm.
+    state.handle_input_bytes(b"\x02w");
+    assert_eq!(
+        state.navigate_reeve_key,
+        Some(ReeveTreeKey::Reeve("ansel".into()))
+    );
+    state.handle_input_bytes(b"D");
+    assert!(matches!(
+        &state.overlay,
+        Some(ClientShellOverlay::ConfirmClose(confirm)) if confirm.workspace_id == "ws_a"
+    ));
+}
+
+#[test]
+fn with_several_machines_no_key_help_row_is_kept() {
+    use crate::client::endpoint::{ClientEndpointId, ClientEndpointStatus, ProfileId};
+    let mut state = reeve_state(listing());
+    let profile = crate::client::endpoint::SavedSshEndpoint {
+        id: ProfileId::parse("0123456789abcdef0123456789abcdef").unwrap(),
+        label: "Build".into(),
+        target: "dev@build.example".into(),
+        session: "agents".into(),
+        enabled: true,
+    };
+    let endpoint_id = ClientEndpointId::Ssh(profile.id.clone());
+    state.set_endpoint_catalog(&[profile]);
+    state.set_endpoint_status(&endpoint_id, ClientEndpointStatus::Online);
+    assert!(
+        state.current_reeve_tree().is_none(),
+        "herdr's machines view"
+    );
+    assert!(state.layout(100, 30).key_help.is_empty());
+    assert_eq!(state.layout(100, 30).sidebar.height, 30);
+    let frame = compose(&mut state);
+    assert!(!rows(&frame).iter().any(|row| row.contains("reeve tree")));
+}
+
+#[test]
+fn a_config_reload_applies_the_reeve_section_live() {
+    let _guard = crate::config::test_config_env_lock().lock().unwrap();
+    let base = std::env::temp_dir().join(format!(
+        "hall-reeve-reload-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&base).expect("create reload test dir");
+    let path = base.join("hall.toml");
+    let saved = std::env::var_os("HALL_CONFIG_PATH");
+    std::env::set_var("HALL_CONFIG_PATH", &path);
+
+    let mut state = reeve_state(listing());
+    std::fs::write(
+        &path,
+        "[reeve]\nlisting_command = [\"other-listing\", \"--json\"]\nlisting_timeout_ms = 2000\n",
+    )
+    .expect("write config");
+    state.reload_client_config();
+    let spec = state.reeve_listing_spec().expect("listing command");
+    assert_eq!(spec.command, ["other-listing", "--json"]);
+    assert_eq!(spec.timeout, std::time::Duration::from_secs(2));
+    // A read of the old command is not the new one's.
+    assert_eq!(state.reeve_listing, None);
+    assert_eq!(tree_rows(&compose(&mut state))[1], " reading listing");
+
+    std::fs::write(&path, "[reeve]\n").expect("write config");
+    state.reload_client_config();
+    assert!(state.reeve_listing_spec().is_none());
+    assert!(state.current_reeve_tree().is_none());
+    assert!(state.layout(100, 30).key_help.is_empty());
+    let frame = compose(&mut state);
+    assert_eq!(tree_rows(&frame)[0], " spaces");
+    assert!(!rows(&frame).iter().any(|row| row.contains("reeve tree")));
+
+    match saved {
+        Some(value) => std::env::set_var("HALL_CONFIG_PATH", value),
+        None => std::env::remove_var("HALL_CONFIG_PATH"),
+    }
+    std::fs::remove_dir_all(&base).expect("remove reload test dir");
 }

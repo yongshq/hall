@@ -55,6 +55,7 @@ impl ClientShellState {
         match crate::config::load_live_config() {
             Ok(loaded) => {
                 let agent_panel_sort = self.config.agent_panel_sort;
+                let reeve_listing = self.config.reeve_listing.clone();
                 let diagnostics = self.config.apply_live_config(
                     &loaded.config,
                     &loaded.diagnostics,
@@ -71,6 +72,10 @@ impl ClientShellState {
                 }
                 if self.agent_panel_sort_manual {
                     self.config.agent_panel_sort = agent_panel_sort;
+                }
+                if self.config.reeve_listing != reeve_listing {
+                    // hall: a read of the old command is not this one's (decision 49).
+                    self.reset_reeve_listing();
                 }
                 self.set_local_config_diagnostic(self.config.local_config_diagnostic(&diagnostics));
                 if let Some(snapshot) = self.snapshot.as_deref() {
@@ -95,7 +100,7 @@ impl ClientShellState {
 impl ClientShellConfig {
     pub(crate) fn from_config(config: &Config) -> Self {
         let theme_runtime = crate::app::client_theme_runtime_from_config(config);
-        Self {
+        let mut shell_config = Self {
             sidebar_width: config.ui.sidebar_width,
             sidebar_min_width: config.ui.sidebar_min_width,
             sidebar_max_width: config.ui.sidebar_max_width,
@@ -142,11 +147,21 @@ impl ClientShellConfig {
             preferences: preferences::ClientChromePreferences::default(),
             startup_config_diagnostic: None,
             startup_onboarding: false,
-            reeve_tree_session: (!config.reeve.listing_command.is_empty()).then(|| {
-                crate::session::active_name()
-                    .unwrap_or_else(|| crate::session::DEFAULT_SESSION_NAME.to_owned())
-            }),
-        }
+            reeve_tree_session: None,
+            reeve_listing: None,
+        };
+        shell_config.apply_reeve_config(&config.reeve);
+        shell_config
+    }
+
+    /// hall: turns the reeve tree on for the client's session when a listing command is
+    /// configured, and off when none is; at startup and on every reload.
+    fn apply_reeve_config(&mut self, reeve: &crate::config::ReeveConfig) {
+        self.reeve_listing = crate::client::reeve_listing::ReeveListingSpec::from_config(reeve);
+        self.reeve_tree_session = self.reeve_listing.is_some().then(|| {
+            crate::session::active_name()
+                .unwrap_or_else(|| crate::session::DEFAULT_SESSION_NAME.to_owned())
+        });
     }
 
     pub(crate) fn with_startup_config_diagnostic(mut self, diagnostic: Option<String>) -> Self {
@@ -340,6 +355,9 @@ impl ClientShellConfig {
             self.switch_ascii_input_source_in_prefix =
                 config.experimental.switch_ascii_input_source_in_prefix;
         }
+        if !invalid_section("reeve") {
+            self.apply_reeve_config(&config.reeve);
+        }
 
         diagnostics
     }
@@ -351,6 +369,7 @@ impl ClientShellConfig {
         sidebar_collapsed: bool,
         tab_count: usize,
         sidebar_width: u16,
+        reeve_tree_shown: bool,
     ) -> ClientShellLayout {
         if cols <= self.mobile_width_threshold {
             let header_height = rows.min(2);
@@ -378,7 +397,7 @@ impl ClientShellConfig {
         }
         .min(cols.saturating_sub(1));
         // hall: with the reeve tree, the bottom row is the key help line (decision 12).
-        let key_help_height = u16::from(self.reeve_tree_session.is_some() && rows > 2);
+        let key_help_height = u16::from(reeve_tree_shown && rows > 2);
         let full_rows = rows;
         let rows = rows - key_help_height;
         let main = Rect::new(sidebar_width, 0, cols.saturating_sub(sidebar_width), rows);
@@ -428,7 +447,14 @@ impl ClientShellConfig {
             .unwrap_or(self.sidebar_width)
             .clamp(min_width, max_width);
         let surface = self
-            .layout(cols, rows, sidebar_collapsed, 0, sidebar_width)
+            .layout(
+                cols,
+                rows,
+                sidebar_collapsed,
+                0,
+                sidebar_width,
+                self.reeve_tree_session.is_some(),
+            )
             .pane_surface;
         ClientSurfaceSize {
             cols: surface.width.max(1),

@@ -1,18 +1,20 @@
-//! hall: the reeve tree in the sidebar (plan step 3, decisions 12, 16, 17, 34, 49 to 54).
+//! hall: the reeve tree in the sidebar (plan step 3, decisions 12, 16, 17, 34, 49 to 56).
 //!
 //! Every reeve the listing places in this hall session sits at the top level, its hands in
-//! flight beneath it (reeve = workspace, hand = tab), a mark per hand and a badge per reeve.
-//! Workspaces that hold no reeve follow in a section of their own. The tree is built from the
-//! server's snapshot and reeve's listing on every frame; nothing of it is kept but the
-//! selection.
+//! flight beneath it (reeve = workspace, hand = tab), a mark per hand and a badge per reeve,
+//! then the reeve's other tabs, dimmed. Workspaces that hold no reeve follow in a section of
+//! their own. The tree is built from the server's snapshot and reeve's listing on every frame;
+//! nothing of it is kept but the selection.
 
 use super::*;
-use crate::client::reeve_listing::{HandState, ListedErrand, ReeveListingRead};
+use crate::client::reeve_listing::{HandState, ListedErrand, ReeveListing, ReeveListingRead};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum ReeveTreeKey {
     Reeve(String),
     Hand(String),
+    /// A tab of a reeve's workspace that holds neither the reeve nor a listed hand.
+    Tab(String),
     Workspace(String),
 }
 
@@ -26,6 +28,9 @@ pub(super) enum ReeveTreeItemKind {
     Hand {
         state: HandState,
         notes: Vec<&'static str>,
+        last: bool,
+    },
+    Tab {
         last: bool,
     },
     Workspace {
@@ -44,10 +49,23 @@ pub(super) struct ReeveTreeItem {
     pub(super) focused: bool,
 }
 
+/// What the tree says about the listing itself, on rows of its own above the reeves.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum ListingNote {
+    /// No read has come back yet.
+    Reading,
+    /// The listing read well and places no reeve in this session.
+    NoReeve,
+    /// The latest read failed and none has read well yet: every workspace sits under `other`.
+    Failed(String),
+    /// The latest read failed; the tree is the last good one (decision 56).
+    Stale(String),
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(super) struct ReeveTree {
     pub(super) items: Vec<ReeveTreeItem>,
-    pub(super) listing_error: Option<String>,
+    pub(super) note: Option<ListingNote>,
 }
 
 impl ReeveTree {
@@ -91,23 +109,25 @@ fn hand_notes(errand: &ListedErrand, placed: bool) -> Vec<&'static str> {
     notes
 }
 
-/// Builds the tree for `session` from the snapshot and the latest listing read.
+/// Builds the tree for `session` from the snapshot, the last listing that read well and why
+/// the latest read failed, if it did.
 pub(super) fn reeve_tree(
     snapshot: &ClientShellSnapshot,
-    listing: Option<&ReeveListingRead>,
+    listing: Option<&ReeveListing>,
+    listing_error: Option<&str>,
     session: &str,
 ) -> ReeveTree {
     let pane = |pane_id: Option<&String>| {
         pane_id.and_then(|pane_id| snapshot.panes.iter().find(|pane| &pane.pane_id == pane_id))
     };
-    let mut tree = ReeveTree::default();
-    let listing = match listing {
-        Some(Ok(listing)) => Some(listing),
-        Some(Err(error)) => {
-            tree.listing_error = Some(error.clone());
-            None
-        }
-        None => None,
+    let mut tree = ReeveTree {
+        note: match (listing, listing_error) {
+            (None, None) => Some(ListingNote::Reading),
+            (None, Some(error)) => Some(ListingNote::Failed(error.to_owned())),
+            (Some(_), Some(error)) => Some(ListingNote::Stale(error.to_owned())),
+            (Some(_), None) => None,
+        },
+        ..ReeveTree::default()
     };
     let mut reeve_workspaces = HashSet::new();
     for reeve in listing
@@ -132,6 +152,21 @@ pub(super) fn reeve_tree(
             .filter_map(|errand| pane(errand.session.pane_id.as_ref()))
             .map(|pane| pane.tab_id.as_str())
             .collect::<HashSet<_>>();
+        // The reeve's workspace's other tabs: neither the reeve's own nor a listed hand's
+        // (decision 55).
+        let other_tabs = reeve_pane
+            .map(|reeve_pane| {
+                snapshot
+                    .tabs
+                    .iter()
+                    .filter(|tab| {
+                        tab.workspace_id == reeve_pane.workspace_id
+                            && tab.tab_id != reeve_pane.tab_id
+                            && !hand_tabs.contains(tab.tab_id.as_str())
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
         let status = reeve_pane
             .and_then(|reeve_pane| {
                 snapshot
@@ -156,10 +191,9 @@ pub(super) fn reeve_tree(
             pane_id: reeve_pane.map(|pane| pane.pane_id.clone()),
             focused: workspace_id.is_some()
                 && snapshot.focused_workspace_id == workspace_id
-                && !snapshot
-                    .focused_tab_id
-                    .as_deref()
-                    .is_some_and(|tab_id| hand_tabs.contains(tab_id)),
+                && !snapshot.focused_tab_id.as_deref().is_some_and(|tab_id| {
+                    hand_tabs.contains(tab_id) || other_tabs.iter().any(|tab| tab.tab_id == tab_id)
+                }),
             workspace_id,
         });
         for (index, errand) in hands.iter().enumerate() {
@@ -169,7 +203,7 @@ pub(super) fn reeve_tree(
                 kind: ReeveTreeItemKind::Hand {
                     state: errand.hand_state,
                     notes: hand_notes(errand, hand_pane.is_some()),
-                    last: index + 1 == hands.len(),
+                    last: index + 1 == hands.len() && other_tabs.is_empty(),
                 },
                 label: errand.id.clone(),
                 pane_id: hand_pane.map(|pane| pane.pane_id.clone()),
@@ -179,6 +213,26 @@ pub(super) fn reeve_tree(
                 }),
             });
         }
+        for (index, tab) in other_tabs.iter().enumerate() {
+            tree.items.push(ReeveTreeItem {
+                key: ReeveTreeKey::Tab(tab.tab_id.clone()),
+                kind: ReeveTreeItemKind::Tab {
+                    last: index + 1 == other_tabs.len(),
+                },
+                label: format!("tab {}", tab.label),
+                pane_id: None,
+                workspace_id: Some(tab.workspace_id.clone()),
+                focused: snapshot.focused_tab_id.as_deref() == Some(tab.tab_id.as_str()),
+            });
+        }
+    }
+    if tree.note.is_none()
+        && !tree
+            .items
+            .iter()
+            .any(|item| matches!(item.kind, ReeveTreeItemKind::Reeve { .. }))
+    {
+        tree.note = Some(ListingNote::NoReeve);
     }
     for workspace in snapshot
         .workspaces
@@ -199,6 +253,60 @@ pub(super) fn reeve_tree(
     tree
 }
 
+fn text_width(text: &str) -> usize {
+    unicode_width::UnicodeWidthStr::width(text)
+}
+
+/// The notes, in order and whole, that fit `width` together with a space between each.
+fn fit_notes(notes: &[String], width: usize) -> String {
+    let mut fitted = String::new();
+    for note in notes {
+        let next = if fitted.is_empty() {
+            note.clone()
+        } else {
+            format!("{fitted} {note}")
+        };
+        if text_width(&next) > width {
+            break;
+        }
+        fitted = next;
+    }
+    fitted
+}
+
+/// Wraps `text` at spaces to rows of at most `width` columns, breaking a longer word.
+fn wrap(text: &str, width: usize) -> Vec<String> {
+    let width = width.max(1);
+    let mut rows = Vec::new();
+    let mut row = String::new();
+    for word in text.split_whitespace() {
+        let mut pieces = vec![String::new()];
+        for character in word.chars() {
+            let piece = pieces.last_mut().expect("a piece");
+            if !piece.is_empty() && text_width(&format!("{piece}{character}")) > width {
+                pieces.push(character.to_string());
+            } else {
+                piece.push(character);
+            }
+        }
+        for piece in pieces {
+            let joined = if row.is_empty() {
+                piece
+            } else if text_width(&row) + 1 + text_width(&piece) <= width {
+                format!("{row} {piece}")
+            } else {
+                rows.push(std::mem::take(&mut row));
+                piece
+            };
+            row = joined;
+        }
+    }
+    if !row.is_empty() {
+        rows.push(row);
+    }
+    rows
+}
+
 fn hand_mark(state: HandState, palette: &Palette) -> (&'static str, ratatui::style::Color) {
     match state {
         HandState::Working => ("●", palette.yellow),
@@ -211,7 +319,7 @@ fn hand_mark(state: HandState, palette: &Palette) -> (&'static str, ratatui::sty
 }
 
 enum TreeLine<'a> {
-    Note(String),
+    Note(String, ratatui::style::Color),
     Gap,
     Header(&'static str),
     Item(&'a ReeveTreeItem),
@@ -240,16 +348,19 @@ pub(super) fn render_reeve_section(
             .add_modifier(Modifier::BOLD),
     );
     let mut lines = Vec::new();
-    if let Some(error) = &tree.listing_error {
-        lines.push(TreeLine::Note(format!("listing: {error}")));
-    }
-    let reeves = tree
-        .items
-        .iter()
-        .filter(|item| matches!(item.kind, ReeveTreeItemKind::Reeve { .. }))
-        .count();
-    if reeves == 0 && tree.listing_error.is_none() {
-        lines.push(TreeLine::Note("no reeve in this session".into()));
+    if let Some(note) = &tree.note {
+        let (text, style) = match note {
+            ListingNote::Reading => ("reading listing".to_owned(), palette.overlay0),
+            ListingNote::NoReeve => ("no reeve in this session".to_owned(), palette.overlay0),
+            ListingNote::Failed(error) => (format!("listing: {error}"), palette.yellow),
+            ListingNote::Stale(error) => (format!("stale: {error}"), palette.yellow),
+        };
+        // A reason is wrapped onto rows of its own, never cut, so it reads at any width.
+        lines.extend(
+            wrap(&text, usize::from(area.width.saturating_sub(1)))
+                .into_iter()
+                .map(|line| TreeLine::Note(line, style)),
+        );
     }
     for item in &tree.items {
         if matches!(item.kind, ReeveTreeItemKind::Workspace { .. })
@@ -288,13 +399,13 @@ pub(super) fn render_reeve_section(
     for (row, line) in lines.iter().skip(*scroll).take(height).enumerate() {
         let rect = Rect::new(body.x, body.y + row as u16, body.width, 1);
         match line {
-            TreeLine::Note(text) => render::put_text(
+            TreeLine::Note(text, color) => render::put_text(
                 buffer,
                 rect.x + 1,
                 rect.y,
                 rect.width.saturating_sub(1),
                 text,
-                Style::default().fg(palette.overlay0),
+                Style::default().fg(*color),
             ),
             TreeLine::Gap => {}
             TreeLine::Header(text) => render::put_text(
@@ -311,6 +422,8 @@ pub(super) fn render_reeve_section(
                 render_item(buffer, rect, item, selected == Some(&item.key), config);
                 if let Some(pane_id) = &item.pane_id {
                     hits.agents.push((rect, pane_id.clone()));
+                } else if let ReeveTreeKey::Tab(tab_id) = &item.key {
+                    hits.reeve_tabs.push((rect, tab_id.clone()));
                 } else if let Some(workspace_id) = item
                     .workspace_id
                     .as_ref()
@@ -359,7 +472,7 @@ fn render_item(
             Modifier::empty()
         });
     let right = rect.right();
-    let (prefix, mark, label_style, note, note_style) = match &item.kind {
+    let (prefix, mark, label_style, notes, note_style) = match &item.kind {
         ReeveTreeItemKind::Reeve {
             badge,
             live,
@@ -373,6 +486,11 @@ fn render_item(
                 format!(" {badge} ")
             } else {
                 String::new()
+            };
+            let notes = if note.is_empty() {
+                Vec::new()
+            } else {
+                vec![note]
             };
             let note_style = if *live && item.pane_id.is_some() {
                 Style::default()
@@ -394,7 +512,7 @@ fn render_item(
                     status_color(*status, palette),
                 ),
                 label_style,
-                note,
+                notes,
                 note_style,
             )
         }
@@ -409,10 +527,17 @@ fn render_item(
                 if *last { "  └ " } else { "  ├ " },
                 mark,
                 label_style,
-                notes.join(" "),
+                notes.iter().map(|note| (*note).to_owned()).collect(),
                 Style::default().fg(mark.1),
             )
         }
+        ReeveTreeItemKind::Tab { last } => (
+            if *last { "  └ " } else { "  ├ " },
+            ("", palette.overlay0),
+            Style::default().fg(palette.overlay0),
+            Vec::new(),
+            Style::default(),
+        ),
         ReeveTreeItemKind::Workspace { status } => (
             " ",
             (
@@ -420,7 +545,7 @@ fn render_item(
                 status_color(*status, palette),
             ),
             label_style,
-            String::new(),
+            Vec::new(),
             Style::default(),
         ),
     };
@@ -432,34 +557,38 @@ fn render_item(
         prefix,
         Style::default().fg(palette.overlay0),
     );
-    x = render::put_segment(
-        buffer,
-        x,
-        rect.y,
-        right,
-        mark.0,
-        Style::default().fg(mark.1),
-    );
-    x = x.saturating_add(1);
-    // The note keeps at most half the row, so a long one never hides the label entirely.
-    let note_width = render::display_width(&note).min(right.saturating_sub(x) / 2);
-    let label_right = right.saturating_sub(note_width + u16::from(note_width > 0));
-    let label_width = label_right.saturating_sub(x);
+    if !mark.0.is_empty() {
+        x = render::put_segment(
+            buffer,
+            x,
+            rect.y,
+            right,
+            mark.0,
+            Style::default().fg(mark.1),
+        );
+        x = x.saturating_add(1);
+    }
+    // The label (a reeve's name, a hand's id) comes first: the notes get what is left after
+    // it, whole notes in order, and the ones that do not fit are dropped (decision 52).
+    let width = usize::from(right.saturating_sub(x));
+    let label_width = text_width(&item.label);
+    let note = fit_notes(&notes, width.saturating_sub(label_width + 1));
     render::put_text(
         buffer,
         x,
         rect.y,
-        label_width,
-        &crate::ui::truncate_end(&item.label, usize::from(label_width)),
+        width as u16,
+        &crate::ui::truncate_end(&item.label, width),
         label_style,
     );
-    if note_width > 0 {
+    if !note.is_empty() {
+        let note_width = render::display_width(&note);
         render::put_text(
             buffer,
             right.saturating_sub(note_width),
             rect.y,
             note_width,
-            &crate::ui::truncate_end(&note, usize::from(note_width)),
+            &note,
             note_style,
         );
     }
@@ -497,10 +626,33 @@ pub(super) fn render_key_help(
             .prefix_rhs_label()
             .map_or_else(|| "unset".to_owned(), |rhs| format!("{prefix} {rhs}"))
     };
-    // The walk's own keys are named as herdr's navigate bar names them.
+    // The walk moves on the navigate keys as bound; enter and esc are fixed in herdr's walk.
+    let walk_keys = |bindings: &crate::config::ActionKeybinds| {
+        let labels = bindings
+            .labels()
+            .iter()
+            .map(|label| match label.as_str() {
+                "up" => "↑".to_owned(),
+                "down" => "↓".to_owned(),
+                label => label.to_owned(),
+            })
+            .collect::<Vec<_>>();
+        if labels.is_empty() {
+            "unset".to_owned()
+        } else {
+            labels.join(",")
+        }
+    };
     let segments = if mode == ClientShellMode::Navigate {
         vec![
-            ("↑/↓".to_owned(), " move  "),
+            (
+                format!(
+                    "{}/{}",
+                    walk_keys(&keybinds.keybinds.navigate.workspace_up),
+                    walk_keys(&keybinds.keybinds.navigate.workspace_down)
+                ),
+                " move  ",
+            ),
             ("enter".to_owned(), " show  "),
             ("esc".to_owned(), " back"),
         ]
@@ -530,11 +682,38 @@ impl ClientShellState {
             return None;
         }
         let snapshot = self.snapshot.as_deref()?;
-        Some(reeve_tree(snapshot, self.reeve_listing.as_ref(), session))
+        Some(reeve_tree(
+            snapshot,
+            self.reeve_listing.as_ref(),
+            self.reeve_listing_error.as_deref(),
+            session,
+        ))
     }
 
+    /// The listing command the client should be running, from the config as last (re)loaded.
+    pub(in crate::client) fn reeve_listing_spec(
+        &self,
+    ) -> Option<&crate::client::reeve_listing::ReeveListingSpec> {
+        self.config.reeve_listing.as_ref()
+    }
+
+    /// Takes a read: a good one replaces the tree, a failed one leaves the last good tree,
+    /// marked stale with the reason (decision 56).
     pub(in crate::client) fn set_reeve_listing(&mut self, read: ReeveListingRead) {
-        self.reeve_listing = Some(read);
+        match read {
+            Ok(listing) => {
+                self.reeve_listing = Some(listing);
+                self.reeve_listing_error = None;
+            }
+            Err(error) => self.reeve_listing_error = Some(error),
+        }
+    }
+
+    /// Forgets every read, when the listing command changes or goes.
+    pub(super) fn reset_reeve_listing(&mut self) {
+        self.reeve_listing = None;
+        self.reeve_listing_error = None;
+        self.navigate_reeve_key = None;
     }
 
     /// Starts a walk of the tree at the item that holds the focus.
@@ -572,9 +751,10 @@ impl ClientShellState {
         true
     }
 
-    /// Picks the selected item: shows a reeve's or a hand's own pane, or focuses a workspace.
-    /// None when the tree is not drawn or nothing is selected, so herdr's own pick runs.
-    pub(super) fn pick_navigate_reeve_target(&self) -> Option<Option<crate::api::schema::Method>> {
+    /// Picks the selected item: shows a reeve's or a hand's own pane, brings a tab forward or
+    /// focuses a workspace. None when the tree is not drawn or nothing is selected, so herdr's
+    /// own pick runs.
+    fn pick_navigate_reeve_target(&self) -> Option<Option<crate::api::schema::Method>> {
         let tree = self.current_reeve_tree()?;
         let item = tree
             .items
@@ -585,12 +765,87 @@ impl ClientShellState {
                     pane_id: pane_id.clone(),
                 },
             ))
+        } else if let ReeveTreeKey::Tab(tab_id) = &item.key {
+            Some(crate::api::schema::Method::TabFocus(
+                crate::api::schema::TabTarget {
+                    tab_id: tab_id.clone(),
+                },
+            ))
         } else {
-            item.workspace_id.as_ref().map(|workspace_id| {
-                crate::api::schema::Method::WorkspaceFocus(crate::api::schema::WorkspaceTarget {
-                    workspace_id: workspace_id.clone(),
+            item.workspace_id
+                .as_ref()
+                .filter(|_| matches!(item.kind, ReeveTreeItemKind::Workspace { .. }))
+                .map(|workspace_id| {
+                    crate::api::schema::Method::WorkspaceFocus(
+                        crate::api::schema::WorkspaceTarget {
+                            workspace_id: workspace_id.clone(),
+                        },
+                    )
                 })
+        })
+    }
+
+    /// Enter in the walk: picks the selected item and leaves the walk. False when the tree is
+    /// not drawn, so herdr's own pick runs.
+    pub(super) fn pick_navigate_reeve_tree(&mut self, outcome: &mut ClientShellInput) -> bool {
+        let Some(method) = self.pick_navigate_reeve_target() else {
+            return false;
+        };
+        self.mode = ClientShellMode::Terminal;
+        self.navigate_workspace_id = None;
+        self.navigate_reeve_key = None;
+        if let Some(method) = method {
+            self.push_endpoint_method(method, outcome);
+        }
+        outcome.repaint = true;
+        true
+    }
+
+    /// A digit in the walk: picks the `index`th reeve or plain workspace in the tree's own order
+    /// (its top-level rows, hands and tabs not counted), as herdr's digits pick the `index`th
+    /// workspace of its list. A digit past the last does nothing. False when the tree is not
+    /// drawn, so herdr's digits run.
+    pub(super) fn pick_navigate_reeve_tree_number(
+        &mut self,
+        index: usize,
+        outcome: &mut ClientShellInput,
+    ) -> bool {
+        let Some(tree) = self.current_reeve_tree() else {
+            return false;
+        };
+        if let Some(item) = tree
+            .items
+            .iter()
+            .filter(|item| {
+                matches!(
+                    item.kind,
+                    ReeveTreeItemKind::Reeve { .. } | ReeveTreeItemKind::Workspace { .. }
+                )
             })
+            .nth(index)
+        {
+            self.navigate_reeve_key = Some(item.key.clone());
+            self.pick_navigate_reeve_tree(outcome);
+        }
+        true
+    }
+
+    /// The workspace a workspace action (close, rename, worktree, new from) acts on while the
+    /// walk has a tree row selected: a reeve's row or a plain workspace's names its workspace;
+    /// a hand's row, a tab's row and a reeve with no pane name none, so the action does nothing
+    /// rather than act on the reeve's whole workspace. None when no tree walk is on: herdr keeps
+    /// `navigate_workspace_id` for exactly as long as a walk lasts, and its walk leaves navigate
+    /// mode before it runs the action a key names, so the mode cannot tell.
+    pub(super) fn reeve_walk_workspace_target(&self) -> Option<Option<String>> {
+        self.navigate_workspace_id.as_ref()?;
+        let key = self.navigate_reeve_key.as_ref()?;
+        let tree = self.current_reeve_tree()?;
+        let item = tree.items.get(tree.position(key)?)?;
+        Some(match item.kind {
+            ReeveTreeItemKind::Reeve { .. } | ReeveTreeItemKind::Workspace { .. } => {
+                item.workspace_id.clone()
+            }
+            ReeveTreeItemKind::Hand { .. } | ReeveTreeItemKind::Tab { .. } => None,
         })
     }
 }
