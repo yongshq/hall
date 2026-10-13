@@ -103,7 +103,7 @@ Hall is a modified version of herdr v0.9.0 (commit b99002ac99b09e00b4ca692436cb1
 | `src/cli.rs` | Every CLI request's protocol ping (`ensure_server_protocol_compatible`) is bounded as `hall status`'s is, and a listener that does not answer it gets the same message, instead of hanging; the request itself stays unbounded (`agent wait`). `tests/hall_stop_guard.rs` tests `pane list` and `workspace list`. |
 | `src/main.rs` | `main` runs the old body as `run` and prints an error of kind `Other` as its message (`Error: <message>`), not as Rust's `Debug` of the `io::Error`; exit status 1 as before. |
 
-## Step 3: reeve tree (decisions 49 to 57)
+## Step 3: reeve tree (decisions 49 to 59)
 
 | File | Change |
 |---|---|
@@ -114,7 +114,7 @@ Hall is a modified version of herdr v0.9.0 (commit b99002ac99b09e00b4ca692436cb1
 | `src/client/events.rs` | `ClientLoopEvent::ReeveListing`, tagged with the reader's generation. |
 | `src/client/shell.rs` | The `reeve_tree` module. |
 | `src/client/shell/state.rs` | `ClientShellConfig::reeve_tree_session` and `reeve_listing`; `ClientShellLayout::key_help`, kept only while the tree is drawn (one machine); `ShellHitMap::reeve_tabs`; the shell keeps the last good listing, why the latest read failed, and the tree item a navigate walk has selected. |
-| `src/client/shell/config.rs` | `from_config` and `apply_live_config` turn the reeve tree on for the client's session when a listing command is configured, off when none is; a reload with a changed command forgets the old command's reads; `layout` keeps the bottom row for the key help line while the tree is shown. |
+| `src/client/shell/config.rs` | `from_config` and `apply_live_config` turn the reeve tree on for the client's session when a listing command is configured, off when none is; a reload with a changed command forgets the old command's reads, and a changed interval or timeout keeps them; `layout` keeps the bottom row for the key help line while the tree is shown. |
 | `src/client/shell/render.rs` | `ShellRenderState` carries the tree and its selection. |
 | `src/client/shell/sidebar.rs` | Herdr's spaces section moved, unchanged, into `render_spaces_section`; the reeve tree is drawn in its place when it is on. |
 | `src/client/shell/composition.rs` | The tree is built for each frame; the key help line is drawn. |

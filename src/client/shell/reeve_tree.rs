@@ -274,6 +274,46 @@ fn fit_notes(notes: &[String], width: usize) -> String {
     fitted
 }
 
+/// The notes of a hand row that fit `width`: all of them when they fit. When they do not, each
+/// is kept whole by how much it tells beyond the mark, `wedged` first and the words the mark
+/// already says (the state word, and `asks` beside a `?`) last, skipping one that does not fit;
+/// the ones kept read in decision 52's order (decision 59).
+fn fit_hand_notes(state: HandState, notes: &[&str], width: usize) -> String {
+    let all = notes.join(" ");
+    if text_width(&all) <= width {
+        return all;
+    }
+    let rank = |note: &str| {
+        let repeats_mark = matches!(note, "decide" | "blocked" | "done" | "failed")
+            || (note == "asks" && state == HandState::NeedsDecision);
+        if repeats_mark {
+            usize::MAX
+        } else {
+            ["wedged", "asks", "waiting", "idle", "no pane"]
+                .iter()
+                .position(|word| *word == note)
+                .unwrap_or(usize::MAX - 1)
+        }
+    };
+    let mut order = (0..notes.len()).collect::<Vec<_>>();
+    order.sort_by_key(|&index| rank(notes[index]));
+    let mut kept = vec![false; notes.len()];
+    let mut used = 0;
+    for index in order {
+        let needed = text_width(notes[index]) + usize::from(used > 0);
+        if used + needed <= width {
+            kept[index] = true;
+            used += needed;
+        }
+    }
+    notes
+        .iter()
+        .zip(kept)
+        .filter_map(|(note, kept)| kept.then_some(*note))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// Wraps `text` at spaces to rows of at most `width` columns, breaking a longer word.
 fn wrap(text: &str, width: usize) -> Vec<String> {
     let width = width.max(1);
@@ -516,7 +556,7 @@ fn render_item(
                 note_style,
             )
         }
-        ReeveTreeItemKind::Hand { state, notes, last } => {
+        ReeveTreeItemKind::Hand { state, last, .. } => {
             let mark = hand_mark(*state, palette);
             let label_style = if item.pane_id.is_some() {
                 label_style
@@ -527,7 +567,8 @@ fn render_item(
                 if *last { "  └ " } else { "  ├ " },
                 mark,
                 label_style,
-                notes.iter().map(|note| (*note).to_owned()).collect(),
+                // Fitted by `fit_hand_notes` below.
+                Vec::new(),
                 Style::default().fg(mark.1),
             )
         }
@@ -569,10 +610,14 @@ fn render_item(
         x = x.saturating_add(1);
     }
     // The label (a reeve's name, a hand's id) comes first: the notes get what is left after
-    // it, whole notes in order, and the ones that do not fit are dropped (decision 52).
+    // it, whole notes, and the ones that do not fit are dropped (decisions 52, 59).
     let width = usize::from(right.saturating_sub(x));
     let label_width = text_width(&item.label);
-    let note = fit_notes(&notes, width.saturating_sub(label_width + 1));
+    let room = width.saturating_sub(label_width + 1);
+    let note = match &item.kind {
+        ReeveTreeItemKind::Hand { state, notes, .. } => fit_hand_notes(*state, notes, room),
+        _ => fit_notes(&notes, room),
+    };
     render::put_text(
         buffer,
         x,
@@ -840,7 +885,11 @@ impl ClientShellState {
         self.navigate_workspace_id.as_ref()?;
         let key = self.navigate_reeve_key.as_ref()?;
         let tree = self.current_reeve_tree()?;
-        let item = tree.items.get(tree.position(key)?)?;
+        // A key no longer in the tree (a hand that finished while selected) names no
+        // workspace, rather than the reeve's that `navigate_workspace_id` still holds.
+        let Some(item) = tree.position(key).and_then(|index| tree.items.get(index)) else {
+            return Some(None);
+        };
         Some(match item.kind {
             ReeveTreeItemKind::Reeve { .. } | ReeveTreeItemKind::Workspace { .. } => {
                 item.workspace_id.clone()

@@ -73,8 +73,11 @@ impl ClientShellState {
                 if self.agent_panel_sort_manual {
                     self.config.agent_panel_sort = agent_panel_sort;
                 }
-                if self.config.reeve_listing != reeve_listing {
-                    // hall: a read of the old command is not this one's (decision 49).
+                if self.config.reeve_listing.as_ref().map(|spec| &spec.command)
+                    != reeve_listing.as_ref().map(|spec| &spec.command)
+                {
+                    // hall: a read of the old command is not this one's (decision 49); a new
+                    // interval or timeout keeps the last good tree (decision 56).
                     self.reset_reeve_listing();
                 }
                 self.set_local_config_diagnostic(self.config.local_config_diagnostic(&diagnostics));

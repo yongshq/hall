@@ -3,16 +3,18 @@
 //! The listing is the draft in docs/listing-draft.md: every reeve and every errand in flight,
 //! with where each one sits. Hall never reads status files (ADR 0002); it runs the command the
 //! config names (`[reeve] listing_command`, decision 49) and reads its JSON, killing a run that
-//! outlasts `[reeve] listing_timeout_ms` (decision 56).
+//! outlasts `[reeve] listing_timeout_ms` (decision 56), and keeps a record of each run so the
+//! next client kills a run that a killed client left behind (decision 58).
 
 use std::io::Read;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use super::ClientLoopEvent;
 
@@ -121,21 +123,29 @@ const MAX_LISTING_BYTES: usize = 8 << 20;
 const POLL: Duration = Duration::from_millis(10);
 /// How long stopping the reader waits for it to kill and reap a running command.
 const STOP_WAIT: Duration = Duration::from_secs(2);
+/// How long the output may stay open once the command has exited: then whatever it left behind
+/// holding the output is killed with its group, and what the command printed is read
+/// (decision 58).
+const EXIT_GRACE: Duration = Duration::from_millis(100);
 
 /// Runs the listing command once and parses what it prints, killing it after `timeout`.
 #[cfg(test)]
 pub(super) fn read_listing(command: &[String], timeout: Duration) -> ReeveListingRead {
     let (_stop_tx, stop_rx) = mpsc::channel();
-    read_listing_until(command, timeout, &stop_rx).unwrap_or_else(|| Err("stopped".into()))
+    read_listing_until(command, timeout, &stop_rx, None).unwrap_or_else(|| Err("stopped".into()))
 }
 
 /// Runs the listing command once, in a process group of its own, and parses what it prints.
 /// When the command outlasts `timeout`, or `stop` says to stop (None then), the command and
 /// everything it started in its group are killed and the command is reaped: nothing is left.
+/// When the command exits but something it started holds its output past `EXIT_GRACE`, that
+/// group is killed and what the command printed is read. While it runs, a record of it sits in
+/// `runs`, for the next client should this one be killed (decision 58).
 fn read_listing_until(
     command: &[String],
     timeout: Duration,
     stop: &mpsc::Receiver<()>,
+    runs: Option<&Path>,
 ) -> Option<ReeveListingRead> {
     let Some((program, args)) = command.split_first() else {
         return Some(Err("no listing command".into()));
@@ -147,6 +157,9 @@ fn read_listing_until(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     // A process group of its own, as herdr's tab bar status commands get (`tab_bar_status.rs`).
+    // Not on Windows, where that spawns the command suspended until herdr's job guard, which
+    // this reader does not use, resumes it: there the command alone is killed.
+    #[cfg(unix)]
     crate::platform::configure_status_command(&mut process);
     let mut child = match process.spawn() {
         Ok(child) => child,
@@ -155,13 +168,19 @@ fn read_listing_until(
         }
         Err(error) => return Some(Err(format!("{program}: {error}"))),
     };
+    let _record = runs.and_then(|runs| RunRecord::write(runs, &child, command));
     let mut stdout = Pipe::read(child.stdout.take());
     let mut stderr = Pipe::read(child.stderr.take());
     let deadline = Instant::now() + timeout;
     let mut status = None;
+    let mut exited = None;
+    let mut group_killed = false;
     loop {
         if status.is_none() {
             status = child.try_wait().ok().flatten();
+            if status.is_some() {
+                exited = Some(Instant::now());
+            }
         }
         stdout.collect();
         stderr.collect();
@@ -176,6 +195,12 @@ fn read_listing_until(
             (status, stdout.output(), stderr.output())
         {
             return Some(listing_from_output(status, stdout, stderr));
+        }
+        if !group_killed && exited.is_some_and(|exited| exited.elapsed() >= EXIT_GRACE) {
+            // The command is gone; what holds its output is in its group (a child it left
+            // behind), and the group id stays reserved while that member exists.
+            kill_group(&child);
+            group_killed = true;
         }
         let stopped = !matches!(stop.recv_timeout(POLL), Err(RecvTimeoutError::Timeout));
         if stopped || Instant::now() >= deadline {
@@ -242,6 +267,12 @@ impl Pipe {
 /// Kills the command's whole process group, so a child it left behind holding the output pipe
 /// goes too, then reaps the command. The pipe readers end once the group is gone.
 fn kill_and_reap(child: &mut Child) {
+    kill_group(child);
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+fn kill_group(child: &Child) {
     #[cfg(unix)]
     if let Ok(group) = libc::pid_t::try_from(child.id()) {
         // The command leads its own group, as in herdr's `StatusCommandGuard::terminate`; the
@@ -250,8 +281,150 @@ fn kill_and_reap(child: &mut Child) {
             libc::kill(-group, libc::SIGKILL);
         }
     }
-    let _ = child.kill();
-    let _ = child.wait();
+    #[cfg(not(unix))]
+    let _ = child;
+}
+
+/// Where each client keeps the record of its running listing command: the client's state
+/// folder.
+fn runs_dir() -> PathBuf {
+    crate::config::state_dir().join("reeve-listing")
+}
+
+/// A process told apart from any later one given the same pid: its pid and its start time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+struct ProcessIdentity {
+    pid: i32,
+    start: u64,
+}
+
+impl ProcessIdentity {
+    fn of(pid: i32) -> Option<Self> {
+        process_start(pid).map(|(start, _)| Self { pid, start })
+    }
+
+    /// Whether this very process still runs.
+    fn alive(self) -> bool {
+        process_start(self.pid).is_some_and(|(start, _)| start == self.start)
+    }
+
+    /// Whether this very process still runs and still leads its own process group.
+    #[cfg_attr(not(unix), allow(dead_code))]
+    fn leads_its_group(self) -> bool {
+        process_start(self.pid)
+            .is_some_and(|(start, group)| start == self.start && group == self.pid)
+    }
+}
+
+/// A process's start time and process group, or None when it is gone (or on a system where
+/// hall cannot tell).
+#[cfg(target_os = "macos")]
+fn process_start(pid: i32) -> Option<(u64, i32)> {
+    let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+    let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+    // SAFETY: `info` is a `proc_bsdinfo` of `size` bytes, as PROC_PIDTBSDINFO fills.
+    let ret = unsafe {
+        libc::proc_pidinfo(
+            pid,
+            libc::PROC_PIDTBSDINFO,
+            0,
+            &mut info as *mut _ as *mut libc::c_void,
+            size,
+        )
+    };
+    (ret == size).then(|| {
+        (
+            info.pbi_start_tvsec * 1_000_000 + info.pbi_start_tvusec,
+            info.pbi_pgid as i32,
+        )
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn process_start(pid: i32) -> Option<(u64, i32)> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    // After the command name: state, ppid, pgrp, ..., starttime (the 22nd field).
+    let fields = stat
+        .rsplit_once(')')?
+        .1
+        .split_whitespace()
+        .collect::<Vec<_>>();
+    Some((fields.get(19)?.parse().ok()?, fields.get(2)?.parse().ok()?))
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn process_start(_pid: i32) -> Option<(u64, i32)> {
+    None
+}
+
+/// The record of one running listing command, in the client's state folder while it runs:
+/// which client started it, the process group it leads and the command. A client killed with
+/// SIGKILL cannot kill its run; the next client's reader finds the record and does
+/// (`kill_leftover_runs`). Removed when the run ends.
+#[derive(Debug, Serialize, Deserialize)]
+struct ListingRun {
+    client: ProcessIdentity,
+    group: ProcessIdentity,
+    command: Vec<String>,
+}
+
+struct RunRecord {
+    path: PathBuf,
+}
+
+impl RunRecord {
+    fn write(runs: &Path, child: &Child, command: &[String]) -> Option<Self> {
+        let client = ProcessIdentity::of(i32::try_from(std::process::id()).ok()?)?;
+        let group = ProcessIdentity::of(i32::try_from(child.id()).ok()?)?;
+        let run = ListingRun {
+            client,
+            group,
+            command: command.to_vec(),
+        };
+        let path = runs.join(format!("{}-{}.json", client.pid, group.pid));
+        // Written whole, then moved into place, so a record is never read half written.
+        let partial = path.with_extension("partial");
+        std::fs::create_dir_all(runs).ok()?;
+        std::fs::write(&partial, serde_json::to_vec(&run).ok()?).ok()?;
+        std::fs::rename(&partial, &path).ok()?;
+        Some(Self { path })
+    }
+}
+
+impl Drop for RunRecord {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+/// Kills every run in `runs` that a client no longer running left behind, when its command
+/// still runs: the very process the run started (same pid, same start time), still leading its
+/// group. Its record goes either way. A run of a client still running is that client's own.
+fn kill_leftover_runs(runs: &Path) {
+    let Ok(entries) = std::fs::read_dir(runs) else {
+        return;
+    };
+    for path in entries.flatten().map(|entry| entry.path()) {
+        if path.extension().is_none_or(|extension| extension != "json") {
+            continue;
+        }
+        let Some(run) = std::fs::read(&path)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<ListingRun>(&bytes).ok())
+        else {
+            continue;
+        };
+        if run.client.alive() {
+            continue;
+        }
+        #[cfg(unix)]
+        if run.group.leads_its_group() {
+            unsafe {
+                libc::kill(-run.group.pid, libc::SIGKILL);
+            }
+        }
+        let _ = std::fs::remove_file(&path);
+    }
 }
 
 /// Seconds as herdr's status commands word a timeout (`timed out after 2s`).
@@ -286,10 +459,15 @@ impl ReeveListingWatch {
         let (stopped_tx, stopped_rx) = mpsc::channel::<()>();
         let thread_spec = spec.clone();
         std::thread::spawn(move || {
+            let runs = runs_dir();
+            kill_leftover_runs(&runs);
             let mut previous = None;
-            while let Some(current) =
-                read_listing_until(&thread_spec.command, thread_spec.timeout, &stop_rx)
-            {
+            while let Some(current) = read_listing_until(
+                &thread_spec.command,
+                thread_spec.timeout,
+                &stop_rx,
+                Some(&runs),
+            ) {
                 if previous.as_ref() != Some(&current) {
                     match event_tx
                         .try_send(ClientLoopEvent::ReeveListing(generation, current.clone()))
@@ -502,22 +680,161 @@ mod tests {
         );
     }
 
+    /// Waits, up to `TIMEOUT`, for a process this test did not start to leave the process
+    /// table. A killed orphan stays there as a zombie until init reaps it, which this process
+    /// cannot wait on, so a check made at once can find it still there.
+    #[cfg(unix)]
+    fn leaves_process_table(pid: i32) -> bool {
+        let deadline = Instant::now() + TIMEOUT;
+        while in_process_table(pid) {
+            if Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::sleep(POLL);
+        }
+        true
+    }
+
     #[cfg(unix)]
     #[test]
-    fn a_child_left_holding_the_output_is_killed_with_the_command() {
+    fn a_child_left_holding_the_output_is_killed_and_the_listing_read() {
         let pid_file = pid_file();
         let read = read_listing(
             &sh(&format!(
                 "echo '{{}}'; sleep 1000 & echo $! > '{}'",
                 pid_file.display()
             )),
-            Duration::from_millis(300),
+            TIMEOUT,
         );
-        assert_eq!(read, Err("timed out after 0.3s".into()));
+        assert_eq!(read, Ok(ReeveListing::default()), "read after the grace");
         assert!(
-            !in_process_table(pid_in(&pid_file)),
+            leaves_process_table(pid_in(&pid_file)),
             "the background child is gone"
         );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_listing_command_runs_on_windows() {
+        // Spawned without the suspended start herdr's status commands get.
+        let read = read_listing(&["cmd".into(), "/C".into(), "echo {}".into()], TIMEOUT);
+        assert_eq!(read, Ok(ReeveListing::default()));
+    }
+
+    /// A fresh, empty folder for a test's run records.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    fn runs() -> PathBuf {
+        let runs = pid_file().with_extension("runs");
+        std::fs::create_dir_all(&runs).expect("runs folder");
+        runs
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    fn records(runs: &Path) -> Vec<String> {
+        let mut names = std::fs::read_dir(runs)
+            .expect("runs folder")
+            .flatten()
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        names.sort();
+        names
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn a_run_is_recorded_while_it_runs_and_its_record_goes_after() {
+        let runs = runs();
+        let seen = pid_file();
+        let (_stop_tx, stop_rx) = mpsc::channel();
+        let read = read_listing_until(
+            &sh(&format!(
+                "ls '{}' > '{}'; echo '{{}}'",
+                runs.display(),
+                seen.display()
+            )),
+            TIMEOUT,
+            &stop_rx,
+            Some(&runs),
+        );
+        assert_eq!(read, Some(Ok(ReeveListing::default())));
+        let seen_names = std::fs::read_to_string(&seen).expect("listing of runs");
+        let _ = std::fs::remove_file(&seen);
+        let name = seen_names.trim();
+        assert!(
+            name.starts_with(&format!("{}-", std::process::id())) && name.ends_with(".json"),
+            "one record, named for this client: {seen_names:?}"
+        );
+        assert_eq!(records(&runs), Vec::<String>::new(), "gone after the run");
+        let _ = std::fs::remove_dir_all(&runs);
+    }
+
+    /// Writes a run record as a client would, `client` and `group` as given.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    fn record(runs: &Path, name: &str, client: ProcessIdentity, group: ProcessIdentity) {
+        let run = ListingRun {
+            client,
+            group,
+            command: vec!["sleep".into(), "1000".into()],
+        };
+        std::fs::write(runs.join(name), serde_json::to_vec(&run).unwrap()).unwrap();
+    }
+
+    /// A hung listing command as a killed client leaves it: leading a group of its own.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    fn hung_run() -> (Child, ProcessIdentity) {
+        use std::os::unix::process::CommandExt;
+        let child = Command::new("sleep")
+            .arg("1000")
+            .process_group(0)
+            .spawn()
+            .expect("sleep");
+        let group = ProcessIdentity::of(child.id() as i32).expect("identity");
+        (child, group)
+    }
+
+    /// This process, as a client that is no longer running would be recorded: same pid,
+    /// another start time.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    fn gone_client() -> ProcessIdentity {
+        let mut client = ProcessIdentity::of(std::process::id() as i32).expect("identity");
+        client.start += 1;
+        assert!(!client.alive());
+        client
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn the_next_reader_kills_a_run_a_killed_client_left_behind() {
+        use std::os::unix::process::ExitStatusExt;
+        let runs = runs();
+        let (mut child, group) = hung_run();
+        record(&runs, "1-2.json", gone_client(), group);
+        kill_leftover_runs(&runs);
+        // The hung command is this test's child: waiting on it is deterministic.
+        assert_eq!(child.wait().expect("wait").signal(), Some(libc::SIGKILL));
+        assert_eq!(records(&runs), Vec::<String>::new());
+        let _ = std::fs::remove_dir_all(&runs);
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn a_leftover_record_kills_only_the_very_command_it_started() {
+        let runs = runs();
+        let (mut child, group) = hung_run();
+        // The pid now names a later process: the start time differs.
+        let mut later = group;
+        later.start += 1;
+        record(&runs, "1-reused.json", gone_client(), later);
+        // A client still running owns its run.
+        let this_client = ProcessIdentity::of(std::process::id() as i32).expect("identity");
+        record(&runs, "2-live.json", this_client, group);
+        std::fs::write(runs.join("3-unreadable.json"), "{").unwrap();
+        kill_leftover_runs(&runs);
+        assert!(child.try_wait().expect("try_wait").is_none(), "not killed");
+        assert_eq!(records(&runs), ["2-live.json", "3-unreadable.json"]);
+        let _ = child.kill();
+        let _ = child.wait();
+        let _ = std::fs::remove_dir_all(&runs);
     }
 
     #[test]

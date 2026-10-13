@@ -255,8 +255,9 @@ fn each_flag_and_state_has_its_own_word_and_counts_once() {
     let mut state = reeve_state(listing);
     let tree = tree_rows(&compose(&mut state));
     assert_eq!(tree[4], " · bertil              1");
-    // At the default sidebar width the id stays whole and the notes that do not fit go.
-    assert_eq!(tree[5], "  └ ? bertil-probe decide");
+    // At the default sidebar width the id stays whole and the notes that do not fit go: the
+    // ones the mark already says (`decide`, and `asks` beside `?`) first, so `wedged` stays.
+    assert_eq!(tree[5], "  └ ? bertil-probe wedged");
     let tree_model = state.current_reeve_tree().expect("tree");
     let probe = &tree_model.items[tree_model
         .position(&ReeveTreeKey::Hand("bertil-probe".into()))
@@ -266,6 +267,35 @@ fn each_flag_and_state_has_its_own_word_and_counts_once() {
         crate::client::shell::reeve_tree::ReeveTreeItemKind::Hand { notes, .. }
             if notes == &["decide", "asks", "waiting", "wedged"]
     ));
+    // With room for them all, every note shows, in decision 52's order.
+    state.config.sidebar_max_width = 50;
+    state.sidebar_width = 50;
+    let row = rows(&compose(&mut state))[5]
+        .chars()
+        .take(49)
+        .collect::<String>();
+    assert_eq!(row, "  └ ? bertil-probe     decide asks waiting wedged");
+}
+
+#[test]
+fn a_narrow_row_keeps_the_notes_the_mark_does_not_say() {
+    let mut listing = listing();
+    {
+        // Working: `asks` says what the mark does not, and goes before `waiting`.
+        let errand = errand_mut(&mut listing, "bertil-probe");
+        errand.question = Some("Ship?".into());
+        errand.waiting = true;
+    }
+    {
+        // Blocked: the mark says blocked, so a flag that fits takes the room.
+        let errand = errand_mut(&mut listing, "ansel-fix");
+        errand.hand_state = crate::client::reeve_listing::HandState::Blocked;
+        errand.idle = true;
+    }
+    let mut state = reeve_state(listing);
+    let tree = tree_rows(&compose(&mut state));
+    assert_eq!(tree[2], "  ├ ! ansel-fix      idle");
+    assert_eq!(tree[5], "  └ ● bertil-probe   asks");
 }
 
 #[test]
@@ -741,6 +771,30 @@ fn workspace_actions_from_a_hand_row_or_a_paneless_reeve_do_nothing() {
 }
 
 #[test]
+fn a_hand_that_finishes_while_selected_offers_no_workspace_action() {
+    let mut listing = listing();
+    let mut state = reeve_state(listing.clone());
+    compose(&mut state);
+    state.handle_input_bytes(b"\x02w\x1b[B\x1b[B");
+    assert_eq!(
+        state.navigate_reeve_key,
+        Some(ReeveTreeKey::Hand("ansel-review".into()))
+    );
+    assert_eq!(state.navigate_workspace_id.as_deref(), Some("ws_a"));
+    // The hand finishes mid-walk: its row becomes a tab of its reeve, under another key.
+    listing.errands.retain(|errand| errand.id != "ansel-review");
+    state.set_reeve_listing(Ok(listing));
+    assert_eq!(tree_rows(&compose(&mut state))[3], "  └ tab ansel-review");
+    assert_eq!(state.reeve_walk_workspace_target(), Some(None));
+    let close = state.handle_input_bytes(b"D");
+    assert!(close.actions.is_empty());
+    assert!(
+        state.overlay.is_none(),
+        "no offer to close the reeve's workspace"
+    );
+}
+
+#[test]
 fn with_several_machines_no_key_help_row_is_kept() {
     use crate::client::endpoint::{ClientEndpointId, ClientEndpointStatus, ProfileId};
     let mut state = reeve_state(listing());
@@ -781,6 +835,20 @@ fn a_config_reload_applies_the_reeve_section_live() {
     std::env::set_var("HALL_CONFIG_PATH", &path);
 
     let mut state = reeve_state(listing());
+    // A new timeout for the same command keeps the last good tree.
+    std::fs::write(
+        &path,
+        "[reeve]\nlisting_command = [\"true\"]\nlisting_timeout_ms = 3500\n",
+    )
+    .expect("write config");
+    state.reload_client_config();
+    let spec = state.reeve_listing_spec().expect("listing command");
+    assert_eq!(spec.timeout, std::time::Duration::from_millis(3500));
+    assert_eq!(state.reeve_listing, Some(listing()));
+    // The reload takes the session from `HALL_SESSION`; this test's tree is hall-dev's.
+    state.config.reeve_tree_session = Some("hall-dev".into());
+    assert_eq!(tree_rows(&compose(&mut state))[1], " · ansel");
+
     std::fs::write(
         &path,
         "[reeve]\nlisting_command = [\"other-listing\", \"--json\"]\nlisting_timeout_ms = 2000\n",
