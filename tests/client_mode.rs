@@ -246,7 +246,7 @@ fn app_dir_name() -> &'static str {
     if cfg!(debug_assertions) {
         "hall-dev"
     } else {
-        "herdr"
+        "hall"
     }
 }
 
@@ -407,7 +407,7 @@ fn client_sees_headless_startup_config_diagnostic() {
     let app_dir = if cfg!(debug_assertions) {
         "hall-dev"
     } else {
-        "herdr"
+        "hall"
     };
     fs::create_dir_all(config_home.join(app_dir)).unwrap();
     fs::write(
@@ -479,14 +479,10 @@ fn server_unreachable_shows_clear_error() {
     let runtime_dir = base.join("runtime");
     let api_socket = runtime_dir.join("herdr.sock");
 
-    fs::create_dir_all(config_home.join("herdr")).unwrap();
+    fs::create_dir_all(config_home.join("hall")).unwrap();
     fs::create_dir_all(&runtime_dir).unwrap();
     register_runtime_dir(&runtime_dir);
-    fs::write(
-        config_home.join("herdr/config.toml"),
-        "onboarding = false\n",
-    )
-    .unwrap();
+    fs::write(config_home.join("hall/config.toml"), "onboarding = false\n").unwrap();
 
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_hall"))
         .arg("client")

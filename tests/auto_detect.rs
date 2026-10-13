@@ -87,14 +87,10 @@ fn spawn_server(
     api_socket_path: &Path,
     _client_socket_path: &Path,
 ) -> SpawnedHerdr {
-    fs::create_dir_all(config_home.join("herdr")).unwrap();
+    fs::create_dir_all(config_home.join("hall")).unwrap();
     fs::create_dir_all(runtime_dir).unwrap();
     register_runtime_dir(runtime_dir);
-    fs::write(
-        config_home.join("herdr/config.toml"),
-        "onboarding = false\n",
-    )
-    .unwrap();
+    fs::write(config_home.join("hall/config.toml"), "onboarding = false\n").unwrap();
 
     let pair = native_pty_system()
         .openpty(PtySize {
@@ -131,14 +127,10 @@ fn spawn_herdr_auto(
     api_socket_path: &Path,
     _client_socket_path: &Path,
 ) -> SpawnedHerdr {
-    fs::create_dir_all(config_home.join("herdr")).unwrap();
+    fs::create_dir_all(config_home.join("hall")).unwrap();
     fs::create_dir_all(runtime_dir).unwrap();
     register_runtime_dir(runtime_dir);
-    fs::write(
-        config_home.join("herdr/config.toml"),
-        "onboarding = false\n",
-    )
-    .unwrap();
+    fs::write(config_home.join("hall/config.toml"), "onboarding = false\n").unwrap();
 
     let pair = native_pty_system()
         .openpty(PtySize {
@@ -508,7 +500,7 @@ fn auto_detect_default_socket_path_from_config_dir() {
     let app_dir_name = if cfg!(debug_assertions) {
         "hall-dev"
     } else {
-        "herdr"
+        "hall"
     };
     let api_socket = config_home.join(app_dir_name).join("herdr.sock");
     let client_socket = config_home.join(app_dir_name).join("herdr-client.sock");
@@ -587,7 +579,7 @@ fn auto_detect_writes_client_and_server_logs_to_separate_files() {
     let app_dir_name = if cfg!(debug_assertions) {
         "hall-dev"
     } else {
-        "herdr"
+        "hall"
     };
     let log_dir = config_home.join(app_dir_name);
     let client_log = log_dir.join("herdr-client.log");

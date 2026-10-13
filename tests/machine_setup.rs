@@ -62,7 +62,7 @@ fn setup(installed: &str, answer: &str, handoff: bool) -> SetupResult {
     let app = if cfg!(debug_assertions) {
         "hall-dev"
     } else {
-        "herdr"
+        "hall"
     };
     fs::create_dir_all(root.join("bin")).unwrap();
     fs::create_dir_all(root.join("config").join(app)).unwrap();
