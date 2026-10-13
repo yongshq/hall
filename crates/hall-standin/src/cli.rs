@@ -29,9 +29,10 @@ usage: hall-standin --home <test reeve home> [command]
 The world file is <home>/standin/world.toml. --home must be a directory whose
 name starts with .reeve-hall-dev, and never ~/.reeve (for HOME or for the
 home in the user database), in any letter case or through any symlink. It
-may not have .. in it. Every command but check-root then walks the whole
-home and refuses it if anything inside is a symlink, a file with more than
-one name (a hard link), or neither a regular file nor a directory.";
+may not have .. in it. Every command but check-root then walks the home,
+save the contents of xdg-config and xdg-state other than their herdr folder,
+and refuses it if anything inside is a symlink, a file with more than one
+name (a hard link), or neither a regular file nor a directory.";
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum CliError {
