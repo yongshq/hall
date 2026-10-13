@@ -615,6 +615,42 @@ fn up_refuses_to_write_through_a_symlink() {
 }
 
 #[test]
+fn up_and_drive_go_on_past_a_link_inside_the_xdg_folders() {
+    let rig = Rig::new("xdg-links");
+    rig.ok("test-setup", &["up"]);
+    // What fnm makes per shell under a test claude's XDG_STATE_HOME: a link
+    // out of the home. The stand-in does not walk inside either folder
+    // (decision 48's amendment).
+    for name in ["xdg-config", "xdg-state"] {
+        let dir = rig.home.join(name).join("fnm_multishells");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::os::unix::fs::symlink(rig.user.join(".reeve"), dir.join("1_2")).unwrap();
+    }
+    let again = rig.ok("test-setup", &["up"]);
+    assert_eq!(again.matches("already up in pane").count(), 5, "{again}");
+    let turn = rig.ok("test-drive", &["ansel", "turn-end"]);
+    assert!(turn.contains("reads as ready for input"), "{turn}");
+
+    // Either folder itself a link is still refused.
+    for name in ["xdg-config", "xdg-state"] {
+        let dir = rig.home.join(name);
+        std::fs::rename(&dir, rig.bin.join(name)).unwrap();
+        std::os::unix::fs::symlink(rig.bin.join(name), &dir).unwrap();
+        for (script, args) in [
+            ("test-setup", &["up"][..]),
+            ("test-drive", &["ansel", "turn-end"]),
+        ] {
+            let out = rig.run(script, args);
+            assert_eq!(out.status.code(), Some(1), "{name} {script}: {out:?}");
+            let err = String::from_utf8_lossy(&out.stderr);
+            assert!(err.contains("is a symlink"), "{name} {script}: {err}");
+        }
+        std::fs::remove_file(&dir).unwrap();
+        std::fs::rename(rig.bin.join(name), &dir).unwrap();
+    }
+}
+
+#[test]
 fn up_keeps_a_running_test_session() {
     let rig = Rig::new("running");
     std::fs::write(rig.bin.join("running"), "").unwrap();
