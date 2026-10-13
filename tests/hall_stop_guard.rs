@@ -405,6 +405,32 @@ fn status_says_hall_cannot_confirm_a_silent_listener() {
     }
 }
 
+#[test]
+fn api_calls_say_hall_cannot_confirm_a_silent_listener() {
+    let rig = Rig::new("sapi");
+    let _silent = SilentListener::bind(&rig.socket());
+    for args in [&["pane", "list"][..], &["workspace", "list"]] {
+        let mut cmd = rig.command(args);
+        cmd.env("HALL_SOCKET_PATH", rig.socket());
+        // Bounded: the protocol ping before the request gives up well inside
+        // this, where it hung before.
+        let started = Instant::now();
+        let output = run(cmd, Duration::from_secs(15));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(1), "hall {args:?}: {stderr}");
+        assert!(started.elapsed() < Duration::from_secs(15));
+        assert!(
+            stderr.contains(
+                "did not answer a status check, so hall cannot confirm it is a hall server"
+            ),
+            "hall {args:?}: {stderr}"
+        );
+        assert!(!stderr.contains("os error"), "hall {args:?}: {stderr}");
+        assert!(!stderr.contains("server stop"), "hall {args:?}: {stderr}");
+        assert!(!stderr.contains("Custom {"), "hall {args:?}: {stderr}");
+    }
+}
+
 /// Kills the real hall server if the test fails before it stops.
 struct ServerGuard(Child);
 

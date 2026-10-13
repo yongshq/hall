@@ -775,9 +775,25 @@ pub(super) fn send_request_unchecked(request: &Request) -> std::io::Result<serde
 }
 
 fn ensure_server_protocol_compatible(client: &ApiClient, request_id: &str) -> std::io::Result<()> {
+    // hall: the ping is bounded as `hall status`'s is, and a listener that does
+    // not answer it gets hall's message, not a hang (decision 46). The request
+    // after it stays unbounded, since `agent wait` blocks on purpose.
     let status = client
-        .status()
-        .map_err(|err| map_server_not_running_or_io(err, request_id, client))?;
+        .status_with_timeout(crate::server::autodetect::STATUS_REQUEST_TIMEOUT)
+        .map_err(|err| match err {
+            ApiClientError::Io(err)
+                if matches!(
+                    err.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) =>
+            {
+                tracing::warn!(err = %err, "server ping failed");
+                std::io::Error::other(crate::server::autodetect::unanswered_status_message(
+                    &client.socket_path(),
+                ))
+            }
+            err => map_server_not_running_or_io(err, request_id, client),
+        })?;
     let server_protocol = status
         .protocol
         .ok_or_else(|| std::io::Error::other("server ping did not include a protocol version"))?;

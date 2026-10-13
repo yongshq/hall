@@ -47,11 +47,6 @@ impl ApiClient {
         self.target.socket_path()
     }
 
-    pub fn request(&self, request: Request) -> Result<SuccessResponse, ApiClientError> {
-        let value = self.request_value(&request)?;
-        parse_response_value(value)
-    }
-
     pub fn request_value(&self, request: &Request) -> Result<serde_json::Value, ApiClientError> {
         let mut stream = self.connect()?;
         write_request(&mut stream, request)?;
@@ -74,13 +69,10 @@ impl ApiClient {
         read_json_line(&mut reader)
     }
 
-    pub fn status(&self) -> Result<crate::api::RuntimeStatus, ApiClientError> {
-        let response = self.request(status_request())?;
-        runtime_status(response)
-    }
-
-    /// hall: `status`, with the wait for the answer bounded by `timeout`, so a
-    /// listener that never answers cannot hang the caller (decision 46).
+    /// hall: the status ping, with the wait for the answer bounded by
+    /// `timeout`, so a listener that never answers cannot hang the caller
+    /// (decision 46). It replaces herdr's unbounded `status`, and with it
+    /// `request`, which nothing else used.
     pub fn status_with_timeout(
         &self,
         timeout: Duration,
