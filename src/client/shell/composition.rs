@@ -102,6 +102,9 @@ impl ClientShellState {
 
     pub(crate) fn compose(&mut self, cols: u16, rows: u16) -> Option<FrameData> {
         self.last_composed_size = Some((cols, rows));
+        // hall: alerts whose trigger has cleared, or whose pane the liege moved to, go before
+        // the tree is drawn (decision 63).
+        self.prune_reeve_alerts();
         if self.snapshot.is_none() || self.pane_surface.is_none() {
             return Some(self.compose_unavailable(cols, rows));
         }

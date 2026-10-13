@@ -1460,6 +1460,12 @@
           "type": "integer",
           "default": "5000",
           "description": "hall: how long one run of the listing command may take, in milliseconds (at least 100). A run past it is killed with everything it started; the last good tree stays on screen, marked stale."
+        },
+        {
+          "key": "reeve.alert_focused_reply",
+          "type": "boolean",
+          "default": "true",
+          "description": "hall: whether a reeve's reply alerts (sound and highlight) while its tab is the focused active one, which the done notification otherwise skips."
         }
       ]
     },

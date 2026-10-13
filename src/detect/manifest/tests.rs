@@ -952,6 +952,62 @@ fn claude_mcp_elicitation_is_blocked() {
 }
 
 #[test]
+fn claude_numbered_consent_without_a_known_footer_is_blocked() {
+    // hall (decision 62): the Claude in Chrome consent, verbatim from a live capture, names
+    // none of the footers the other blocked rules know and hides the composer, so it read
+    // idle with no rule matched. Two numbered choices with the cursor on one read blocked.
+    let screen = concat!(
+        " ──────────────────────────────────────────────────────────────────\n",
+        "  Claude in Chrome wants to create a browser window and read your tabs\n",
+        "\n",
+        "  ❯ 1. Allow\n",
+        "    2. Deny (esc)\n",
+    );
+    let result = with_manifest_dirs("claude-numbered-consent", || {
+        osc_explain(
+            Agent::Claude,
+            screen,
+            "\u{2733} Browser tabs context MCP",
+            "",
+        )
+    });
+    assert_eq!(result.state, AgentState::Blocked, "{result:#?}");
+    assert!(result.visible_blocker, "{result:#?}");
+    assert_eq!(
+        result.matched_rule.as_ref().map(|r| r.id.as_str()),
+        Some("numbered_choice_overlay"),
+        "{result:#?}"
+    );
+}
+
+#[test]
+fn claude_numbered_list_above_a_visible_composer_stays_idle() {
+    // hall (decision 62): a finished reply that ends in a numbered list, or that quotes the
+    // consent, sits above the composer, which outranks the overlay rule.
+    for transcript in [
+        "⏺ Two options:\n  1. alpha\n  2. beta\n",
+        "⏺ It asked:\n  Claude in Chrome wants to create a browser window and read your tabs\n  ❯ 1. Allow\n    2. Deny (esc)\n",
+    ] {
+        let screen = format!(
+            "{transcript}\n\
+             ────────────────────────────────────────────────────────────────\n\
+             ❯\n\
+             ────────────────────────────────────────────────────────────────\n\
+             \u{20}\u{20}? for shortcuts\n"
+        );
+        let result = with_manifest_dirs("claude-numbered-list-idle", || {
+            osc_explain(Agent::Claude, &screen, "\u{2733} Claude Code", "")
+        });
+        assert_eq!(result.state, AgentState::Idle, "{result:#?}");
+        assert_eq!(
+            result.matched_rule.as_ref().map(|r| r.id.as_str()),
+            Some("live_prompt_box"),
+            "{result:#?}"
+        );
+    }
+}
+
+#[test]
 fn claude_empty_osc_empty_screen_is_idle_fallback() {
     // No OSC data, no matching screen rule → fallback idle (unchanged V3 behavior)
     let result = osc_explain(Agent::Claude, "", "", "");

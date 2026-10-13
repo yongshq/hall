@@ -1047,6 +1047,10 @@ pub struct ReeveConfig {
     /// How long one run of the listing command may take before it is killed, in milliseconds
     /// (decision 56). Default: 5000.
     pub listing_timeout_ms: u64,
+    /// Whether a reeve's reply alerts (sound and highlight) while its tab is the focused active
+    /// one, which herdr's done notification otherwise skips (decisions 22, 35 and 62).
+    /// Default: true.
+    pub alert_focused_reply: bool,
 }
 
 impl Default for ReeveConfig {
@@ -1055,6 +1059,7 @@ impl Default for ReeveConfig {
             listing_command: Vec::new(),
             listing_interval_ms: 1000,
             listing_timeout_ms: 5000,
+            alert_focused_reply: true,
         }
     }
 }

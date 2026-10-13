@@ -144,7 +144,7 @@ Each step works end to end and can be shown to the liege on its own. Steps 1 to 
   - a test reeve ending a turn while its tab is active and the hall window has focus, with the setting that turns herdr's suppression off (decisions 22 and 35).
 
   With the sound muted, a repeat of any trigger shows only the highlight. The "live setup unchanged" check passes.
-- **Needs:** step 3 for the highlight on the reeve; step 2 for setting states and driving test reeves on demand. The turn-end question below is settled before this step starts.
+- **Needs:** step 3 for the highlight on the reeve; step 2 for setting states and driving test reeves on demand. The turn-end question below is settled before this step starts. Settled by decision 62; built in step 4 with decision 63 (the highlight, its clearing, the listing alert's sound), and `scripts/test-drive` drives a test hand too, for the hand at a dialog.
 
 ### 5. Go-live bridge
 
@@ -154,7 +154,7 @@ Each step works end to end and can be shown to the liege on its own. Steps 1 to 
 
 ## Questions left for build time
 
-- **How a reeve's turn ending is read.** Herdr's done sound already fires on turn end (fork-map section 4). Whether its idle and done reads are good enough is not settled: reeve's backend avoids herdr's `agent_status` because it latches, and uses `agent explain` instead (`reeve:backends/herdr.sh:539-542`); and a dialog claude paints full screen can read idle with no blocked rule, so it plays done or nothing instead of request. Step 4 waits on this.
+- **How a reeve's turn ending is read.** Herdr's done sound already fires on turn end (fork-map section 4). Whether its idle and done reads are good enough is not settled: reeve's backend avoids herdr's `agent_status` because it latches, and uses `agent explain` instead (`reeve:backends/herdr.sh:539-542`); and a dialog claude paints full screen can read idle with no blocked rule, so it plays done or nothing instead of request. Step 4 waits on this. Settled before step 4 by decision 62: herdr's own transitions read every measured turn end and dialog once (the latch is only `agent_status` holding done until seen), and claude's manifest gains one rule for a full-screen consent with no known footer.
 - **Building zig on this Mac.** Settled in step 1: Homebrew's `zig@0.15` (0.15.2, keg-only, at `/opt/homebrew/opt/zig@0.15/bin`) builds the vendored libghostty-vt and hall links against it with Rust 1.96.1, with no SDK workaround: the patched `.tbd` copy of fork-map section 6 was not needed and hall's build has none. Zig 0.15.2 from Homebrew and Rust 1.96.1 through rustup are installed beside the existing toolchain (decision 39).
 - **Telling reeve workspaces from the rest.** The liege's other workspaces sit in the same list as reeves (fork-map section 2). Whether hall keeps them apart by the listing's session locations, by a token reeve pushes, or by something else is not settled. Settled in step 3 by decision 50: by the listing's session locations.
 - **Environment names set into panes.** Decision 33 renames the inbound names. What hall sets into every pane now:

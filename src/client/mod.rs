@@ -736,9 +736,11 @@ async fn run_client_loop(
                     .as_ref()
                     .is_some_and(|watch| watch.generation() == generation);
                 if let Some(shell) = state.shell.as_mut().filter(|_| current) {
-                    shell.set_reeve_listing(read);
-                    if let Some(frame) = shell.compose(state.reported_size.0, state.reported_size.1)
-                    {
+                    // A read showing a hand newly stuck or asking rings (decision 62).
+                    let effects = shell.set_reeve_listing(read);
+                    let frame = shell.compose(state.reported_size.0, state.reported_size.1);
+                    handle_shell_notification_effects(effects, &state.sound_config);
+                    if let Some(frame) = frame {
                         state.present_frame(frame);
                     }
                 }

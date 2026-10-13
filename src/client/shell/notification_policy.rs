@@ -174,8 +174,22 @@ impl ClientShellState {
                 self.pending_notifications.push(pending);
                 continue;
             }
+            // hall: what the pane is to the reeve tree's alerts (decision 62). A hand's turn end
+            // is not an alert: herdr's done for a listed hand's pane is dropped. A reeve's reply
+            // alerts in its focused active tab too while `[reeve] alert_focused_reply` is on.
+            let alert_role = self.reeve_alert_role(&pending.endpoint_id, &pending.event);
+            let finished = pending.event.kind == SemanticNotificationKind::Finished;
+            if finished && matches!(alert_role, Some(super::reeve_alerts::AlertRole::Hand(_))) {
+                continue;
+            }
+            let reeve_reply_lifted = alert_role == Some(super::reeve_alerts::AlertRole::Reeve)
+                && self.config.reeve_alert_focused_reply;
             if pending.validate_state {
-                match self.notification_validation(&pending.endpoint_id, &pending.event) {
+                match self.notification_validation(
+                    &pending.endpoint_id,
+                    &pending.event,
+                    reeve_reply_lifted,
+                ) {
                     NotificationValidation::Current => {}
                     NotificationValidation::AwaitingSnapshot if now < pending.expires_at => {
                         let mut pending = pending;
@@ -194,9 +208,25 @@ impl ClientShellState {
             let target_active =
                 self.notification_target_is_active(&pending.endpoint_id, &pending.event);
             let suppress_external = target_active && self.outer_focused != Some(false);
+            let suppress_sound = finished && suppress_external && !reeve_reply_lifted;
+            // hall: the highlight rises with every alert that rings, apart from the sound and
+            // whether it is muted (decision 63).
+            if let (Some(role), Some(pane_id)) = (&alert_role, pending.event.pane_id.as_deref()) {
+                let alert = match pending.event.kind {
+                    SemanticNotificationKind::NeedsAttention => {
+                        Some(super::reeve_alerts::PaneAlert::Dialog)
+                    }
+                    SemanticNotificationKind::Finished if !suppress_sound => {
+                        Some(super::reeve_alerts::PaneAlert::Reply)
+                    }
+                    _ => None,
+                };
+                if let Some(alert) = alert {
+                    self.raise_pane_alert(pane_id, role, alert);
+                    repaint = true;
+                }
+            }
             if let Some(sound) = pending.event.sound {
-                let suppress_sound =
-                    pending.event.kind == SemanticNotificationKind::Finished && suppress_external;
                 if !suppress_sound {
                     effects.push(ClientShellNotificationEffect::Sound {
                         sound: match sound {
@@ -264,10 +294,13 @@ impl ClientShellState {
         })
     }
 
+    /// `reeve_reply_lifted`: hall takes a reeve's Finished as current while its pane reads
+    /// idle too, as the focused active tab reads it (decision 62).
     fn notification_validation(
         &self,
         endpoint_id: &ClientEndpointId,
         event: &SemanticNotification,
+        reeve_reply_lifted: bool,
     ) -> NotificationValidation {
         let Some(pane_id) = event.pane_id.as_deref() else {
             // Finished notifications carry no independently trustworthy completion state. Without
@@ -300,6 +333,12 @@ impl ClientShellState {
             }
             SemanticNotificationKind::Finished
                 if agent.agent_status == crate::api::schema::AgentStatus::Done =>
+            {
+                NotificationValidation::Current
+            }
+            SemanticNotificationKind::Finished
+                if reeve_reply_lifted
+                    && agent.agent_status == crate::api::schema::AgentStatus::Idle =>
             {
                 NotificationValidation::Current
             }

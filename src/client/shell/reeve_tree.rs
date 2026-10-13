@@ -1,4 +1,5 @@
-//! hall: the reeve tree in the sidebar (plan step 3, decisions 12, 16, 17, 34, 49 to 56).
+//! hall: the reeve tree in the sidebar (plan step 3, decisions 12, 16, 17, 34, 49 to 56; the
+//! alert highlight of plan step 4, decisions 62 and 63).
 //!
 //! Every reeve the listing places in this hall session sits at the top level, its hands in
 //! flight beneath it (reeve = workspace, hand = tab), a mark per hand and a badge per reeve,
@@ -6,6 +7,7 @@
 //! their own. The tree is built from the server's snapshot and reeve's listing on every frame;
 //! nothing of it is kept but the selection.
 
+use super::reeve_alerts::ReeveAlerts;
 use super::*;
 use crate::client::reeve_listing::{HandState, ListedErrand, ReeveListing, ReeveListingRead};
 
@@ -47,6 +49,9 @@ pub(super) struct ReeveTreeItem {
     pub(super) pane_id: Option<String>,
     pub(super) workspace_id: Option<String>,
     pub(super) focused: bool,
+    /// An alert stands for this reeve (its own pane or any of its hands) or this hand
+    /// (decision 63).
+    pub(super) alert: bool,
 }
 
 /// What the tree says about the listing itself, on rows of its own above the reeves.
@@ -116,6 +121,7 @@ pub(super) fn reeve_tree(
     listing: Option<&ReeveListing>,
     listing_error: Option<&str>,
     session: &str,
+    alerts: &ReeveAlerts,
 ) -> ReeveTree {
     let pane = |pane_id: Option<&String>| {
         pane_id.and_then(|pane_id| snapshot.panes.iter().find(|pane| &pane.pane_id == pane_id))
@@ -177,7 +183,15 @@ pub(super) fn reeve_tree(
             .map_or(crate::api::schema::AgentStatus::Unknown, |agent| {
                 agent.agent_status
             });
+        let hand_alert = |errand: &ListedErrand| {
+            alerts.hand(
+                &errand.id,
+                pane(errand.session.pane_id.as_ref()).map(|pane| pane.pane_id.as_str()),
+            )
+        };
         tree.items.push(ReeveTreeItem {
+            alert: alerts.pane(reeve_pane.map(|pane| pane.pane_id.as_str()))
+                || hands.iter().any(|errand| hand_alert(errand)),
             key: ReeveTreeKey::Reeve(reeve.name.clone()),
             kind: ReeveTreeItemKind::Reeve {
                 badge: hands
@@ -199,6 +213,7 @@ pub(super) fn reeve_tree(
         for (index, errand) in hands.iter().enumerate() {
             let hand_pane = pane(errand.session.pane_id.as_ref());
             tree.items.push(ReeveTreeItem {
+                alert: hand_alert(errand),
                 key: ReeveTreeKey::Hand(errand.id.clone()),
                 kind: ReeveTreeItemKind::Hand {
                     state: errand.hand_state,
@@ -223,6 +238,7 @@ pub(super) fn reeve_tree(
                 pane_id: None,
                 workspace_id: Some(tab.workspace_id.clone()),
                 focused: snapshot.focused_tab_id.as_deref() == Some(tab.tab_id.as_str()),
+                alert: false,
             });
         }
     }
@@ -248,6 +264,7 @@ pub(super) fn reeve_tree(
             pane_id: None,
             workspace_id: Some(workspace.workspace_id.clone()),
             focused: workspace.focused,
+            alert: false,
         });
     }
     tree
@@ -482,6 +499,9 @@ pub(super) fn render_reeve_section(
     }
 }
 
+/// The mark in a row's first column while an alert stands for it (decision 63).
+pub(super) const ALERT_BAR: &str = "▌";
+
 fn render_item(
     buffer: &mut Buffer,
     rect: Rect,
@@ -590,6 +610,12 @@ fn render_item(
             Style::default(),
         ),
     };
+    // An alert marks the row with a bar in its first column and its label in the alert
+    // colour (decision 63), whatever the sound does.
+    let alert_style = Style::default()
+        .fg(palette.peach)
+        .add_modifier(Modifier::BOLD);
+    let label_style = if item.alert { alert_style } else { label_style };
     let mut x = render::put_segment(
         buffer,
         rect.x,
@@ -598,6 +624,9 @@ fn render_item(
         prefix,
         Style::default().fg(palette.overlay0),
     );
+    if item.alert {
+        render::put_segment(buffer, rect.x, rect.y, right, ALERT_BAR, alert_style);
+    }
     if !mark.0.is_empty() {
         x = render::put_segment(
             buffer,
@@ -732,6 +761,7 @@ impl ClientShellState {
             self.reeve_listing.as_ref(),
             self.reeve_listing_error.as_deref(),
             session,
+            &self.reeve_alerts,
         ))
     }
 
@@ -746,16 +776,24 @@ impl ClientShellState {
     /// marked stale with the reason (decision 56). A row selected in the walk that the read
     /// turns into another kind of row for the same tab keeps the selection: a hand the read
     /// drops leaves its tab behind as a tab row (decision 55), and a tab row the read lists as
-    /// a hand becomes that hand's row (decision 61).
-    pub(in crate::client) fn set_reeve_listing(&mut self, read: ReeveListingRead) {
+    /// a hand becomes that hand's row (decision 61). A good read also raises the alerts of the
+    /// hands it shows newly stuck or asking, and gives the sound to play for them (decision 62).
+    pub(in crate::client) fn set_reeve_listing(
+        &mut self,
+        read: ReeveListingRead,
+    ) -> Vec<ClientShellNotificationEffect> {
         let selected_tab = self.selected_row_tab();
-        match read {
+        let effects = match read {
             Ok(listing) => {
                 self.reeve_listing = Some(listing);
                 self.reeve_listing_error = None;
+                self.read_listing_alerts()
             }
-            Err(error) => self.reeve_listing_error = Some(error),
-        }
+            Err(error) => {
+                self.reeve_listing_error = Some(error);
+                Vec::new()
+            }
+        };
         if let (Some(key), Some(tab_id), Some(tree)) = (
             self.navigate_reeve_key.as_ref(),
             selected_tab,
@@ -767,6 +805,7 @@ impl ClientShellState {
                 }
             }
         }
+        effects
     }
 
     /// The tab a hand's or a tab's row selected in the walk stands for, if one is selected.
@@ -810,6 +849,7 @@ impl ClientShellState {
         self.reeve_listing = None;
         self.reeve_listing_error = None;
         self.navigate_reeve_key = None;
+        self.reset_reeve_alerts();
     }
 
     /// Starts a walk of the tree at the item that holds the focus.
@@ -894,6 +934,11 @@ impl ClientShellState {
         self.mode = ClientShellMode::Terminal;
         self.navigate_workspace_id = None;
         self.navigate_reeve_key = None;
+        if let Some(crate::api::schema::Method::PaneFocus(target)) = &method {
+            // Showing a reeve's or a hand's pane clears its alert, also when it already has
+            // the focus (decision 63).
+            self.show_reeve_alerts(&target.pane_id);
+        }
         if let Some(method) = method {
             self.push_endpoint_method(method, outcome);
         }

@@ -219,5 +219,6 @@ mod keybindings_settings;
 mod mobile;
 mod mouse_selection;
 mod popup_focus_projection;
+mod reeve_alerts;
 mod reeve_tree;
 mod startup_overlays;

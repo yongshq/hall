@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Drive a test reeve to a dialog or to the end of a turn, so hall's alerts can
-# be shown on demand (the earlier plan's step 1; see docs/test-setup.md).
+# Drive a test reeve or a test hand to a dialog or to the end of a turn, so
+# hall's alerts can be shown on demand (plan step 4; see docs/test-setup.md).
 set -euo pipefail
 
 HALL_PROG=test-drive
-HALL_USAGE="usage: scripts/test-drive [options] <test reeve> dialog|turn-end|deny
+HALL_USAGE="usage: scripts/test-drive [options] <test reeve or test hand> dialog|turn-end|deny
 
-  dialog    prompt the test reeve to create a file, which its default
+  dialog    prompt the test claude to create a file, which its default
             permissions ask about, wait for hall to read it as blocked, and
             print hall's reading; the dialog is left standing
   turn-end  deny any standing dialog with Esc, prompt a direct question, wait
@@ -27,14 +27,13 @@ WAIT_MS=120000
 DENY_WAIT_MS=10000
 
 parse_common "$@"
-[ "${#REST[@]}" -eq 2 ] || usage_die "expected <test reeve> and one of dialog, turn-end, deny"
+[ "${#REST[@]}" -eq 2 ] || usage_die "expected <test reeve or test hand> and one of dialog, turn-end, deny"
 NAME=${REST[0]}
 ACTION=${REST[1]}
 case $ACTION in dialog | turn-end | deny) ;; *) usage_die "unknown action $ACTION" ;; esac
 load_inputs
 
 roster_find "$NAME" || die "$NAME is not in the roster"
-[ "$R_KIND" = reeve ] || die "$NAME is a test hand; test-drive drives test reeves"
 
 loc=""
 run_into loc "$R_SESSION <pane-of-$NAME>" "$HALL_STANDIN" --home "$HALL_DEV_HOME" locate "$NAME" ||
@@ -42,7 +41,8 @@ run_into loc "$R_SESSION <pane-of-$NAME>" "$HALL_STANDIN" --home "$HALL_DEV_HOME
 S=${loc%% *}
 P=${loc#* }
 check_session "$S"
-say "test reeve $NAME: pane $P in $S, action $ACTION"
+if [ "$R_KIND" = reeve ]; then KIND="test reeve"; else KIND="test hand"; fi
+say "$KIND $NAME: pane $P in $S, action $ACTION"
 
 deny() {
   hd "$S" agent send-keys "$P" esc

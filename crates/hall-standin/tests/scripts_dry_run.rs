@@ -367,7 +367,8 @@ fn status_is_read_only() {
 #[test]
 fn drive() {
     let h = home("drive");
-    for reeve in REEVES {
+    // A test hand is driven as a test reeve is, so a hand at a dialog can be shown (step 4).
+    for reeve in REEVES.into_iter().chain(HANDS) {
         let cmds = dry("test-drive", &h, &[reeve, "dialog"]);
         assert_eq!(count(&cmds, " agent prompt "), 1);
         assert_eq!(count(&cmds, " agent wait "), 1);

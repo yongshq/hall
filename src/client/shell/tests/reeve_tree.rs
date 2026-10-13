@@ -25,7 +25,7 @@ fn workspace(id: &str, number: usize, label: &str, focused: bool) -> ClientShell
 
 /// Three workspaces as the test setup lays them out: two test reeves, each a workspace with its
 /// hands as tabs, and a plain workspace beside them. The reeve ansel's own pane has the focus.
-fn hall_dev_snapshot() -> ClientShellSnapshot {
+pub(super) fn hall_dev_snapshot() -> ClientShellSnapshot {
     let mut snapshot = snapshot();
     snapshot.focused_workspace_id = Some("ws_a".into());
     snapshot.focused_tab_id = Some("ws_a_t0".into());
@@ -74,7 +74,7 @@ fn hall_dev_snapshot() -> ClientShellSnapshot {
 }
 
 /// The stand-in's listing for that layout, with every hand working and nothing waiting.
-fn listing() -> ReeveListing {
+pub(super) fn listing() -> ReeveListing {
     serde_json::from_value(serde_json::json!({
         "draft": true,
         "reeves": [
@@ -100,7 +100,7 @@ fn errand(id: &str, owner: &str, pane: &str) -> serde_json::Value {
     })
 }
 
-fn errand_mut<'a>(
+pub(super) fn errand_mut<'a>(
     listing: &'a mut ReeveListing,
     id: &str,
 ) -> &'a mut crate::client::reeve_listing::ListedErrand {
@@ -111,7 +111,7 @@ fn errand_mut<'a>(
         .expect("errand")
 }
 
-fn reeve_state(listing: ReeveListing) -> ClientShellState {
+pub(super) fn reeve_state(listing: ReeveListing) -> ClientShellState {
     let mut config = Config::default();
     config.reeve.listing_command = vec!["true".into()];
     let mut config = ClientShellConfig::from_config(&config);
@@ -123,7 +123,7 @@ fn reeve_state(listing: ReeveListing) -> ClientShellState {
     state
 }
 
-fn rows(frame: &FrameData) -> Vec<String> {
+pub(super) fn rows(frame: &FrameData) -> Vec<String> {
     frame
         .cells
         .chunks(frame.width as usize)
@@ -136,7 +136,7 @@ fn rows(frame: &FrameData) -> Vec<String> {
 }
 
 /// The reeve section of the sidebar: its rows up to the first blank row after `other`.
-fn tree_rows(frame: &FrameData) -> Vec<String> {
+pub(super) fn tree_rows(frame: &FrameData) -> Vec<String> {
     rows(frame)
         .iter()
         .map(|row| {
@@ -165,7 +165,7 @@ fn narrow_tree_rows(frame: &FrameData) -> Vec<String> {
         .collect()
 }
 
-fn compose(state: &mut ClientShellState) -> FrameData {
+pub(super) fn compose(state: &mut ClientShellState) -> FrameData {
     state.compose(100, 30).expect("composed frame")
 }
 
@@ -593,7 +593,7 @@ fn a_long_tree_scrolls_to_keep_the_selection_in_view() {
     assert!(rows(&frame).iter().any(|row| row.contains(&selected)));
 }
 
-fn picked_method(input: &ClientShellInput) -> Option<&crate::api::schema::Method> {
+pub(super) fn picked_method(input: &ClientShellInput) -> Option<&crate::api::schema::Method> {
     match &input.actions[..] {
         [ClientShellAction::Endpoint { request, .. }] => Some(&request.method),
         _ => None,

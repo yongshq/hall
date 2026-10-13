@@ -111,6 +111,9 @@ pub(crate) struct ClientShellConfig {
     pub(super) reeve_tree_session: Option<String>,
     /// hall: the listing command the client runs for the tree, from `[reeve]` (decision 49).
     pub(super) reeve_listing: Option<crate::client::reeve_listing::ReeveListingSpec>,
+    /// hall: whether a reeve's reply alerts while its tab is the focused active one, lifting
+    /// herdr's suppression there (`[reeve] alert_focused_reply`, decisions 22, 35 and 62).
+    pub(super) reeve_alert_focused_reply: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -941,6 +944,8 @@ pub(crate) struct ClientShellState {
     pub(super) reeve_listing: Option<crate::client::reeve_listing::ReeveListing>,
     /// hall: why the latest read of the listing failed, while it does (decision 56).
     pub(super) reeve_listing_error: Option<String>,
+    /// hall: the alerts standing on the reeve tree (decisions 62 and 63).
+    pub(super) reeve_alerts: super::reeve_alerts::ReeveAlerts,
     pub(super) overlay: Option<ClientShellOverlay>,
     pub(super) previous_pane_id: Option<String>,
     pub(super) pane_mouse_gesture: Option<ClientPaneMouseGesture>,
@@ -1087,6 +1092,7 @@ impl ClientShellState {
             navigate_reeve_key: None,
             reeve_listing: None,
             reeve_listing_error: None,
+            reeve_alerts: Default::default(),
             overlay,
             previous_pane_id: None,
             pane_mouse_gesture: None,

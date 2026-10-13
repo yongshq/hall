@@ -87,15 +87,18 @@ Read only. It prints:
 
 Anything wrong is a line starting `CHECK:`; a failed live check also makes `status` exit 1. On a home that fails the check inside it (What the scripts refuse, above), `status` still runs, reading nothing inside the home.
 
-## Driving a test reeve
+## Driving a test reeve or test hand
 
 ```sh
 scripts/test-drive ansel dialog     # to a dialog
 scripts/test-drive ansel turn-end   # to the end of a turn
 scripts/test-drive ansel deny       # deny a standing dialog with Esc
+scripts/test-drive ansel-fix dialog # a test hand, to a dialog
 ```
 
-- `dialog` prompts the test reeve to create a file in its work dir (`hall agent prompt`), which claude's default permissions ask about, waits up to two minutes for hall to read it as blocked (`hall agent wait --until blocked`), and prints the reading. The dialog is left standing, so hall can alert on it; `deny` or `turn-end` clears it.
+A test hand is driven as a test reeve is (plan step 4), so a hand at a dialog can be shown.
+
+- `dialog` prompts the test claude to create a file in its work dir (`hall agent prompt`), which claude's default permissions ask about, waits up to two minutes for hall to read it as blocked (`hall agent wait --until blocked`), and prints the reading. The dialog is left standing, so hall can alert on it; `deny` or `turn-end` clears it.
 - `turn-end` reads the session first and, if a dialog stands, denies it as `deny` does. Then it prompts a direct question with `hall agent prompt --wait`, which waits for observed activity before it settles, so an agent already idle cannot end the wait before the turn starts. Then it prints the reading.
 - `deny` sends Esc, waits up to ten seconds for hall to stop reading the dialog (`hall agent wait --until idle --until done --until working`; hall refuses a prompt to an agent it reads as blocked), and prints the reading.
 
@@ -109,6 +112,25 @@ How the reading is printed, from hall's `agent explain --json` (herdr's, unchang
 | `idle` or `done` | not matched | covered composer: a dialog is likely on screen |
 
 The last row matters: a dialog claude paints over the whole screen can read as `idle` with no `blocked` rule matched (found in reeve's backend). Then `agent wait --until blocked` times out, and the reading still shows the dialog.
+
+## Alerts
+
+Attached with the client config, hall alerts on the reeve tree (plan step 4, decisions 62 and 63). Each alert plays a sound and marks the row with a bar `▌` in its first column and its label in the alert colour:
+
+| trigger | how to raise it | sound | marked rows |
+|---|---|---|---|
+| a test reeve at a dialog | `scripts/test-drive ansel dialog` | herdr's request | the reeve |
+| a test reeve ending a turn | `scripts/test-drive ansel turn-end` | herdr's done | the reeve |
+| a test hand at a dialog | `scripts/test-drive ansel-fix dialog` | herdr's request | the hand and its reeve |
+| a test hand blocked, needs-decision, idle, wedged or waiting | `hall-standin set ansel-fix state=blocked` (or `idle=true`, ...) | hall's request | the hand and its reeve |
+| a test hand with a new question | `hall-standin set ansel-fix question="Which base?"` | hall's request | the hand and its reeve |
+
+- Hall's listing alerts ring on a rise only: the first read after attaching seeds them, a failed or stale read rings nothing, a hand leaving the listing rings nothing, a question rings when its text changes to another non-empty one, and `waiting` rises silently while hall already reads that hand's pane at a dialog. One read rings once however many hands rose.
+- A test hand ending its turn rings nothing: herdr's done for a listed hand's pane is dropped.
+- A test reeve ending its turn in the focused tab of a focused hall window alerts too, while `[reeve] alert_focused_reply` is on (the default); with it off, herdr's suppression stands.
+- A mark clears when the reeve's or the hand's pane is shown (enter, a click on its row, or the focus moving onto it), or when its trigger clears: the reeve working again, the dialog gone, the hand no longer waiting on the liege.
+- `[ui.sound] enabled = false` in the client config mutes every alert's sound and a reload (ctrl+b shift+r) applies it; the marks still show. `request_path`, `done_path` and `path` change the sounds.
+- A sound cannot be heard in a test run: start the client with `HERDR_LOG=hall=info` and each sound asked for is logged in `~/.config/hall-dev/sessions/hall-dev/herdr-client.log` as `event="sound.play"` with `played=true` or `false` (muted), beside an `event="reeve.alert"` line for each alert raised.
 
 ## Down
 

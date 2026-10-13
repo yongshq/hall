@@ -1,6 +1,6 @@
 use std::io;
 
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 use crate::protocol::NotifyKind;
 
@@ -14,7 +14,17 @@ pub(super) fn handle_shell_notification_effects(
         match effect {
             shell::ClientShellNotificationEffect::Sound { sound, agent } => {
                 let agent = agent.as_deref().and_then(crate::detect::parse_agent_label);
-                if sound_config.allows(agent) {
+                let allowed = sound_config.allows(agent);
+                // hall: every sound the shell asks for is logged, played or muted, so an alert
+                // can be checked where it cannot be heard (plan step 4).
+                info!(
+                    event = "sound.play",
+                    sound = ?sound,
+                    agent = ?agent,
+                    played = allowed,
+                    "client sound"
+                );
+                if allowed {
                     crate::sound::play(sound, sound_config);
                 }
             }

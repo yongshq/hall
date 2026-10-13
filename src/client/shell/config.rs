@@ -152,6 +152,7 @@ impl ClientShellConfig {
             startup_onboarding: false,
             reeve_tree_session: None,
             reeve_listing: None,
+            reeve_alert_focused_reply: true,
         };
         shell_config.apply_reeve_config(&config.reeve);
         shell_config
@@ -161,6 +162,7 @@ impl ClientShellConfig {
     /// configured, and off when none is; at startup and on every reload.
     fn apply_reeve_config(&mut self, reeve: &crate::config::ReeveConfig) {
         self.reeve_listing = crate::client::reeve_listing::ReeveListingSpec::from_config(reeve);
+        self.reeve_alert_focused_reply = reeve.alert_focused_reply;
         self.reeve_tree_session = self.reeve_listing.is_some().then(|| {
             crate::session::active_name()
                 .unwrap_or_else(|| crate::session::DEFAULT_SESSION_NAME.to_owned())
