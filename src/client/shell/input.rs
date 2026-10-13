@@ -638,7 +638,9 @@ impl ClientShellState {
             .workspace_up
             .matches_direct_key(key)
         {
-            self.move_navigate_workspace(-1);
+            if !self.move_navigate_reeve_tree(-1) {
+                self.move_navigate_workspace(-1);
+            }
             outcome.repaint = true;
             return;
         }
@@ -650,7 +652,9 @@ impl ClientShellState {
             .workspace_down
             .matches_direct_key(key)
         {
-            self.move_navigate_workspace(1);
+            if !self.move_navigate_reeve_tree(1) {
+                self.move_navigate_workspace(1);
+            }
             outcome.repaint = true;
             return;
         }
@@ -682,6 +686,17 @@ impl ClientShellState {
         if modifiers.is_empty() {
             match code {
                 KeyCode::Enter => {
+                    // hall: picking a reeve or a hand shows its own pane (plan step 3).
+                    if let Some(method) = self.pick_navigate_reeve_target() {
+                        self.mode = ClientShellMode::Terminal;
+                        self.navigate_workspace_id = None;
+                        self.navigate_reeve_key = None;
+                        if let Some(method) = method {
+                            self.push_endpoint_method(method, outcome);
+                        }
+                        outcome.repaint = true;
+                        return;
+                    }
                     let selected = self.navigate_workspace_id.clone();
                     self.mode = ClientShellMode::Terminal;
                     self.navigate_workspace_id = None;

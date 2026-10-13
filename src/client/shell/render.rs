@@ -226,6 +226,9 @@ pub(super) struct ShellRenderState<'a> {
     pub(super) selected_workspace_id: Option<&'a str>,
     pub(super) dragged_workspace_id: Option<&'a str>,
     pub(super) workspace_drop_indicator_row: Option<u16>,
+    /// hall: the reeve tree, drawn in place of herdr's spaces when it is on.
+    pub(super) reeve_tree: Option<&'a super::reeve_tree::ReeveTree>,
+    pub(super) selected_reeve_key: Option<&'a super::reeve_tree::ReeveTreeKey>,
 }
 
 pub(super) fn render_shell(

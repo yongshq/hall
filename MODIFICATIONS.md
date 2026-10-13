@@ -1,6 +1,6 @@
 # Modifications to herdr
 
-Hall is a modified version of herdr v0.9.0 (commit b99002ac99b09e00b4ca692436cb15a6b0d676f1), Apache-2.0; see [NOTICE](NOTICE). Every herdr file hall changes is listed here, kept current with each change. Files hall adds (`crates/`, `scripts/`, hall's own `docs/*.md`, `docs/adr/`, `docs/research/`, `GLOSSARY.md`, `NOTICE`, this file, `tests/hall_separation.rs`, `tests/hall_stop_guard.rs` and `tests/fixtures/hall-endpoint-welcome-1001.json`) are hall's own and not listed.
+Hall is a modified version of herdr v0.9.0 (commit b99002ac99b09e00b4ca692436cb15a6b0d676f1), Apache-2.0; see [NOTICE](NOTICE). Every herdr file hall changes is listed here, kept current with each change. Files hall adds (`crates/`, `scripts/`, hall's own `docs/*.md`, `docs/adr/`, `docs/research/`, `GLOSSARY.md`, `NOTICE`, this file, `tests/hall_separation.rs`, `tests/hall_stop_guard.rs`, `tests/fixtures/hall-endpoint-welcome-1001.json`, `src/client/reeve_listing.rs`, `src/client/shell/reeve_tree.rs` and `src/client/shell/tests/reeve_tree.rs`) are hall's own and not listed.
 
 ## Repository and build
 
@@ -102,3 +102,24 @@ Hall is a modified version of herdr v0.9.0 (commit b99002ac99b09e00b4ca692436cb1
 | `src/api/client.rs` | `ApiClient::status_with_timeout`: `status` with its wait bounded; `status` and it share the ping request and the reply's reading. Once every caller bounds its ping, `status` and `request`, which nothing else used, are removed. |
 | `src/cli.rs` | Every CLI request's protocol ping (`ensure_server_protocol_compatible`) is bounded as `hall status`'s is, and a listener that does not answer it gets the same message, instead of hanging; the request itself stays unbounded (`agent wait`). `tests/hall_stop_guard.rs` tests `pane list` and `workspace list`. |
 | `src/main.rs` | `main` runs the old body as `run` and prints an error of kind `Other` as its message (`Error: <message>`), not as Rust's `Debug` of the `io::Error`; exit status 1 as before. |
+
+## Step 3: reeve tree (decisions 49 to 54)
+
+| File | Change |
+|---|---|
+| `src/config/model.rs` | `[reeve]` section (`ReeveConfig`): `listing_command` and `listing_interval_ms`. |
+| `src/config/io.rs` | `reeve` is a known section and reloads live like the others. |
+| `src/client/mod.rs` | The `reeve_listing` module; the client starts the listing reader when a listing command is configured, and redraws on each changed read. |
+| `src/client/events.rs` | `ClientLoopEvent::ReeveListing`. |
+| `src/client/loop_config.rs` | The listing command and interval. |
+| `src/client/shell.rs` | The `reeve_tree` module. |
+| `src/client/shell/state.rs` | `ClientShellConfig::reeve_tree_session`; `ClientShellLayout::key_help`; the shell keeps the latest listing read and the tree item a navigate walk has selected. |
+| `src/client/shell/config.rs` | `from_config` turns the reeve tree on for the client's session when a listing command is configured; `layout` keeps the bottom row for the key help line then. |
+| `src/client/shell/render.rs` | `ShellRenderState` carries the tree and its selection. |
+| `src/client/shell/sidebar.rs` | Herdr's spaces section moved, unchanged, into `render_spaces_section`; the reeve tree is drawn in its place when it is on. |
+| `src/client/shell/composition.rs` | The tree is built for each frame; the key help line is drawn. |
+| `src/client/shell/input.rs` | In navigate mode ↑ and ↓ walk the tree and enter picks its item when the tree is on. |
+| `src/client/shell/actions.rs` | Opening navigate mode starts the tree walk at the focused item. |
+| `src/client/shell/tests/mod.rs` | The `reeve_tree` tests. |
+| `README.md` | Status line for step 3. |
+| `docs/next/website/src/data/config-reference.json` | The `[reeve]` keys, so `scripts/config_reference_check.py` stays in sync. |

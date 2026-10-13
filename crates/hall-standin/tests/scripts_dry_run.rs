@@ -251,7 +251,9 @@ fn up() {
     );
     assert_eq!(count(&cmds, " place "), ROSTER);
     assert_eq!(count(&cmds, &format!("--session {SESSION} server &")), 1);
-    assert_eq!(count(&cmds, "+ write "), 1);
+    // The world file, and the hall client config that turns the reeve tree on.
+    assert_eq!(count(&cmds, "+ write "), 2);
+    assert_eq!(count(&cmds, "/standin/hall.toml"), 1);
     assert_eq!(count(&cmds, "/xdg-config"), 1 + ROSTER);
     assert_eq!(count(&cmds, "/xdg-state"), 1 + ROSTER);
     assert_eq!(count(&cmds, "REEVE_HAND=\""), ERRANDS);

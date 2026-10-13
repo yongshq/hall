@@ -28,6 +28,7 @@ mod handshake;
 mod input;
 mod loop_config;
 mod notifications;
+mod reeve_listing;
 mod shell;
 mod shell_runtime;
 mod startup;
@@ -182,6 +183,14 @@ fn run_client_with_mode(
         endpoint_keybindings,
         remote_image_paste_key,
         shell_config,
+        reeve_listing: (client_rendered_shell
+            && !loaded_config.config.reeve.listing_command.is_empty())
+        .then(|| {
+            (
+                loaded_config.config.reeve.listing_command.clone(),
+                Duration::from_millis(loaded_config.config.reeve.listing_interval_ms.max(100)),
+            )
+        }),
     };
 
     crate::logging::startup("client");
@@ -560,6 +569,13 @@ async fn run_client_loop(
     if state.shell.is_some() && !is_remote_client && state.attach_escape.is_none() {
         catalog_reload::watch_profiles(event_tx.clone(), should_quit.clone());
     }
+    if let Some((command, interval)) = config
+        .reeve_listing
+        .clone()
+        .filter(|_| state.shell.is_some() && state.attach_escape.is_none())
+    {
+        reeve_listing::watch(command, interval, event_tx.clone(), should_quit.clone());
+    }
 
     // This (foreground) client owns the prefix ASCII input-source switch
     // (implemented on macOS and Windows; a no-op on other platforms).
@@ -718,6 +734,15 @@ async fn run_client_loop(
 
         match event {
             ClientLoopEvent::EndpointCatalog(reload) => pending_catalog = Some(reload),
+            ClientLoopEvent::ReeveListing(read) => {
+                if let Some(shell) = state.shell.as_mut() {
+                    shell.set_reeve_listing(read);
+                    if let Some(frame) = shell.compose(state.reported_size.0, state.reported_size.1)
+                    {
+                        state.present_frame(frame);
+                    }
+                }
+            }
             #[cfg(unix)]
             ClientLoopEvent::StdinInput(data) => {
                 let image_bridge_active = endpoint_accepts_local_images(

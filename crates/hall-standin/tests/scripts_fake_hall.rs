@@ -294,6 +294,20 @@ fn up_status_drive_down() {
     }
     assert!(rig.home.join("xdg-config").is_dir());
     assert!(rig.home.join("xdg-state").is_dir());
+    // The hall client config that turns the reeve tree on names the stand-in's
+    // listing of this home (decision 49), and up says to attach with it.
+    let client_config = std::fs::read_to_string(rig.home.join("standin/hall.toml")).unwrap();
+    assert!(
+        client_config.contains(&format!(
+            "[reeve]\nlisting_command = [\"{}\", \"--home\", \"{h}\"]\n",
+            rig.standin.display()
+        )),
+        "{client_config}"
+    );
+    assert!(
+        up.contains(&format!("HALL_CONFIG_PATH={h}/standin/hall.toml")),
+        "{up}"
+    );
 
     // The test hall server started with none of the starter's identity names
     // (decision 48).

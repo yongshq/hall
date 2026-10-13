@@ -107,6 +107,8 @@ pub(crate) struct ClientShellConfig {
     pub(super) preferences: preferences::ClientChromePreferences,
     pub(super) startup_config_diagnostic: Option<String>,
     pub(super) startup_onboarding: bool,
+    /// hall: the session whose reeves the reeve tree shows; None leaves herdr's sidebar.
+    pub(super) reeve_tree_session: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -115,6 +117,8 @@ pub(super) struct ClientShellLayout {
     pub tab_bar: Rect,
     pub mobile_header: Rect,
     pub pane_surface: Rect,
+    /// hall: the one line of key help at the bottom, with the reeve tree (decision 12).
+    pub key_help: Rect,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -927,6 +931,10 @@ pub(crate) struct ClientShellState {
     pub(super) collapsed_endpoints: HashSet<ClientEndpointId>,
     pub(super) mode: ClientShellMode,
     pub(super) navigate_workspace_id: Option<String>,
+    /// hall: the reeve tree item a navigate walk has selected.
+    pub(super) navigate_reeve_key: Option<super::reeve_tree::ReeveTreeKey>,
+    /// hall: the latest read of reeve's listing, when the reeve tree is on.
+    pub(super) reeve_listing: Option<crate::client::reeve_listing::ReeveListingRead>,
     pub(super) overlay: Option<ClientShellOverlay>,
     pub(super) previous_pane_id: Option<String>,
     pub(super) pane_mouse_gesture: Option<ClientPaneMouseGesture>,
@@ -1070,6 +1078,8 @@ impl ClientShellState {
             collapsed_endpoints: HashSet::new(),
             mode: ClientShellMode::Terminal,
             navigate_workspace_id: None,
+            navigate_reeve_key: None,
+            reeve_listing: None,
             overlay,
             previous_pane_id: None,
             pane_mouse_gesture: None,

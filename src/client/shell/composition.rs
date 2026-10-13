@@ -56,6 +56,8 @@ impl ClientShellState {
                 selected_workspace_id: self.navigate_workspace_id.as_deref(),
                 dragged_workspace_id: None,
                 workspace_drop_indicator_row: None,
+                reeve_tree: None,
+                selected_reeve_key: None,
             },
             &mut self.hits,
         );
@@ -132,6 +134,7 @@ impl ClientShellState {
             ),
             _ => (None, None),
         };
+        let reeve_tree = self.current_reeve_tree();
         let mut buffer = Buffer::empty(Rect::new(0, 0, cols, rows));
         self.hits = render::render_shell(
             &mut buffer,
@@ -156,7 +159,18 @@ impl ClientShellState {
                     .flatten(),
                 dragged_workspace_id,
                 workspace_drop_indicator_row,
+                reeve_tree: reeve_tree.as_ref(),
+                selected_reeve_key: (self.mode == ClientShellMode::Navigate)
+                    .then_some(self.navigate_reeve_key.as_ref())
+                    .flatten(),
             },
+        );
+        super::reeve_tree::render_key_help(
+            &mut buffer,
+            layout.key_help,
+            self.mode,
+            &self.config.keybinds,
+            &self.config.palette,
         );
         self.hits.panes = surface
             .panes

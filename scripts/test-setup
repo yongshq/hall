@@ -39,6 +39,9 @@ case $CMD in down | status) HOME_WALK=warn ;; esac
 load_inputs
 
 WORLD="$HALL_DEV_HOME/standin/world.toml"
+# The hall client config that turns the reeve tree on (decision 49): hall reads
+# the listing by running the stand-in on this home.
+CLIENT_CONFIG="$HALL_DEV_HOME/standin/hall.toml"
 # How long up waits for a hall server it started to answer, in tenths of a
 # second. HALL_START_WAIT overrides it (the tests do).
 START_WAIT=${HALL_START_WAIT:-150}
@@ -119,6 +122,26 @@ herdr_session = \"$R_SESSION\"
     esac
   done
   write_file "$WORLD" "$text"
+}
+
+# write_client_config: the hall client config naming the stand-in's listing of
+# this home as the reeve tree's listing command. Rewritten on every up, since
+# it names the stand-in this checkout runs. Attach with HALL_CONFIG_PATH set to it.
+write_client_config() {
+  local p
+  for p in "$HALL_STANDIN" "$HALL_DEV_HOME"; do
+    # Each goes into a TOML string as it is, so it must be plain.
+    [[ $p =~ ^/[A-Za-z0-9_./-]+$ ]] || die "refusing $(q "$p") in the hall client config: use letters, digits, '.', '_', '-' and '/' only"
+  done
+  write_file "$CLIENT_CONFIG" "# hall client config for the test setup, written by scripts/test-setup up.
+# The reeve tree reads the stand-in's listing of the test reeve home (decision 49).
+# Attach with HALL_CONFIG_PATH set to this file: see docs/test-setup.md.
+# No first-run overlay: this config is the test view's, not a first run of hall.
+onboarding = false
+
+[reeve]
+listing_command = [\"$HALL_STANDIN\", \"--home\", \"$HALL_DEV_HOME\"]
+"
 }
 
 # check_pane_id <id> <what>: the stand-in's pane id rule (is_pane_id), checked
@@ -232,6 +255,7 @@ cmd_up() {
   else
     say "  world file $WORLD exists, kept as it is"
   fi
+  write_client_config
 
   # Test reeves first, so each test hand has its reeve's workspace to open in.
   for line in "${HALL_DEV_ROSTER[@]}"; do
@@ -245,7 +269,7 @@ cmd_up() {
 
   say "listing:"
   standin listing
-  say "next: answer any folder trust dialog yourself (attach with $(q "${HALL_CLI[@]}" --session "$HALL_DEV_SESSION")), then scripts/test-setup status"
+  say "next: answer any folder trust dialog yourself (attach with $(q "${HALL_CLEAN_ENV[@]}" HALL_CONFIG_PATH="$CLIENT_CONFIG" "$HALL_BIN" --session "$HALL_DEV_SESSION"), which shows the reeve tree), then scripts/test-setup status"
 }
 
 cmd_down() {

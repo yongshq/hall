@@ -142,6 +142,10 @@ impl ClientShellConfig {
             preferences: preferences::ClientChromePreferences::default(),
             startup_config_diagnostic: None,
             startup_onboarding: false,
+            reeve_tree_session: (!config.reeve.listing_command.is_empty()).then(|| {
+                crate::session::active_name()
+                    .unwrap_or_else(|| crate::session::DEFAULT_SESSION_NAME.to_owned())
+            }),
         }
     }
 
@@ -355,6 +359,7 @@ impl ClientShellConfig {
                 tab_bar: Rect::default(),
                 mobile_header: Rect::new(0, 0, cols, header_height),
                 pane_surface: Rect::new(0, header_height, cols, rows.saturating_sub(header_height)),
+                key_help: Rect::default(),
             };
         }
 
@@ -372,6 +377,10 @@ impl ClientShellConfig {
             sidebar_width.clamp(min, max)
         }
         .min(cols.saturating_sub(1));
+        // hall: with the reeve tree, the bottom row is the key help line (decision 12).
+        let key_help_height = u16::from(self.reeve_tree_session.is_some() && rows > 2);
+        let full_rows = rows;
+        let rows = rows - key_help_height;
         let main = Rect::new(sidebar_width, 0, cols.saturating_sub(sidebar_width), rows);
         let show_tab_bar = rows > 1 && !(self.hide_tab_bar_when_single_tab && tab_count == 1);
         let tab_height = u16::from(show_tab_bar);
@@ -401,6 +410,7 @@ impl ClientShellConfig {
             tab_bar,
             mobile_header: Rect::default(),
             pane_surface,
+            key_help: Rect::new(0, rows, cols, full_rows - rows),
         }
     }
 

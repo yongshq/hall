@@ -9,6 +9,7 @@ const KNOWN_TOP_LEVEL_CONFIG_KEYS: &[&str] = &[
     "experimental",
     "keys",
     "onboarding",
+    "reeve",
     "remote",
     "server",
     "session",
@@ -349,6 +350,14 @@ fn load_live_config_from_str(content: &str) -> Result<LoadedConfig, Vec<String>>
         &mut diagnostics,
         &mut invalid_sections,
         |section| config.remote = section,
+    );
+    load_live_section(
+        table,
+        "reeve",
+        "reeve config",
+        &mut diagnostics,
+        &mut invalid_sections,
+        |section| config.reeve = section,
     );
 
     diagnostics.extend(config.theme.diagnostics());

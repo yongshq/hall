@@ -133,6 +133,7 @@ impl ClientShellState {
                         .snapshot
                         .as_deref()
                         .and_then(|snapshot| snapshot.focused_workspace_id.clone());
+                    self.start_reeve_tree_navigation();
                     outcome.repaint = true;
                     return;
                 }

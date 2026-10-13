@@ -13,4 +13,6 @@ pub(super) struct ClientLoopConfig {
     pub(super) remote_image_paste_key:
         Option<(crossterm::event::KeyCode, crossterm::event::KeyModifiers)>,
     pub(super) shell_config: Option<shell::ClientShellConfig>,
+    /// hall: the listing command and how often to run it, when the reeve tree is on.
+    pub(super) reeve_listing: Option<(Vec<String>, Duration)>,
 }

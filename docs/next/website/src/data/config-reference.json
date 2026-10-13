@@ -1440,6 +1440,24 @@
       ]
     },
     {
+      "id": "reeve",
+      "title": "Reeve",
+      "keys": [
+        {
+          "key": "reeve.listing_command",
+          "type": "list of strings",
+          "default": "[]",
+          "description": "hall: the command that prints reeve's listing as JSON, program first. Empty leaves the sidebar as herdr draws it; set, the sidebar shows the reeve tree and the bottom row shows key help."
+        },
+        {
+          "key": "reeve.listing_interval_ms",
+          "type": "integer",
+          "default": "1000",
+          "description": "hall: how often the client runs the listing command, in milliseconds (at least 100)."
+        }
+      ]
+    },
+    {
       "id": "advanced",
       "title": "Advanced",
       "keys": [

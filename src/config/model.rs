@@ -321,6 +321,7 @@ pub struct Config {
     pub advanced: AdvancedConfig,
     pub experimental: ExperimentalConfig,
     pub remote: RemoteConfig,
+    pub reeve: ReeveConfig,
 }
 
 #[derive(Debug)]
@@ -1030,6 +1031,26 @@ impl Default for RemoteConfig {
     fn default() -> Self {
         Self {
             manage_ssh_config: true,
+        }
+    }
+}
+
+/// hall: where the reeve tree's listing comes from (plan step 3, decision 49).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(default)]
+pub struct ReeveConfig {
+    /// The command that prints reeve's listing as JSON (docs/listing-draft.md), program first.
+    /// Empty leaves the sidebar as herdr draws it. Default: empty.
+    pub listing_command: Vec<String>,
+    /// How often the client runs the listing command, in milliseconds. Default: 1000.
+    pub listing_interval_ms: u64,
+}
+
+impl Default for ReeveConfig {
+    fn default() -> Self {
+        Self {
+            listing_command: Vec::new(),
+            listing_interval_ms: 1000,
         }
     }
 }

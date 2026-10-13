@@ -4,7 +4,7 @@ Hall is the liege's audience hall: herdr, forked from v0.9.0 and renamed, with e
 
 Hall is a modified version of herdr (https://github.com/herdrdev/herdr), Apache-2.0: herdr's `LICENSE` is kept, [NOTICE](NOTICE) says so, and [MODIFICATIONS.md](MODIFICATIONS.md) lists every herdr file hall changes. Herdr's own instructions for agents are kept for reference at [docs/herdr/AGENTS.md](docs/herdr/AGENTS.md).
 
-**Status: step 1 (fork and separate) built: herdr v0.9.0 merged at the root and separated from the installed herdr (own folders, binary `hall`, inbound `HALL_*` names, protocol 1022), and `scripts/live-check`. Step 2 (test setup on hall): `scripts/test-setup` runs the test reeves and hands in the hall session `hall-dev` and makes no herdr call ([docs/test-setup.md](docs/test-setup.md)).**
+**Status: step 1 (fork and separate) built: herdr v0.9.0 merged at the root and separated from the installed herdr (own folders, binary `hall`, inbound `HALL_*` names, protocol 1022), and `scripts/live-check`. Step 2 (test setup on hall): `scripts/test-setup` runs the test reeves and hands in the hall session `hall-dev` and makes no herdr call ([docs/test-setup.md](docs/test-setup.md)). Step 3 (reeve tree): with a listing command configured (`[reeve] listing_command`, decision 49), the sidebar shows each test reeve with its hands beneath it, a mark per hand and a badge per reeve, other workspaces apart, a key walk through the tree and a key help line at the bottom.**
 
 - [Version one plan](docs/plan.md): scope, architecture sketch, test setup and the five build steps.
 - [Glossary](GLOSSARY.md): the terms every document and, later, the code uses.
