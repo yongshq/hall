@@ -32,6 +32,7 @@ JSON on stdout, exit status 0:
       "waiting": false,
       "idle": false,
       "wedged": false,
+      "since": { "waiting": null, "idle": null, "wedged": null },
       "session": { "backend": "hall", "name": "hall-dev", "pane_id": "w3:p1" }
     }
   ]
@@ -52,6 +53,7 @@ JSON on stdout, exit status 0:
 | `errands[].question` | The hand's newest unanswered question, or `null`. |
 | `errands[].open` | Reeve's count of the hand's open questions. Hall does not read it. |
 | `errands[].waiting`, `idle`, `wedged` | One flag each, as the reeve's watch judges them; default `false`. |
+| `errands[].since` | When each flag's present spell began: `{ "waiting": N, "idle": N, "wedged": N }`, each `N` the epoch seconds in the first field of the latch file behind that flag (`state/.attn-<id>`, `.stale-<id>`, `.wedged-<id>`), or `null` while that flag is `false`. Optional: an older reeve prints none. A `since` that does not read (not an object, or a value that is not a whole number of seconds) is taken as absent, for that flag or for all three, and never drops the errand. Hall reads it only to ring each spell once (Ringing a flag, below). |
 | `errands[].session` | The hand's session location (below). |
 
 A session location is `{ "backend": <name>, "name": <session or null>, "pane_id": <id or null> }`: the backend that holds it (`hall` or `herdr`), the session there, and the pane in it. `name` is `null` for every herdr entry, since reeve's herdr backend cannot say, and for a hall record with no `place`; `pane_id` is `null` until the pane is known. Hall drops every reeve and errand whose `backend` is not `hall` before it matches anything (design finding F1): herdr's live session is `default`, as hall's is at go-live, and a herdr reeve at `w1:p1` would otherwise land on hall's own `w1:p1`. Of the rest, hall shows those whose `name` is its own session (`default` for the liege's hall, `hall-dev` in the test setup) at the pane named.
@@ -60,9 +62,20 @@ Reeve's listing prints `null` for a value it does not have: `office`, `owner_ree
 
 Hall ignores fields it does not know. A command that fails shows its first non-empty stderr line as the reason; reeve's prints one line and exits 1 only when it cannot read the home.
 
+### Ringing a flag
+
+Reeve's listing shows a flag only while the reeve's watch runs, and the watch exits when it wakes the reeve and is started again: the flag drops for that gap and rises again on the same latch. Hall rings a hand's listing alerts on a rise only ([test-setup.md](test-setup.md), Alerts), so without `since` one spell of `idle`, say, rang once per watch (finding R2 of step5-shown-working). With it, a rise of `waiting`, `idle` or `wedged` rings only when its `since` differs from the one hall last rang for that errand and flag, and hall then keeps the new one:
+
+- the same `since` again after a gap is the same spell: no sound, no highlight (the hand still counts toward its reeve's badge);
+- another `since` is a new spell and rings, as does a spell older than the last one rung;
+- a flag up with no `since` (absent, `null`, or one that does not read) rings on every rise, as it did before `since`, and leaves what was last rung as it was;
+- the first good read after attaching rings nothing and counts each spell then up as rung, so attaching during a spell and a watch gap after it ring nothing either;
+- a `waiting` rise left silent because this client rang herdr's request for the dialog the hand's pane stands at counts its spell as rung, so one dialog still rings once;
+- an errand that leaves the listing has its spells forgotten: back with the same `since`, it rings as a hand new to the listing.
+
 ## The stand-in
 
-The stand-in prints version 1 with every location's `backend` `hall`, the session name from the world file's `herdr_session` key, and no `open`.
+The stand-in prints version 1 with every location's `backend` `hall`, the session name from the world file's `herdr_session` key, and no `open` and no `since`, so its flags ring on every rise.
 
 ### Asking for it
 

@@ -9,7 +9,7 @@
 //! reeve's or hand's pane, or when what raised it no longer holds.
 
 use super::*;
-use crate::client::reeve_listing::{HandState, ListedErrand, ReeveListing};
+use crate::client::reeve_listing::{FlagsSince, HandState, ListedErrand, ReeveListing};
 
 /// What a pane the listing names is, to the alerts.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,6 +36,12 @@ struct HandFacts {
     idle: bool,
     wedged: bool,
     question: Option<String>,
+    /// When each flag's present spell began, as listed.
+    since: FlagsSince,
+    /// The spell of each flag this client last rang, or seeded on its first read: a flag that
+    /// rises again with the same `since` (the reeve's watch exited and came back, which drops
+    /// the flag between) is the same spell and rings nothing.
+    rung: FlagsSince,
 }
 
 impl HandFacts {
@@ -50,22 +56,73 @@ impl HandFacts {
                 .question
                 .clone()
                 .filter(|question| !question.is_empty()),
+            since: errand.since,
+            rung: FlagsSince::default(),
         }
     }
 
-    /// What rose from `before` to `self`, by name. A rise of `waiting` is left out when this
+    /// On the first read, which rings nothing: each flag up then counts as rung for its spell.
+    fn seed(&mut self) {
+        for (up, since, rung) in [
+            (self.waiting, self.since.waiting, &mut self.rung.waiting),
+            (self.idle, self.since.idle, &mut self.rung.idle),
+            (self.wedged, self.since.wedged, &mut self.rung.wedged),
+        ] {
+            if up {
+                *rung = since;
+            }
+        }
+    }
+
+    /// What rose from `before` to `self`, by name, keeping `before`'s rung spells and noting
+    /// each spell rung now. A flag rising with the `since` it last rang with is left out; one
+    /// with no `since` rises on every rise. A rise of `waiting` is left out too when this
     /// client rang herdr's request for the dialog the hand's pane stands at, or holds it to
-    /// ring (decisions 62, 64, 65).
-    fn rises(&self, before: &Self, dialog_rung: bool) -> Vec<&'static str> {
+    /// ring (decisions 62, 64, 65), and its spell counts as rung.
+    fn rises(&mut self, before: &Self, dialog_rung: bool) -> Vec<&'static str> {
+        self.rung = before.rung;
         let mut rises = Vec::new();
         for (now, was, name) in [
             (self.blocked, before.blocked, "blocked"),
             (self.needs_decision, before.needs_decision, "needs-decision"),
-            (self.waiting && !dialog_rung, before.waiting, "waiting"),
-            (self.idle, before.idle, "idle"),
-            (self.wedged, before.wedged, "wedged"),
         ] {
             if now && !was {
+                rises.push(name);
+            }
+        }
+        for (now, was, since, rung, rung_elsewhere, name) in [
+            (
+                self.waiting,
+                before.waiting,
+                self.since.waiting,
+                &mut self.rung.waiting,
+                dialog_rung,
+                "waiting",
+            ),
+            (
+                self.idle,
+                before.idle,
+                self.since.idle,
+                &mut self.rung.idle,
+                false,
+                "idle",
+            ),
+            (
+                self.wedged,
+                before.wedged,
+                self.since.wedged,
+                &mut self.rung.wedged,
+                false,
+                "wedged",
+            ),
+        ] {
+            if !now || was || (since.is_some() && since == *rung) {
+                continue;
+            }
+            if since.is_some() {
+                *rung = since;
+            }
+            if !rung_elsewhere {
                 rises.push(name);
             }
         }
@@ -76,7 +133,7 @@ impl HandFacts {
     }
 
     /// What is kept of a hand that a read no longer lists: its question, so a hand coming
-    /// back with the same question does not ring it again (decision 64).
+    /// back with the same question does not ring it again (decision 64). Its rung spells go.
     fn kept(&self) -> Option<Self> {
         self.question.as_ref().map(|question| Self {
             question: Some(question.clone()),
@@ -269,8 +326,10 @@ impl ClientShellState {
         if let Some(seen) = self.reeve_alerts.seen.as_ref() {
             for errand in &errands {
                 let before = seen.get(&errand.id).cloned().unwrap_or_default();
-                let rises =
-                    facts[&errand.id].rises(&before, dialog_rung(errand.session.pane_id.as_ref()));
+                let at_dialog = dialog_rung(errand.session.pane_id.as_ref());
+                let rises = facts
+                    .get_mut(&errand.id)
+                    .map_or_else(Vec::new, |facts| facts.rises(&before, at_dialog));
                 if !rises.is_empty() {
                     risen.push((errand.id.clone(), rises));
                 }
@@ -282,6 +341,8 @@ impl ClientShellState {
                     }
                 }
             }
+        } else {
+            facts.values_mut().for_each(HandFacts::seed);
         }
         let waiting = errands
             .iter()

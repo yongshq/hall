@@ -422,6 +422,204 @@ fn each_listing_trigger_rises_once_and_clears_with_its_cause() {
     }
 }
 
+/// Sets one of the hand's three flags and its `since`, as reeve's listing has them: the flag
+/// down has no `since`.
+type SetFlag = fn(&mut crate::client::reeve_listing::ListedErrand, Option<u64>);
+
+const FLAGS: [(&str, SetFlag); 3] = [
+    ("waiting", |errand, since| {
+        errand.waiting = since.is_some();
+        errand.since.waiting = since;
+    }),
+    ("idle", |errand, since| {
+        errand.idle = since.is_some();
+        errand.since.idle = since;
+    }),
+    ("wedged", |errand, since| {
+        errand.wedged = since.is_some();
+        errand.since.wedged = since;
+    }),
+];
+
+/// Reads `listing` with the hand's flag set (`Some` is up, with that `since`) and gives how
+/// many request sounds the read rang.
+fn read_flag(
+    state: &mut ClientShellState,
+    listing: &mut ReeveListing,
+    set: impl Fn(&mut crate::client::reeve_listing::ListedErrand, Option<u64>),
+    since: Option<u64>,
+) -> usize {
+    set(errand_mut(listing, "bertil-probe"), since);
+    requests(&state.set_reeve_listing(Ok(listing.clone())))
+}
+
+#[test]
+fn a_flag_rising_again_with_the_same_since_rings_once() {
+    // Finding R2: the reeve's watch exits and comes back, so the flag drops between reads and
+    // rises again on the same latch. One spell rings once; a new spell rings again.
+    for (name, set) in FLAGS {
+        let mut listing = listing();
+        let mut state = alert_state(listing.clone(), &[]);
+        assert_eq!(
+            read_flag(&mut state, &mut listing, set, Some(100)),
+            1,
+            "{name} rises"
+        );
+        assert_eq!(alerting(&mut state), ["bertil", "bertil-probe"], "{name}");
+        assert_eq!(
+            read_flag(&mut state, &mut listing, set, None),
+            0,
+            "{name} watch gap"
+        );
+        assert!(alerting(&mut state).is_empty(), "{name}");
+        assert_eq!(
+            read_flag(&mut state, &mut listing, set, Some(100)),
+            0,
+            "{name} back on the same spell"
+        );
+        assert!(
+            alerting(&mut state).is_empty(),
+            "{name} raises no highlight either"
+        );
+        assert_eq!(read_flag(&mut state, &mut listing, set, None), 0, "{name}");
+        assert_eq!(
+            read_flag(&mut state, &mut listing, set, Some(200)),
+            1,
+            "{name} a new spell"
+        );
+        assert_eq!(alerting(&mut state), ["bertil", "bertil-probe"], "{name}");
+        assert_eq!(read_flag(&mut state, &mut listing, set, None), 0, "{name}");
+        assert_eq!(
+            read_flag(&mut state, &mut listing, set, Some(100)),
+            1,
+            "{name} an older spell is not the last rung"
+        );
+    }
+}
+
+#[test]
+fn a_flag_with_no_since_rings_on_every_rise() {
+    // An older reeve's listing has no since, or a null one: every rise rings, as before.
+    for (name, set) in FLAGS {
+        let mut listing = listing();
+        let mut state = alert_state(listing.clone(), &[]);
+        let up = |errand: &mut crate::client::reeve_listing::ListedErrand, _: Option<u64>| {
+            set(errand, Some(0));
+            errand.since = Default::default();
+        };
+        for round in 0..3 {
+            assert_eq!(
+                read_flag(&mut state, &mut listing, up, None),
+                1,
+                "{name} rise {round}"
+            );
+            assert_eq!(read_flag(&mut state, &mut listing, set, None), 0, "{name}");
+        }
+        // A spell with a since after one without, and back.
+        assert_eq!(
+            read_flag(&mut state, &mut listing, set, Some(100)),
+            1,
+            "{name}"
+        );
+        assert_eq!(read_flag(&mut state, &mut listing, set, None), 0, "{name}");
+        assert_eq!(read_flag(&mut state, &mut listing, up, None), 1, "{name}");
+        assert_eq!(read_flag(&mut state, &mut listing, set, None), 0, "{name}");
+        assert_eq!(
+            read_flag(&mut state, &mut listing, set, Some(100)),
+            0,
+            "{name} the spell last rung with a since"
+        );
+    }
+}
+
+#[test]
+fn a_spell_up_at_the_first_read_counts_as_rung() {
+    // The first read seeds the alerts without ringing: the spell then up does not ring after a
+    // watch gap either.
+    for (name, set) in FLAGS {
+        let mut listing = listing();
+        set(errand_mut(&mut listing, "bertil-probe"), Some(100));
+        let mut state = alert_state(ReeveListing::default(), &[]);
+        state.reset_reeve_listing();
+        assert!(
+            state.set_reeve_listing(Ok(listing.clone())).is_empty(),
+            "{name}"
+        );
+        assert_eq!(read_flag(&mut state, &mut listing, set, None), 0, "{name}");
+        assert_eq!(
+            read_flag(&mut state, &mut listing, set, Some(100)),
+            0,
+            "{name}"
+        );
+        assert_eq!(read_flag(&mut state, &mut listing, set, None), 0, "{name}");
+        assert_eq!(
+            read_flag(&mut state, &mut listing, set, Some(200)),
+            1,
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn a_hand_leaving_the_listing_forgets_its_rung_spells() {
+    for (name, set) in FLAGS {
+        let mut listing = listing();
+        let mut state = alert_state(listing.clone(), &[]);
+        assert_eq!(
+            read_flag(&mut state, &mut listing, set, Some(100)),
+            1,
+            "{name}"
+        );
+        let mut gone = listing.clone();
+        gone.errands.retain(|errand| errand.id != "bertil-probe");
+        assert!(state.set_reeve_listing(Ok(gone)).is_empty(), "{name}");
+        assert_eq!(
+            requests(&state.set_reeve_listing(Ok(listing.clone()))),
+            1,
+            "{name} back on the same spell rings, as a hand new to the listing"
+        );
+    }
+}
+
+#[test]
+fn the_flags_keep_their_spells_apart() {
+    let mut listing = listing();
+    let mut state = alert_state(listing.clone(), &[]);
+    let [(_, waiting), (_, idle), (_, wedged)] = FLAGS;
+    assert_eq!(read_flag(&mut state, &mut listing, idle, Some(100)), 1);
+    assert_eq!(read_flag(&mut state, &mut listing, idle, None), 0);
+    // Another flag on the same second is a spell of its own.
+    assert_eq!(read_flag(&mut state, &mut listing, wedged, Some(100)), 1);
+    assert_eq!(read_flag(&mut state, &mut listing, waiting, Some(100)), 1);
+    assert_eq!(read_flag(&mut state, &mut listing, idle, Some(100)), 0);
+    // Another hand on the same since is its own too.
+    errand_mut(&mut listing, "ansel-fix").idle = true;
+    errand_mut(&mut listing, "ansel-fix").since.idle = Some(100);
+    assert_eq!(requests(&state.set_reeve_listing(Ok(listing))), 1);
+}
+
+#[test]
+fn a_waiting_spell_whose_dialog_this_client_rang_counts_as_rung() {
+    let mut listing = listing();
+    let mut state = alert_state(listing.clone(), &[("p_b1", AgentStatus::Blocked)]);
+    notify(
+        &mut state,
+        SemanticNotificationKind::NeedsAttention,
+        "p_b1",
+        "ws_b_t1",
+    );
+    let [(_, waiting), ..] = FLAGS;
+    assert_eq!(read_flag(&mut state, &mut listing, waiting, Some(100)), 0);
+    // The watch gap, and the pane no longer read at the dialog this client rang: the same
+    // spell still rang once, through herdr's request.
+    assert_eq!(read_flag(&mut state, &mut listing, waiting, None), 0);
+    set_statuses(&mut state, &[]);
+    compose(&mut state);
+    assert_eq!(read_flag(&mut state, &mut listing, waiting, Some(100)), 0);
+    assert_eq!(read_flag(&mut state, &mut listing, waiting, None), 0);
+    assert_eq!(read_flag(&mut state, &mut listing, waiting, Some(200)), 1);
+}
+
 #[test]
 fn a_new_question_rings_when_its_text_changes_to_another() {
     let mut listing = listing();

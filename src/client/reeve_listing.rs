@@ -63,7 +63,35 @@ pub(super) struct ListedErrand {
     pub(super) idle: bool,
     #[serde(default)]
     pub(super) wedged: bool,
+    /// When each flag's present spell began; all none when the listing has no `since`.
+    #[serde(default, deserialize_with = "since_or_none")]
+    pub(super) since: FlagsSince,
     pub(super) session: ListedSession,
+}
+
+/// When the reeve's watch first judged each flag, in epoch seconds (`since`, from the first field
+/// of the latch file behind it), or none: the flag is down, the listing has no `since` (an older
+/// reeve) or its value does not read. The same value on a later rise is the same spell, which
+/// the alerts ring once.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(super) struct FlagsSince {
+    pub(super) waiting: Option<u64>,
+    pub(super) idle: Option<u64>,
+    pub(super) wedged: Option<u64>,
+}
+
+/// Reads `since` leniently: a value that does not read is taken as none, for that flag or for
+/// all three, and never drops the errand.
+fn since_or_none<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<FlagsSince, D::Error> {
+    let since = serde_json::Value::deserialize(deserializer)?;
+    let flag = |name: &str| since.get(name).and_then(serde_json::Value::as_u64);
+    Ok(FlagsSince {
+        waiting: flag("waiting"),
+        idle: flag("idle"),
+        wedged: flag("wedged"),
+    })
 }
 
 /// A session location: the backend that holds it, the session there (none when the listing
@@ -969,6 +997,62 @@ mod tests {
             )
         });
         assert_eq!(log, "");
+    }
+
+    #[test]
+    fn since_reads_per_flag_and_absent_or_null_reads_as_none() {
+        let with = |since: &str| {
+            parse(&LISTING.replace(
+                "\"wedged\": false,",
+                &format!("\"wedged\": false, \"since\": {since},"),
+            ))
+            .unwrap()
+            .errands[0]
+                .since
+        };
+        assert_eq!(
+            with(r#"{ "waiting": null, "idle": 1791623715, "wedged": null }"#),
+            FlagsSince {
+                idle: Some(1_791_623_715),
+                ..FlagsSince::default()
+            }
+        );
+        assert_eq!(
+            with(r#"{ "waiting": 1, "idle": 2, "wedged": 3 }"#),
+            FlagsSince {
+                waiting: Some(1),
+                idle: Some(2),
+                wedged: Some(3),
+            }
+        );
+        assert_eq!(with("null"), FlagsSince::default());
+        assert_eq!(
+            parse(LISTING).unwrap().errands[0].since,
+            FlagsSince::default(),
+            "an older reeve's listing has no since"
+        );
+    }
+
+    #[test]
+    fn a_since_that_does_not_read_is_none_and_keeps_the_errand() {
+        for (since, idle) in [
+            (r#""1791623715""#, None),
+            ("[1, 2, 3]", None),
+            ("7", None),
+            (r#"{ "idle": "soon", "wedged": 9 }"#, None),
+            (r#"{ "idle": -1 }"#, None),
+            (r#"{ "idle": 1.5 }"#, None),
+            (r#"{ "idle": 12, "waiting": {} }"#, Some(12)),
+        ] {
+            let listing = parse(&LISTING.replace(
+                "\"wedged\": false,",
+                &format!("\"wedged\": false, \"since\": {since},"),
+            ))
+            .unwrap();
+            assert_eq!(listing.errands.len(), 1, "{since}");
+            assert_eq!(listing.errands[0].since.idle, idle, "{since}");
+            assert_eq!(listing.errands[0].since.waiting, None, "{since}");
+        }
     }
 
     #[test]
