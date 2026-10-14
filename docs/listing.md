@@ -81,6 +81,8 @@ A reeve hand's pane is not restored (the liege's choice A, 2026-10-14). Reeve op
 
 Why: hall's native resume restarts claude as a bare `claude --resume <id>`, without the hand's launch line (`REEVE_HAND`, the office's `--settings`, `--add-dir`), so a resumed hand stalls at its next `reeve-say`. `pane get` and `pane list` show `"agent_resume": false` for a marked pane, so reeve can check the mark. A live handoff keeps marked panes, since their processes carry on.
 
+`worktree open --no-agent-resume` marks the root pane of each workspace it opens: the worktree's, and the repo parent's when it opens that too. For a worktree already open it creates no pane, marks nothing, and returns `"already_open": true` with the `root_pane` of the workspace already there, a pane that is not the hand's: reeve should not take it as one.
+
 ## The stand-in
 
 The stand-in prints version 1 with every location's `backend` `hall`, the session name from the world file's `herdr_session` key, and no `open` and no `since`, so its flags ring on every rise.

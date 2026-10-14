@@ -173,7 +173,7 @@ Hall is a modified version of herdr v0.9.0 (commit b99002ac99b09e00b4ca692436cb1
 | `src/workspace.rs` | `reserve_public_workspace_ids`, which `reserve_workspace_ids` now calls, for the ids of dropped workspaces. |
 | `src/app/mod.rs` | The cold restore calls `drop_no_resume_panes` first; the live handoff does not. |
 | `src/app/creation.rs` | `mark_root_pane_no_agent_resume`; `PaneInfo::agent_resume` from the mark. |
-| `src/app/api/tabs.rs`, `src/app/api/workspaces.rs`, `src/app/api/worktrees.rs` | `tab.create`, `workspace.create` and `worktree.open` (when it opens a new workspace) mark the root pane they create when asked; a test; test params gain the field. |
+| `src/app/api/tabs.rs`, `src/app/api/workspaces.rs`, `src/app/api/worktrees.rs` | `tab.create`, `workspace.create` and `worktree.open` mark the root pane they create when asked: for `worktree.open`, that of each workspace it opens (the worktree's, and the repo parent's when it opens that too), never one it finds already open; tests; test params gain the field. |
 | `src/api/schema.rs`, `src/api/schema/tabs.rs`, `src/api/schema/workspaces.rs`, `src/api/schema/worktrees.rs`, `src/api/schema/panes.rs` | `no_agent_resume` on the three create params, left out when false; `PaneInfo::agent_resume`, shown only when false. |
 | `src/api/schema/tests.rs`, `src/api/server.rs`, `src/api/subscriptions.rs`, `src/client/shell/tests/mod.rs`, `src/server/headless/tests/mod.rs` | Test values gain the new fields. |
 | `src/client/shell/actions.rs`, `src/client/shell/context_menu.rs`, `src/client/shell/overlay_input.rs`, `src/client/shell/worktrees.rs` | The client's own creates send `no_agent_resume: false`. |

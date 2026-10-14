@@ -136,8 +136,17 @@ impl App {
                 Err(err) => return encode_error(id, "worktree_open_failed", err.to_string()),
             }
         };
-        if created_workspace && params.no_agent_resume {
-            self.mark_root_pane_no_agent_resume(ws_idx, 0);
+        // Hall: mark each pane this request created, the repo parent it opened
+        // included, and never a pane it found open (`already_open`).
+        if params.no_agent_resume {
+            if created_source_workspace {
+                if let Some(source_idx) = source.workspace_idx {
+                    self.mark_root_pane_no_agent_resume(source_idx, 0);
+                }
+            }
+            if created_workspace {
+                self.mark_root_pane_no_agent_resume(ws_idx, 0);
+            }
         }
         self.mark_worktree_membership(
             &source,
@@ -1615,6 +1624,145 @@ mod tests {
         app.state.selected = 0;
         app.state.close_selected_workspace();
         app.shutdown_detached_terminal_runtimes();
+        let _ = std::fs::remove_dir_all(repo);
+    }
+
+    fn root_pane_marked(app: &App, ws_idx: usize) -> bool {
+        let tab = &app.state.workspaces[ws_idx].tabs[0];
+        let terminal_id = &tab.panes[&tab.root_pane].attached_terminal_id;
+        app.state.terminals[terminal_id].no_agent_resume
+    }
+
+    #[tokio::test]
+    async fn api_worktree_open_no_agent_resume_marks_every_pane_it_creates() {
+        let repo = create_committed_repo("api-worktree-open-mark-repo");
+        let checkout = unique_temp_path("api-worktree-open-mark-checkout");
+        run_git(
+            &repo,
+            &[
+                "worktree",
+                "add",
+                "--quiet",
+                "-b",
+                "worktree/api-open-mark",
+                checkout.to_str().unwrap(),
+                "HEAD",
+            ],
+        );
+        let mut app = test_app();
+
+        let response = app.handle_api_request(Request {
+            id: "req".into(),
+            method: crate::api::schema::Method::WorktreeOpen(WorktreeOpenParams {
+                cwd: Some(repo.display().to_string()),
+                path: Some(checkout.display().to_string()),
+                no_agent_resume: true,
+                ..WorktreeOpenParams::default()
+            }),
+        });
+
+        let response: serde_json::Value = serde_json::from_str(&response).unwrap();
+        assert_eq!(response["result"]["already_open"], serde_json::json!(false));
+        assert_eq!(
+            response["result"]["root_pane"]["agent_resume"],
+            serde_json::json!(false)
+        );
+        // The repo parent the request opened, and the worktree's own workspace.
+        assert_eq!(app.state.workspaces.len(), 2);
+        assert!(root_pane_marked(&app, 0), "the parent it created is marked");
+        assert!(
+            root_pane_marked(&app, 1),
+            "the worktree workspace is marked"
+        );
+
+        for (_, runtime) in app.terminal_runtimes.drain() {
+            runtime.shutdown();
+        }
+        let remove = crate::worktree::build_worktree_remove_command(&repo, &checkout, false, false);
+        crate::worktree::run_worktree_command(&remove).unwrap();
+        let _ = std::fs::remove_dir_all(repo);
+    }
+
+    #[tokio::test]
+    async fn api_worktree_open_no_agent_resume_marks_source_checkout_it_creates() {
+        let repo = create_committed_repo("api-worktree-open-mark-source-repo");
+        let mut app = test_app();
+
+        let response = app.handle_api_request(Request {
+            id: "req".into(),
+            method: crate::api::schema::Method::WorktreeOpen(WorktreeOpenParams {
+                cwd: Some(repo.display().to_string()),
+                path: Some(repo.display().to_string()),
+                no_agent_resume: true,
+                ..WorktreeOpenParams::default()
+            }),
+        });
+
+        let response: serde_json::Value = serde_json::from_str(&response).unwrap();
+        assert_eq!(response["result"]["already_open"], serde_json::json!(false));
+        assert_eq!(
+            response["result"]["root_pane"]["agent_resume"],
+            serde_json::json!(false)
+        );
+        assert_eq!(app.state.workspaces.len(), 1);
+        assert!(root_pane_marked(&app, 0));
+
+        app.state.selected = 0;
+        app.state.close_selected_workspace();
+        app.shutdown_detached_terminal_runtimes();
+        let _ = std::fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn api_worktree_open_no_agent_resume_leaves_an_already_open_pane_unmarked() {
+        let repo = create_committed_repo("api-worktree-open-mark-open-repo");
+        let checkout = unique_temp_path("api-worktree-open-mark-open-checkout");
+        run_git(
+            &repo,
+            &[
+                "worktree",
+                "add",
+                "--quiet",
+                "-b",
+                "worktree/api-open-mark-open",
+                checkout.to_str().unwrap(),
+                "HEAD",
+            ],
+        );
+        let mut app = app_with_parent(&repo);
+        let mut child = Workspace::test_new("child");
+        child.identity_cwd = checkout.clone();
+        app.state.workspaces.push(child);
+        app.state.ensure_test_terminals();
+        let child_root = app.state.workspaces[1].tabs[0].root_pane;
+        let child_root_id = app.public_pane_id(1, child_root).unwrap();
+
+        let response = app.handle_api_request(Request {
+            id: "req".into(),
+            method: crate::api::schema::Method::WorktreeOpen(WorktreeOpenParams {
+                workspace_id: Some(app.state.workspaces[0].id.clone()),
+                path: Some(checkout.display().to_string()),
+                no_agent_resume: true,
+                ..WorktreeOpenParams::default()
+            }),
+        });
+
+        // The call returns the pane already there, the liege's, and creates none.
+        let response: serde_json::Value = serde_json::from_str(&response).unwrap();
+        assert_eq!(response["result"]["already_open"], serde_json::json!(true));
+        assert_eq!(
+            response["result"]["root_pane"]["pane_id"],
+            serde_json::json!(child_root_id)
+        );
+        assert!(response["result"]["root_pane"]
+            .get("agent_resume")
+            .is_none());
+        assert_eq!(app.state.workspaces.len(), 2);
+        assert!(!root_pane_marked(&app, 0));
+        assert!(!root_pane_marked(&app, 1));
+
+        let remove = crate::worktree::build_worktree_remove_command(&repo, &checkout, false, false);
+        crate::worktree::run_worktree_command(&remove).unwrap();
         let _ = std::fs::remove_dir_all(repo);
     }
 

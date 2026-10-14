@@ -4721,7 +4721,7 @@
               ]
             },
             "no_agent_resume": {
-              "description": "Hall: mark the root pane of the workspace this opens, when it opens a\nnew one, so a restore drops it instead of recreating it (a reeve hand).\nA worktree already open keeps its panes unmarked.",
+              "description": "Hall: mark the root pane of each workspace this opens (the worktree's,\nand the repo parent's when it opens that too), so a restore drops them\ninstead of recreating them (a reeve hand). A worktree already open\nkeeps its panes unmarked, the root pane returned for it included.",
               "type": "boolean"
             },
             "path": {

@@ -46,9 +46,10 @@ pub struct WorktreeOpenParams {
     pub focus: bool,
     #[serde(default, skip_serializing_if = "super::is_false")]
     pub trust_repository: bool,
-    /// Hall: mark the root pane of the workspace this opens, when it opens a
-    /// new one, so a restore drops it instead of recreating it (a reeve hand).
-    /// A worktree already open keeps its panes unmarked.
+    /// Hall: mark the root pane of each workspace this opens (the worktree's,
+    /// and the repo parent's when it opens that too), so a restore drops them
+    /// instead of recreating them (a reeve hand). A worktree already open
+    /// keeps its panes unmarked, the root pane returned for it included.
     #[serde(default, skip_serializing_if = "super::is_false")]
     pub no_agent_resume: bool,
 }
