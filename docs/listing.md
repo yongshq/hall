@@ -46,15 +46,17 @@ JSON on stdout, exit status 0:
 | `reeves[].live` | Whether the reeve is alive now; default `true`. |
 | `errands[]` | Errands in flight only (decision 16): one torn down, or never dispatched, is left out; a hand reported done shows `✓` until its teardown. |
 | `errands[].id` | The errand id. |
-| `errands[].office` | The office the hand holds. |
-| `errands[].owner_reeve` | The reeve that dispatched it. |
+| `errands[].office` | The office the hand holds, or `null` when its record names none (read as none). |
+| `errands[].owner_reeve` | The reeve that dispatched it, or `null` when reeve cannot tell (the record names no valid reeve and its owning session has no name): the hand then nests under no reeve. |
 | `errands[].hand_state` | `working`, `needs-decision`, `blocked`, `done` or `failed`; any other (reeve's `unknown`, say) shows `·` and counts toward nothing. |
 | `errands[].question` | The hand's newest unanswered question, or `null`. |
 | `errands[].open` | Reeve's count of the hand's open questions. Hall does not read it. |
 | `errands[].waiting`, `idle`, `wedged` | One flag each, as the reeve's watch judges them; default `false`. |
 | `errands[].session` | The hand's session location (below). |
 
-A session location is `{ "backend": <name>, "name": <session or null>, "pane_id": <id or null> }`: the backend that holds it (`hall` or `herdr`), the session there, and the pane in it. `name` is `null` when the listing does not know the session (a herdr record made before step 5), and `pane_id` is `null` until the pane is known. Hall drops every reeve and errand whose `backend` is not `hall` before it matches anything (design finding F1): herdr's live session is `default`, as hall's is at go-live, and a herdr reeve at `w1:p1` would otherwise land on hall's own `w1:p1`. Of the rest, hall shows those whose `name` is its own session (`default` for the liege's hall, `hall-dev` in the test setup) at the pane named.
+A session location is `{ "backend": <name>, "name": <session or null>, "pane_id": <id or null> }`: the backend that holds it (`hall` or `herdr`), the session there, and the pane in it. `name` is `null` for every herdr entry, since reeve's herdr backend cannot say, and for a hall record with no `place`; `pane_id` is `null` until the pane is known. Hall drops every reeve and errand whose `backend` is not `hall` before it matches anything (design finding F1): herdr's live session is `default`, as hall's is at go-live, and a herdr reeve at `w1:p1` would otherwise land on hall's own `w1:p1`. Of the rest, hall shows those whose `name` is its own session (`default` for the liege's hall, `hall-dev` in the test setup) at the pane named.
+
+Reeve's listing prints `null` for a value it does not have: `office`, `owner_reeve`, `question` and a location's `name` and `pane_id`, as above; every other field always has a value. Hall reads each reeve and errand on its own, after the `backend` check: one that does not read (a `null` where the table allows none, a field of the wrong type, a missing `name`, `id` or `session`) is dropped alone, and the rest of the listing still reads. Only a listing that is not JSON at all, or has the wrong `version`, fails the whole read.
 
 Hall ignores fields it does not know. A command that fails shows its first non-empty stderr line as the reason; reeve's prints one line and exits 1 only when it cannot read the home.
 

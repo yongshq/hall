@@ -45,8 +45,12 @@ fn listed_live_default() -> bool {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub(super) struct ListedErrand {
     pub(super) id: String,
-    #[serde(default)]
+    /// Empty when the listing has none (null).
+    #[serde(default, deserialize_with = "null_as_empty")]
     pub(super) office: String,
+    /// Empty when the listing has none (null): reeve could not resolve the errand's owner, so
+    /// the hand nests under no reeve.
+    #[serde(default, deserialize_with = "null_as_empty")]
     pub(super) owner_reeve: String,
     pub(super) hand_state: HandState,
     #[serde(default)]
@@ -80,20 +84,28 @@ impl ListedSession {
     }
 }
 
+/// A string the listing may print as null for none, read as empty.
+fn null_as_empty<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
+    Option::<String>::deserialize(deserializer).map(Option::unwrap_or_default)
+}
+
 /// The listing format version this hall reads.
 const LISTING_VERSION: u64 = 1;
 
-/// The listing as the command prints it: its version beside its contents.
+/// The listing as the command prints it: its version beside its entries, each read on its own.
 #[derive(Deserialize)]
 struct ListingDocument {
     #[serde(default)]
     version: Option<u64>,
-    #[serde(flatten)]
-    listing: ReeveListing,
+    #[serde(default)]
+    reeves: Vec<serde_json::Value>,
+    #[serde(default)]
+    errands: Vec<serde_json::Value>,
 }
 
 /// Parses a listing: version 1 only, a missing or other version refused with a reason, and every
-/// reeve and errand outside hall dropped before anything matches on it.
+/// reeve and errand outside hall dropped before anything matches on it. An entry in hall that
+/// does not read is dropped alone, so one odd record never hides the rest.
 fn parse_listing(output: &[u8]) -> ReeveListingRead {
     let document: ListingDocument =
         serde_json::from_slice(output).map_err(|error| format!("unreadable JSON: {error}"))?;
@@ -102,14 +114,25 @@ fn parse_listing(output: &[u8]) -> ReeveListingRead {
         Some(version) => return Err(format!("listing version {version}, not {LISTING_VERSION}")),
         None => return Err(format!("listing names no version, not {LISTING_VERSION}")),
     }
-    let mut listing = document.listing;
-    listing
-        .reeves
-        .retain(|reeve| reeve.session.backend == "hall");
-    listing
-        .errands
-        .retain(|errand| errand.session.backend == "hall");
-    Ok(listing)
+    Ok(ReeveListing {
+        reeves: hall_entries(document.reeves),
+        errands: hall_entries(document.errands),
+    })
+}
+
+/// The entries whose session is in hall, by the raw `session.backend`, each read on its own and
+/// dropped when it does not read.
+fn hall_entries<T: serde::de::DeserializeOwned>(entries: Vec<serde_json::Value>) -> Vec<T> {
+    entries
+        .into_iter()
+        .filter(|entry| {
+            entry
+                .pointer("/session/backend")
+                .and_then(serde_json::Value::as_str)
+                == Some("hall")
+        })
+        .filter_map(|entry| serde_json::from_value(entry).ok())
+        .collect()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -784,6 +807,55 @@ mod tests {
         let errands: Vec<_> = listing.errands.iter().map(|e| e.id.as_str()).collect();
         assert_eq!(reeves, ["ansel"]);
         assert_eq!(errands, ["new"]);
+    }
+
+    #[test]
+    fn a_null_office_or_owner_reads_as_empty() {
+        // Reeve's listing prints null for a field it has no value for: an errand whose record
+        // names no office, or no owner it can resolve.
+        let listing = parse(
+            &LISTING
+                .replace("\"office\": \"artificer\"", "\"office\": null")
+                .replace("\"owner_reeve\": \"ansel\"", "\"owner_reeve\": null"),
+        )
+        .unwrap();
+        assert_eq!(listing.reeves.len(), 1);
+        let errand = &listing.errands[0];
+        assert_eq!(
+            (errand.office.as_str(), errand.owner_reeve.as_str()),
+            ("", "")
+        );
+        assert_eq!(errand.question.as_deref(), Some("Which base branch?"));
+    }
+
+    #[test]
+    fn an_entry_that_does_not_read_is_dropped_alone() {
+        let listing = parse(
+            r#"{
+              "version": 1,
+              "reeves": [
+                { "name": null, "session": { "backend": "hall", "name": "hall-dev", "pane_id": "w1:p9" } },
+                { "name": "ansel", "session": { "backend": "hall", "name": "hall-dev", "pane_id": "w1:p1" } },
+                { "name": "aldric", "session": { "backend": "herdr", "name": null, "pane_id": "w1:p1" }, "live": null }
+              ],
+              "errands": [
+                { "id": "odd", "owner_reeve": "ansel", "hand_state": null, "waiting": null,
+                  "session": { "backend": "hall", "name": "hall-dev", "pane_id": "w1:p4" } },
+                { "id": "no-session", "owner_reeve": "ansel", "hand_state": "working" },
+                { "id": "ok", "office": null, "owner_reeve": null, "hand_state": "working",
+                  "question": null, "session": { "backend": "hall", "name": null, "pane_id": null } },
+                { "id": "fine", "owner_reeve": "ansel", "hand_state": "blocked",
+                  "session": { "backend": "hall", "name": "hall-dev", "pane_id": "w1:p3" } },
+                { "id": null, "owner_reeve": null, "hand_state": null,
+                  "session": { "backend": "herdr", "name": null, "pane_id": null } }
+              ]
+            }"#,
+        )
+        .unwrap();
+        let reeves: Vec<_> = listing.reeves.iter().map(|r| r.name.as_str()).collect();
+        let errands: Vec<_> = listing.errands.iter().map(|e| e.id.as_str()).collect();
+        assert_eq!(reeves, ["ansel"]);
+        assert_eq!(errands, ["ok", "fine"]);
     }
 
     #[test]
