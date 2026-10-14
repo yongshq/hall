@@ -139,7 +139,7 @@ pub(super) fn reeve_tree(
     for reeve in listing
         .iter()
         .flat_map(|listing| &listing.reeves)
-        .filter(|reeve| reeve.session.herdr_session == session)
+        .filter(|reeve| reeve.session.in_session(session))
     {
         let reeve_pane = pane(reeve.session.pane_id.as_ref());
         let workspace_id = reeve_pane.map(|pane| pane.workspace_id.clone());
@@ -149,9 +149,7 @@ pub(super) fn reeve_tree(
         let hands = listing
             .iter()
             .flat_map(|listing| &listing.errands)
-            .filter(|errand| {
-                errand.owner_reeve == reeve.name && errand.session.herdr_session == session
-            })
+            .filter(|errand| errand.owner_reeve == reeve.name && errand.session.in_session(session))
             .collect::<Vec<_>>();
         let hand_tabs = hands
             .iter()

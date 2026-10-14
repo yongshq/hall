@@ -76,11 +76,11 @@ pub(super) fn hall_dev_snapshot() -> ClientShellSnapshot {
 /// The stand-in's listing for that layout, with every hand working and nothing waiting.
 pub(super) fn listing() -> ReeveListing {
     serde_json::from_value(serde_json::json!({
-        "draft": true,
+        "version": 1,
         "reeves": [
-            { "name": "ansel", "session": { "herdr_session": "hall-dev", "pane_id": "p_a0" }, "live": true },
-            { "name": "bertil", "session": { "herdr_session": "hall-dev", "pane_id": "p_b0" }, "live": true },
-            { "name": "elsewhere", "session": { "herdr_session": "hall-dev-other", "pane_id": "p_p0" }, "live": true }
+            { "name": "ansel", "session": { "backend": "hall", "name": "hall-dev", "pane_id": "p_a0" }, "live": true },
+            { "name": "bertil", "session": { "backend": "hall", "name": "hall-dev", "pane_id": "p_b0" }, "live": true },
+            { "name": "elsewhere", "session": { "backend": "hall", "name": "hall-dev-other", "pane_id": "p_p0" }, "live": true }
         ],
         "errands": [
             errand("ansel-fix", "ansel", "p_a1"),
@@ -96,7 +96,7 @@ fn errand(id: &str, owner: &str, pane: &str) -> serde_json::Value {
         "id": id, "office": "artificer", "owner_reeve": owner,
         "hand_state": "working", "question": null,
         "waiting": false, "idle": false, "wedged": false,
-        "session": { "herdr_session": "hall-dev", "pane_id": pane }
+        "session": { "backend": "hall", "name": "hall-dev", "pane_id": pane }
     })
 }
 

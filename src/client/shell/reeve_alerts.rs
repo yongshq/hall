@@ -129,7 +129,7 @@ impl ClientShellState {
     fn pane_alert_role(&self, pane_id: &str) -> Option<AlertRole> {
         let (listing, session) = self.alert_listing()?;
         let names = |located: &crate::client::reeve_listing::ListedSession| {
-            located.herdr_session == session && located.pane_id.as_deref() == Some(pane_id)
+            located.in_session(session) && located.pane_id.as_deref() == Some(pane_id)
         };
         if listing.reeves.iter().any(|reeve| names(&reeve.session)) {
             return Some(AlertRole::Reeve);
@@ -223,7 +223,7 @@ impl ClientShellState {
         let errands = listing
             .errands
             .iter()
-            .filter(|errand| errand.session.herdr_session == session)
+            .filter(|errand| errand.session.in_session(session))
             .collect::<Vec<_>>();
         let mut facts = errands
             .iter()

@@ -1,7 +1,7 @@
 //! hall: reeve's listing, read by the client for the reeve tree (plan step 3).
 //!
-//! The listing is the draft in docs/listing-draft.md: every reeve and every errand in flight,
-//! with where each one sits. Hall never reads status files (ADR 0002); it runs the command the
+//! The listing is version 1 of the format in docs/listing-draft.md: every reeve and every
+//! errand in flight, with where each one sits. Hall never reads status files (ADR 0002); it runs the command the
 //! config names (`[reeve] listing_command`, decision 49) and reads its JSON, killing a run that
 //! outlasts `[reeve] listing_timeout_ms` (decision 56), and keeps a record of each run so the
 //! next client kills a run that a killed client left behind (decision 58).
@@ -60,13 +60,56 @@ pub(super) struct ListedErrand {
     pub(super) session: ListedSession,
 }
 
-/// A session location: the hall session (the draft still names the field `herdr_session`) and
-/// the pane in it.
+/// A session location: the backend that holds it, the session there (none when the listing
+/// does not know it) and the pane in it. Only `hall` locations reach the tree: the listing names
+/// herdr's reeves and hands too, in herdr's own sessions, whose names and pane ids would match
+/// hall's (`default`, `w1:p1`).
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub(super) struct ListedSession {
-    pub(super) herdr_session: String,
+    pub(super) backend: String,
+    #[serde(default)]
+    pub(super) name: Option<String>,
     #[serde(default)]
     pub(super) pane_id: Option<String>,
+}
+
+impl ListedSession {
+    /// Whether this location is in the hall session `session`.
+    pub(super) fn in_session(&self, session: &str) -> bool {
+        self.backend == "hall" && self.name.as_deref() == Some(session)
+    }
+}
+
+/// The listing format version this hall reads.
+const LISTING_VERSION: u64 = 1;
+
+/// The listing as the command prints it: its version beside its contents.
+#[derive(Deserialize)]
+struct ListingDocument {
+    #[serde(default)]
+    version: Option<u64>,
+    #[serde(flatten)]
+    listing: ReeveListing,
+}
+
+/// Parses a listing: version 1 only, a missing or other version refused with a reason, and every
+/// reeve and errand outside hall dropped before anything matches on it.
+fn parse_listing(output: &[u8]) -> ReeveListingRead {
+    let document: ListingDocument =
+        serde_json::from_slice(output).map_err(|error| format!("unreadable JSON: {error}"))?;
+    match document.version {
+        Some(LISTING_VERSION) => {}
+        Some(version) => return Err(format!("listing version {version}, not {LISTING_VERSION}")),
+        None => return Err(format!("listing names no version, not {LISTING_VERSION}")),
+    }
+    let mut listing = document.listing;
+    listing
+        .reeves
+        .retain(|reeve| reeve.session.backend == "hall");
+    listing
+        .errands
+        .retain(|errand| errand.session.backend == "hall");
+    Ok(listing)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -229,7 +272,7 @@ fn listing_from_output(
             .map_or_else(|| status.to_string(), str::to_owned);
         return Err(reason);
     }
-    serde_json::from_slice(stdout).map_err(|error| format!("unreadable JSON: {error}"))
+    parse_listing(stdout)
 }
 
 /// One of the command's output pipes, read without blocking as it fills, on the reader's own
@@ -641,25 +684,31 @@ pub(super) fn follow(
 mod tests {
     use super::*;
 
-    const DRAFT: &str = r#"{
-      "draft": true,
+    const LISTING: &str = r#"{
+      "version": 1,
       "reeves": [
-        { "name": "ansel", "session": { "herdr_session": "hall-dev", "pane_id": "w1:p1" }, "live": true }
+        { "name": "ansel", "session": { "backend": "hall", "name": "hall-dev", "pane_id": "w1:p1" }, "live": true }
       ],
       "errands": [
         {
           "id": "ansel-fix", "office": "artificer", "owner_reeve": "ansel",
-          "hand_state": "needs-decision", "question": "Which base branch?",
+          "hand_state": "needs-decision", "question": "Which base branch?", "open": 1,
           "waiting": false, "idle": false, "wedged": false,
-          "session": { "herdr_session": "hall-dev", "pane_id": null }
+          "session": { "backend": "hall", "name": "hall-dev", "pane_id": null }
         }
       ]
     }"#;
 
+    fn parse(listing: &str) -> ReeveListingRead {
+        parse_listing(listing.as_bytes())
+    }
+
     #[test]
-    fn parses_the_draft_listing() {
-        let listing: ReeveListing = serde_json::from_str(DRAFT).unwrap();
+    fn parses_the_listing() {
+        let listing = parse(LISTING).unwrap();
         assert_eq!(listing.reeves[0].name, "ansel");
+        assert_eq!(listing.reeves[0].session.name.as_deref(), Some("hall-dev"));
+        assert!(listing.reeves[0].session.in_session("hall-dev"));
         assert_eq!(listing.reeves[0].session.pane_id.as_deref(), Some("w1:p1"));
         let errand = &listing.errands[0];
         assert_eq!(errand.hand_state, HandState::NeedsDecision);
@@ -670,14 +719,87 @@ mod tests {
 
     #[test]
     fn an_unknown_hand_state_reads_as_unknown() {
-        let listing: ReeveListing =
-            serde_json::from_str(&DRAFT.replace("\"needs-decision\"", "\"pondering\"")).unwrap();
+        let listing = parse(&LISTING.replace("\"needs-decision\"", "\"pondering\"")).unwrap();
         assert_eq!(listing.errands[0].hand_state, HandState::Unknown);
     }
 
     #[test]
+    fn a_missing_or_other_version_is_refused_with_a_reason() {
+        assert_eq!(
+            parse(&LISTING.replace("\"version\": 1,", "")),
+            Err("listing names no version, not 1".into())
+        );
+        assert_eq!(
+            parse(&LISTING.replace("\"version\": 1,", "\"version\": 2,")),
+            Err("listing version 2, not 1".into())
+        );
+        assert_eq!(
+            parse(&LISTING.replace("\"version\": 1,", "\"draft\": true,")),
+            Err("listing names no version, not 1".into()),
+            "the draft's marker is no version"
+        );
+        assert_eq!(
+            read_listing(
+                &sh("printf '%s' '{\"version\": 2}'"),
+                Duration::from_secs(5)
+            ),
+            Err("listing version 2, not 1".into()),
+            "shown as a failed read is"
+        );
+    }
+
+    #[test]
+    fn unknown_fields_are_ignored() {
+        let listing = parse(&LISTING.replace(
+            "\"version\": 1,",
+            "\"version\": 1, \"generated\": \"now\", \"extra\": { \"a\": [1] },",
+        ))
+        .unwrap();
+        assert_eq!(listing, parse(LISTING).unwrap());
+    }
+
+    #[test]
+    fn entries_outside_hall_are_dropped() {
+        // A herdr reeve in herdr's `default` at `w1:p1` would match hall's own `default` pane.
+        let listing = parse(
+            r#"{
+              "version": 1,
+              "reeves": [
+                { "name": "aldric", "session": { "backend": "herdr", "name": null, "pane_id": "w1:p1" }, "live": true },
+                { "name": "osric", "session": { "backend": "herdr", "name": "default", "pane_id": "w1:p2" } },
+                { "name": "ansel", "session": { "backend": "hall", "name": "default", "pane_id": "w1:p1" } }
+              ],
+              "errands": [
+                { "id": "old", "owner_reeve": "aldric", "hand_state": "working",
+                  "session": { "backend": "herdr", "name": null, "pane_id": "w1:p3" } },
+                { "id": "new", "owner_reeve": "ansel", "hand_state": "working",
+                  "session": { "backend": "hall", "name": "default", "pane_id": "w1:p3" } },
+                { "id": "elsewhere", "owner_reeve": "ansel", "hand_state": "working",
+                  "session": { "backend": "tmux", "name": "default", "pane_id": "w1:p4" } }
+              ]
+            }"#,
+        )
+        .unwrap();
+        let reeves: Vec<_> = listing.reeves.iter().map(|r| r.name.as_str()).collect();
+        let errands: Vec<_> = listing.errands.iter().map(|e| e.id.as_str()).collect();
+        assert_eq!(reeves, ["ansel"]);
+        assert_eq!(errands, ["new"]);
+    }
+
+    #[test]
+    fn a_session_with_no_name_is_in_no_session() {
+        let listing = parse(&LISTING.replace(
+            "\"name\": \"hall-dev\", \"pane_id\": null",
+            "\"name\": null, \"pane_id\": null",
+        ))
+        .unwrap();
+        assert_eq!(listing.errands[0].session.name, None);
+        assert!(!listing.errands[0].session.in_session("hall-dev"));
+    }
+
+    #[test]
     fn a_working_hand_with_no_flag_does_not_wait_on_the_liege() {
-        let mut listing: ReeveListing = serde_json::from_str(DRAFT).unwrap();
+        let mut listing = parse(LISTING).unwrap();
         let errand = &mut listing.errands[0];
         errand.hand_state = HandState::Working;
         errand.question = None;
@@ -723,8 +845,8 @@ mod tests {
     }
 
     #[test]
-    fn a_command_printing_the_draft_reads_it() {
-        let read = read_listing(&["printf".into(), "%s".into(), DRAFT.into()], TIMEOUT).unwrap();
+    fn a_command_printing_the_listing_reads_it() {
+        let read = read_listing(&["printf".into(), "%s".into(), LISTING.into()], TIMEOUT).unwrap();
         assert_eq!(read.errands.len(), 1);
     }
 
@@ -842,7 +964,7 @@ mod tests {
         let pid_file = pid_file();
         let read = read_listing(
             &sh(&format!(
-                "echo '{{}}'; sleep 1000 & echo $! > '{}'",
+                "echo '{{\"version\": 1}}'; sleep 1000 & echo $! > '{}'",
                 pid_file.display()
             )),
             TIMEOUT,
@@ -865,7 +987,7 @@ mod tests {
         // pid before it exits, so the daemon is out of the group before the grace ends.
         let read = read_listing(
             &sh(&format!(
-                "echo '{{}}'; perl -MPOSIX -e 'setsid(); open my $f, \">\", $ARGV[0]; \
+                "echo '{{\"version\": 1}}'; perl -MPOSIX -e 'setsid(); open my $f, \">\", $ARGV[0]; \
                  print $f $$; close $f; exec \"sleep\", \"1000\"' '{file}' & \
                  while [ ! -s '{file}' ]; do sleep 0.01; done",
                 file = daemon.pid_file.display()
@@ -890,7 +1012,10 @@ mod tests {
     #[test]
     fn a_listing_command_runs_on_windows() {
         // Spawned without the suspended start herdr's status commands get.
-        let read = read_listing(&["cmd".into(), "/C".into(), "echo {}".into()], TIMEOUT);
+        let read = read_listing(
+            &["cmd".into(), "/C".into(), "echo {\"version\": 1}".into()],
+            TIMEOUT,
+        );
         assert_eq!(read, Ok(ReeveListing::default()));
     }
 
@@ -921,7 +1046,7 @@ mod tests {
         let (_stop_tx, stop_rx) = mpsc::channel();
         let read = read_listing_until(
             &sh(&format!(
-                "ls '{}' > '{}'; echo '{{}}'",
+                "ls '{}' > '{}'; echo '{{\"version\": 1}}'",
                 runs.display(),
                 seen.display()
             )),
@@ -1095,10 +1220,14 @@ mod tests {
                 std::thread::sleep(POLL);
             }
         };
-        follow(&mut watch, Some(&spec(DRAFT)), &event_tx);
+        follow(&mut watch, Some(&spec(LISTING)), &event_tx);
         let (first, read) = recv(&mut event_rx);
         assert_eq!(read.unwrap().errands.len(), 1);
-        assert!(follow(&mut watch, Some(&spec("{}")), &event_tx));
+        assert!(follow(
+            &mut watch,
+            Some(&spec(r#"{"version": 1}"#)),
+            &event_tx
+        ));
         let (second, read) = recv(&mut event_rx);
         assert_ne!(first, second);
         assert_eq!(watch.as_ref().unwrap().generation(), second);
