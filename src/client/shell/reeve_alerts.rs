@@ -1,4 +1,4 @@
-//! hall: alerts on the reeve tree (plan step 4, decisions 19, 22, 35 and 62 to 64).
+//! hall: alerts on the reeve tree (plan step 4, decisions 19, 22, 35 and 62 to 65).
 //!
 //! Herdr's own notifications ring for a reeve's pane at a dialog (request) or ending its turn
 //! (done), and for a hand's pane at a dialog (request); herdr's done for a hand's pane is
