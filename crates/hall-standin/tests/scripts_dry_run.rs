@@ -153,10 +153,14 @@ fn check_command(c: &str, home: &Path) {
     );
     let hall = hall_bin().display().to_string();
     if c.ends_with(" server &") {
-        // The hall server starts without the starter's identity names.
+        // The hall server starts without the starter's identity names, and with
+        // the test home as REEVE_HOME for the hands a test reeve dispatches.
         assert_eq!(
             c,
-            format!("{CLEAN_ENV}{SERVER_DROP} {hall} --session {SESSION} server &")
+            format!(
+                "{CLEAN_ENV}{SERVER_DROP} REEVE_HOME={} {hall} --session {SESSION} server &",
+                home.display()
+            )
         );
     } else if c.split_whitespace().any(|w| w == hall) {
         let prefix = hall_prefix();

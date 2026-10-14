@@ -16,7 +16,9 @@ use serde_json::Value;
 
 /// Logs each call (and whether the HALL_* names hall reads leaked through) and
 /// answers like hall does for the calls the scripts make. `--session <s>
-/// server` logs the identity names it was started with (decision 48), marks
+/// server` logs the identity names it was started with (decision 48) and its
+/// REEVE_HOME, which every tab it opens holds (a hand a test reeve dispatches
+/// among them), marks
 /// the session running and exits, as a detached server would return control;
 /// `session stop` marks it stopped. `pane run` runs the line in a shell, with
 /// the HERDR_* and HALL_* names and REEVE_BACKEND hall sets into a pane, as a
@@ -35,6 +37,7 @@ next() { n=$(( $(cat "$dir/n" 2>/dev/null || echo 0) + 1 )); echo "$n" >"$dir/n"
 case "$*" in
   "--session hall-dev server")
     env | sed -nE 's/^((REEVE_HAND|REEVE_HALL_[A-Z_]*|CLAUDECODE|CLAUDE_[A-Z_]*|HERDR_[A-Z_]*)=.*)/\1/p' | sort >>"$dir/server-env.log"
+    printf '%s\n' "${REEVE_HOME-unset}" >>"$dir/server-reeve-home.log"
     [ -e "$dir/no-start" ] || touch "$dir/running"
     ;;
   "session list --json")
@@ -202,6 +205,9 @@ impl Rig {
         // As run from a live claude, itself a hand (decision 48): none of
         // this may reach the test hall server or a test claude.
         .env("REEVE_HAND", "starter-hand")
+        // A starter's own reeve home, the live one: the test hall server must
+        // carry the test home instead.
+        .env("REEVE_HOME", self.user.join(".reeve"))
         // Reeve's hall backend overrides, read before hall's own names: a
         // test reeve's dispatches would follow them to the live hall.
         .env("REEVE_HALL_SOCKET", "/live/hall.sock")
@@ -332,6 +338,13 @@ fn up_status_drive_down() {
     // The test hall server started with none of the starter's identity names
     // (decision 48).
     assert_eq!(rig.read_bin("server-env.log"), "");
+    // It carries the test home as REEVE_HOME, not the starter's: a hand a test
+    // reeve dispatches opens in a tab with the server's environment, from a
+    // launch line that names no REEVE_HOME (finding F1 of step5-shown-working).
+    assert_eq!(
+        rig.read_bin("server-reeve-home.log"),
+        format!("{}\n", rig.home.canonicalize().unwrap().display())
+    );
     // Each claude line, run as a pane's shell runs it, gave claude none of them
     // either, though the shell had them all: a test hand has its own errand id
     // as REEVE_HAND, a test reeve none; each has the test home's folders and
@@ -893,6 +906,12 @@ fn the_reeve_listing_starts_one_test_reeve_and_drives_a_hand_it_dispatched() {
     assert_eq!(count("workspace create "), 1, "{calls:?}");
     assert_eq!(count("tab create "), 0, "{calls:?}");
     assert_eq!(count("pane run "), 1, "{calls:?}");
+    // The hands the test reeve dispatches here open in tabs with the server's
+    // environment: it carries the test home as REEVE_HOME.
+    assert_eq!(
+        rig.read_bin("server-reeve-home.log"),
+        format!("{}\n", rig.home.canonicalize().unwrap().display())
+    );
     // The one test reeve's claude keeps hall's pane names: reeve's hall backend
     // reads them (decision 68).
     let claudes = rig.read_bin("claude.log");

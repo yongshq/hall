@@ -71,11 +71,16 @@ session_dir() {
 # start_session <name>: starts the hall server for that session, detached, and
 # waits until hall's session list shows it running. Leaves the list in SESSIONS.
 # The server runs without the STARTER_DROP names, so no pane or claude in it
-# inherits them from whoever ran up (decision 48).
+# inherits them from whoever ran up (decision 48), and with REEVE_HOME set to
+# the test reeve home: a hand a test reeve dispatches gets a tab whose
+# environment is the server's, and reeve's launch line names no REEVE_HOME, so
+# without it that hand's reeve hooks would write to the live ~/.reeve. Set in
+# every listing mode, since a test reeve can dispatch through reeve's hall
+# backend in either.
 start_session() {
   local s=$1 i dir
   check_session "$s"
-  detach "${HALL_CLEAN_ENV[@]}" "${SERVER_DROP[@]}" "$HALL_BIN" --session "$s" server
+  detach "${HALL_CLEAN_ENV[@]}" "${SERVER_DROP[@]}" REEVE_HOME="$HALL_DEV_HOME" "$HALL_BIN" --session "$s" server
   if [ "$DRY_RUN" = 1 ]; then
     hall_session_list SESSIONS
     return 0
@@ -278,7 +283,7 @@ cmd_up() {
 
   hall_session_list SESSIONS
   if session_running "$SESSIONS" "$HALL_DEV_SESSION" && [ "$DRY_RUN" = 0 ]; then
-    say "  hall session $HALL_DEV_SESSION is running"
+    say "  hall session $HALL_DEV_SESSION is running, kept as it is: a server up did not start may lack REEVE_HOME=$HALL_DEV_HOME for the hands a test reeve dispatches; down, then up, starts one that has it"
   else
     start_session "$HALL_DEV_SESSION"
   fi

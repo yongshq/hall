@@ -185,10 +185,11 @@ fn first_run_records_baseline_once() {
         "pane-graphics",
         "peers",
         "reeve-state",
+        "reeve-hall-dev",
     ] {
         assert!(line(&stdout, part).contains(": pass"), "{stdout}");
     }
-    assert_eq!(stdout.lines().count(), 6, "one line per part:\n{stdout}");
+    assert_eq!(stdout.lines().count(), 7, "one line per part:\n{stdout}");
     let b = rig.baseline();
     assert_eq!(
         entries(&b, "config"),
@@ -652,4 +653,127 @@ fn reeve_state_naming_the_test_setup_fails() {
     touch(&state.join("errands/bertil-probe/meta"));
     let (stdout, _) = fails(&rig.run(&[]));
     assert!(line(&stdout, "reeve-state").contains("FAIL"), "{stdout}");
+}
+
+#[test]
+fn reeve_state_naming_hall_dev_fails_until_accepted() {
+    let rig = Rig::new("hall-dev");
+    let state = rig.user.join(".reeve/state");
+    // Near misses: the live herdr's pane key, hall-dev inside longer words, and
+    // the test home, which is reeve-state's to judge.
+    std::fs::create_dir_all(state.join("sessions/s1")).unwrap();
+    std::fs::write(
+        state.join("sessions/s1/pane"),
+        "wS:p1@/u/.config/herdr/herdr.sock\nfix-hall-dev-docs hall-devx\n",
+    )
+    .unwrap();
+    let stdout = passes(&rig.run(&[]));
+    assert!(line(&stdout, "reeve-hall-dev").contains("pass"), "{stdout}");
+    std::fs::write(state.join("sessions/s1/home"), "/u/.reeve-hall-dev\n").unwrap();
+    let (stdout, _) = fails(&rig.run(&[]));
+    assert!(line(&stdout, "reeve-state").contains("FAIL"), "{stdout}");
+    assert!(line(&stdout, "reeve-hall-dev").contains("pass"), "{stdout}");
+    std::fs::remove_file(state.join("sessions/s1/home")).unwrap();
+
+    // A test hand's pane key, written by a reeve hook that ran without the
+    // test home (finding F1 of step5-shown-working).
+    let pane = state.join("sessions/s2/pane");
+    std::fs::create_dir_all(pane.parent().unwrap()).unwrap();
+    std::fs::write(
+        &pane,
+        "w1:p2@/Users/x/.config/hall-dev/sessions/hall-dev/herdr.sock\n",
+    )
+    .unwrap();
+    let (stdout, stderr) = fails(&rig.run(&[]));
+    assert!(
+        line(&stdout, "reeve-hall-dev").contains("FAIL 1 new files name hall-dev"),
+        "{stdout}"
+    );
+    assert!(line(&stdout, "reeve-state").contains("pass"), "{stdout}");
+    assert!(
+        stderr.contains("reeve-hall-dev: new sessions/s2/pane names hall-dev (born 20"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("accept reeve-hall-dev <file>"), "{stderr}");
+
+    // Only a file that names hall-dev now, not yet in the baseline, with who
+    // and why.
+    let accept = |file: &str| {
+        rig.run(&[
+            "accept",
+            "reeve-hall-dev",
+            file,
+            "--by",
+            "liege",
+            "--reason",
+            "seen",
+        ])
+    };
+    assert_eq!(accept("sessions/s1/pane").status.code(), Some(1));
+    assert_eq!(accept("sessions/none").status.code(), Some(1));
+    assert_eq!(
+        rig.run(&["accept", "reeve-hall-dev", "sessions/s2/pane"])
+            .status
+            .code(),
+        Some(2)
+    );
+    passes(&accept("sessions/s2/pane"));
+    assert_eq!(accept("sessions/s2/pane").status.code(), Some(1));
+    let b = rig.baseline();
+    assert_eq!(
+        b["reeve-hall-dev"]["entries"],
+        serde_json::json!(["sessions/s2/pane"])
+    );
+    let accepted = b["accepted"].as_array().unwrap();
+    assert_eq!(accepted.len(), 1);
+    assert_eq!(accepted[0]["place"], "reeve-hall-dev");
+    assert_eq!(accepted[0]["entry"], "sessions/s2/pane");
+    passes(&rig.run(&[]));
+
+    // A file whose own path names the test hall session is new too.
+    touch(&state.join("groups/hall-dev/w1"));
+    let (stdout, stderr) = fails(&rig.run(&[]));
+    assert!(
+        line(&stdout, "reeve-hall-dev").contains("FAIL 1 new files"),
+        "{stdout}"
+    );
+    assert!(stderr.contains("new groups/hall-dev/w1"), "{stderr}");
+}
+
+#[test]
+fn reeve_hall_dev_baseline() {
+    // The first run records the files that name hall-dev then, as it records
+    // the places.
+    let rig = Rig::new("hall-dev-first");
+    let state = rig.user.join(".reeve/state");
+    std::fs::create_dir_all(&state).unwrap();
+    std::fs::write(state.join("old"), "@/u/.config/hall-dev/x.sock\n").unwrap();
+    passes(&rig.run(&[]));
+    assert_eq!(
+        rig.baseline()["reeve-hall-dev"]["entries"],
+        serde_json::json!(["old"])
+    );
+
+    // A baseline recorded before the part existed has no entries for it: every
+    // file naming hall-dev is new, and the run does not write the baseline.
+    let mut b = rig.baseline();
+    b.as_object_mut().unwrap().remove("reeve-hall-dev");
+    std::fs::write(rig.baseline_path(), serde_json::to_vec_pretty(&b).unwrap()).unwrap();
+    let before = std::fs::read(rig.baseline_path()).unwrap();
+    let (stdout, _) = fails(&rig.run(&[]));
+    assert!(
+        line(&stdout, "reeve-hall-dev").contains("FAIL 1 new files"),
+        "{stdout}"
+    );
+    assert_eq!(std::fs::read(rig.baseline_path()).unwrap(), before);
+    passes(&rig.run(&[
+        "accept",
+        "reeve-hall-dev",
+        "old",
+        "--by",
+        "liege",
+        "--reason",
+        "before the part",
+    ]));
+    passes(&rig.run(&[]));
 }

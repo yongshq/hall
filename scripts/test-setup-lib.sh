@@ -15,6 +15,10 @@
 #   can find the live herdr's config, state, sessions or sockets; and with
 #   HALL_SOCKET_PATH=<the hall session's socket>, so a hall call from a test
 #   pane still reaches that session;
+# - the hall server up starts carries REEVE_HOME=<test home>, so a hand a test
+#   reeve dispatches, whose tab has the server's environment and whose launch
+#   line is reeve's, writes under the test home too (it has no XDG guard: see
+#   docs/test-setup.md, What the guard costs);
 # - nothing about a test claude's identity is inherited from whoever ran the
 #   script (decision 48): the hall server up starts drops the names in
 #   STARTER_DROP, every claude line drops CLAUDE_DROP's names in the pane's own

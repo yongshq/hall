@@ -44,6 +44,16 @@ part passes, 1 when any fails, 2 on a usage error:
       digits, `_` or `-`), so `ansel` does not match `anselm` or `ansel-fix`,
       and `ansel-fix` is its own name.
 
+  reeve-hall-dev
+      No new file under ~/.reeve/state (read only) names the debug hall's
+      folder `hall-dev` or the test hall session from scripts/test-setup.conf,
+      in its contents or in its own path, as a whole word as above: a pane key
+      `<pane>@<home>/.config/hall-dev/sessions/hall-dev/...` written by a reeve
+      hook running in a test pane without the test home. Judged against the
+      baseline's `reeve-hall-dev` entries, files under ~/.reeve/state: a file
+      not in it fails until accepted. A baseline recorded before this part
+      existed has none.
+
 The check never calls herdr: it reads the filesystem and the process table only.
 
 The baseline is ~/.local/state/hall-live-check/baseline.json, written on the
@@ -56,7 +66,8 @@ that.
       Adds one entry that is on disk now and not in the baseline to the
       baseline, recording who accepted it, why, and when. The entry `.` is the
       place's folder itself: it accepts a folder that was absent in the
-      baseline and is present now.
+      baseline and is present now. The place `reeve-hall-dev` takes a file
+      under ~/.reeve/state, relative to it, that names hall-dev now.
 
 HALL_LIVE_CHECK_VAR_TMP replaces /var/tmp as the pane-graphics folder's parent;
 the tests use it. Every line names the folder it read.
@@ -71,6 +82,12 @@ import sys
 import time
 
 PLACES = ("config", "state", "worktrees", "pane-graphics")
+# The baseline key, and accept's place, of the files under ~/.reeve/state that
+# name hall-dev.
+HALL_DEV_PART = "reeve-hall-dev"
+# The debug hall's folder name (src/config/io.rs app_dir_name): in every hall-dev
+# socket path, so in every pane key a reeve hook writes for a hall-dev pane.
+DEBUG_HALL_DIR = "hall-dev"
 REPO = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 EXIT_USAGE = 2
 
@@ -327,59 +344,88 @@ def check_peers():
 
 
 def test_names():
-    """The test home and the roster's reeve and errand names, from
-    scripts/test-setup.conf (sourced by bash, as the test setup does)."""
+    """The test home, the test hall session and the roster's reeve and errand
+    names, from scripts/test-setup.conf (sourced by bash, as the test setup
+    does)."""
     conf = os.path.join(REPO, "scripts/test-setup.conf")
-    script = 'source "$1" && printf "%s\\n" "$HALL_DEV_HOME" && printf "%s\\n" "${HALL_DEV_ROSTER[@]}"'
+    script = (
+        'source "$1" && printf "%s\\n" "$HALL_DEV_HOME" "$HALL_DEV_SESSION"'
+        ' && printf "%s\\n" "${HALL_DEV_ROSTER[@]}"'
+    )
     out = subprocess.run(["bash", "-c", script, "bash", conf], capture_output=True, text=True)
     if out.returncode != 0:
         raise RuntimeError(f"reading {conf}: {out.stderr.strip()}")
     lines = out.stdout.splitlines()
     names = []
-    for line in lines[1:]:
+    for line in lines[2:]:
         f = line.split()
         if len(f) >= 2 and f[0] in ("reeve", "errand"):
             names.append(f[1])
-    return lines[0], names
+    return lines[0], lines[1], names
 
 
-def check_reeve_state():
+def whole_words(words):
+    """A pattern matching any of words, not inside a longer run of letters,
+    digits, `_` or `-`; with no words, one that matches nothing."""
+    if not words:
+        return r"(?!)"
+    return r"(?<![A-Za-z0-9_-])(?:" + "|".join(re.escape(w) for w in words) + r")(?![A-Za-z0-9_-])"
+
+
+def scan_reeve_state():
+    """Reads every regular file under ~/.reeve/state once, for reeve-state and
+    reeve-hall-dev. Raises RuntimeError when the test names do not read."""
     root = os.path.join(home(), ".reeve/state")
-    try:
-        test_home, names = test_names()
-    except RuntimeError as e:
-        print("reeve-state: FAIL could not read the test names")
-        warn(f"reeve-state: {e}")
-        return False
+    test_home, session, names = test_names()
     home_re = re.escape(os.path.basename(test_home.rstrip("/")))
-    pattern = re.compile(
-        (rf"/{home_re}(?![A-Za-z0-9_.-])|(?<![A-Za-z0-9_-])(?:"
-         + "|".join(re.escape(n) for n in names)
-         + r")(?![A-Za-z0-9_-])").encode()
-    )
-    if not os.path.isdir(root):
-        print(f"reeve-state: pass {root} (absent)")
-        return True
-    hits, unread, files = [], [], 0
+    test_pattern = re.compile((rf"/{home_re}(?![A-Za-z0-9_.-])|" + whole_words(names)).encode())
+    hall_dev = sorted({DEBUG_HALL_DIR, session} - {""})
+    hall_dev_pattern = re.compile(whole_words(hall_dev).encode())
+    scan = {
+        "root": root,
+        "home": test_home,
+        "names": names,
+        "hall_dev": hall_dev,
+        "exists": os.path.isdir(root),
+        "files": 0,
+        "hits": [],
+        "hall_dev_hits": [],
+        "unread": [],
+    }
+    if not scan["exists"]:
+        return scan
     for dirpath, _dirs, filenames in os.walk(root):
         for n in filenames:
             p = os.path.join(dirpath, n)
             # Regular files only: never follow a link, never open a fifo or socket.
             if os.path.islink(p) or not os.path.isfile(p):
                 continue
-            files += 1
+            scan["files"] += 1
             try:
                 with open(p, "rb") as f:
                     data = f.read()
             except FileNotFoundError:
                 continue
             except OSError as e:
-                unread.append((p, e.strerror))
+                scan["unread"].append((p, e.strerror))
                 continue
             # The file's own path under the state folder counts as naming too.
-            m = pattern.search(os.path.relpath(p, root).encode()) or pattern.search(data)
+            rel = os.path.relpath(p, root)
+            m = test_pattern.search(rel.encode()) or test_pattern.search(data)
             if m:
-                hits.append((p, m.group(0).decode(errors="replace")))
+                scan["hits"].append((p, m.group(0).decode(errors="replace")))
+            m = hall_dev_pattern.search(rel.encode()) or hall_dev_pattern.search(data)
+            if m:
+                scan["hall_dev_hits"].append((rel, m.group(0).decode(errors="replace")))
+    return scan
+
+
+def check_reeve_state(scan):
+    root = scan["root"]
+    if not scan["exists"]:
+        print(f"reeve-state: pass {root} (absent)")
+        return True
+    hits, unread = scan["hits"], scan["unread"]
     if hits or unread:
         print(f"reeve-state: FAIL {len(hits)} files name the test setup, {len(unread)} unreadable, in {root}")
         for p, what in hits:
@@ -387,21 +433,103 @@ def check_reeve_state():
         for p, why in unread:
             warn(f"reeve-state: could not read {p}: {why}")
         return False
-    print(f"reeve-state: pass {root} ({files} files, none name {test_home} or {', '.join(names)})")
+    print(f"reeve-state: pass {root} ({scan['files']} files, none name {scan['home']} or {', '.join(scan['names'])})")
+    return True
+
+
+def hall_dev_known(base):
+    return base.get(HALL_DEV_PART, {}).get("entries", [])
+
+
+def check_reeve_hall_dev(base, scan):
+    """New files under ~/.reeve/state naming hall-dev fail until accepted. An
+    unreadable file is reeve-state's failure, not counted again here."""
+    root, words = scan["root"], ", ".join(scan["hall_dev"])
+    if not scan["exists"]:
+        print(f"{HALL_DEV_PART}: pass {root} (absent)")
+        return True
+    known = set(hall_dev_known(base))
+    new = [(rel, what) for rel, what in scan["hall_dev_hits"] if rel not in known]
+    if new:
+        print(f"{HALL_DEV_PART}: FAIL {len(new)} new files name {words}, in {root}")
+        for rel, what in new:
+            warn(f"{HALL_DEV_PART}: new {rel} names {what} ({birth(os.path.join(root, rel))})")
+        warn(
+            f"{HALL_DEV_PART}: judge each; accept with: scripts/live-check accept {HALL_DEV_PART} <file> --by <who> --reason <why>"
+        )
+        return False
+    print(f"{HALL_DEV_PART}: pass {root} ({scan['files']} files, none new name {words})")
     return True
 
 
 def run_check():
     base = load_baseline()
     snap = snapshot()
+    try:
+        scan = scan_reeve_state()
+    except RuntimeError as e:
+        scan = None
+        scan_error = e
     if base is None:
         base = {"version": 1, "recorded": now(), "places": snap, "accepted": []}
+        if scan is not None:
+            base[HALL_DEV_PART] = {"entries": sorted(rel for rel, _ in scan["hall_dev_hits"])}
         save_baseline(base)
         warn(f"baseline recorded at {baseline_path()} (first run)")
     ok = check_places(base, snap)
     ok = check_peers() and ok
-    ok = check_reeve_state() and ok
+    if scan is None:
+        for part in ("reeve-state", HALL_DEV_PART):
+            print(f"{part}: FAIL could not read the test names")
+            warn(f"{part}: {scan_error}")
+        return 1
+    ok = check_reeve_state(scan) and ok
+    ok = check_reeve_hall_dev(base, scan) and ok
     return 0 if ok else 1
+
+
+def accept_place(base, place, entry):
+    """Adds entry of a live herdr place to base; False, having said why, when it
+    cannot be accepted."""
+    snap = snapshot()[place]
+    if entry == ".":
+        if base["places"][place]["exists"]:
+            warn(f"{place}: {snap['path']} was present in the baseline; nothing to accept")
+            return False
+        if not snap["exists"]:
+            warn(f"{place}: {snap['path']} is absent now; only a folder on disk can be accepted")
+            return False
+        base["places"][place]["exists"] = True
+    elif entry in base["places"][place]["entries"]:
+        warn(f"{place}: {entry} is already in the baseline")
+        return False
+    elif entry not in snap["entries"]:
+        warn(f"{place}: {entry} is not in {snap['path']} now; only an entry on disk can be accepted")
+        return False
+    else:
+        base["places"][place]["entries"] = sorted(base["places"][place]["entries"] + [entry])
+    return True
+
+
+def accept_hall_dev(base, entry):
+    """Adds a file under ~/.reeve/state that names hall-dev now to base; False,
+    having said why, when it cannot be accepted."""
+    try:
+        scan = scan_reeve_state()
+    except RuntimeError as e:
+        warn(f"{HALL_DEV_PART}: {e}")
+        return False
+    if entry in hall_dev_known(base):
+        warn(f"{HALL_DEV_PART}: {entry} is already in the baseline")
+        return False
+    if entry not in {rel for rel, _ in scan["hall_dev_hits"]}:
+        warn(
+            f"{HALL_DEV_PART}: {entry} is not a file under {scan['root']} naming"
+            f" {', '.join(scan['hall_dev'])} now; only such a file can be accepted"
+        )
+        return False
+    base[HALL_DEV_PART] = {"entries": sorted(hall_dev_known(base) + [entry])}
+    return True
 
 
 def accept(args):
@@ -426,30 +554,16 @@ def accept(args):
         warn(usage)
         return EXIT_USAGE
     place, entry = pos
-    if place not in PLACES:
-        warn(f"unknown place {place}: one of {', '.join(PLACES)}")
+    if place not in PLACES and place != HALL_DEV_PART:
+        warn(f"unknown place {place}: one of {', '.join(PLACES + (HALL_DEV_PART,))}")
         return EXIT_USAGE
     base = load_baseline()
     if base is None:
         warn(f"no baseline at {baseline_path()}: run scripts/live-check first")
         return 1
-    snap = snapshot()[place]
-    if entry == ".":
-        if base["places"][place]["exists"]:
-            warn(f"{place}: {snap['path']} was present in the baseline; nothing to accept")
-            return 1
-        if not snap["exists"]:
-            warn(f"{place}: {snap['path']} is absent now; only a folder on disk can be accepted")
-            return 1
-        base["places"][place]["exists"] = True
-    elif entry in base["places"][place]["entries"]:
-        warn(f"{place}: {entry} is already in the baseline")
+    added = accept_hall_dev(base, entry) if place == HALL_DEV_PART else accept_place(base, place, entry)
+    if not added:
         return 1
-    elif entry not in snap["entries"]:
-        warn(f"{place}: {entry} is not in {snap['path']} now; only an entry on disk can be accepted")
-        return 1
-    else:
-        base["places"][place]["entries"] = sorted(base["places"][place]["entries"] + [entry])
     record = {"place": place, "entry": entry, "by": by, "reason": reason, "at": now()}
     base["accepted"].append(record)
     save_baseline(base)
