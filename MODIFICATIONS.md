@@ -156,3 +156,5 @@ Hall is a modified version of herdr v0.9.0 (commit b99002ac99b09e00b4ca692436cb1
 | `src/app/api/plugins/panes.rs` | Plugin panes get the same three names, protected from the plugin's own env. |
 | `src/app/api/plugins/mod.rs` | Tests: a plugin pane's env cannot override the three names; a plugin command gets them. |
 | `src/client/shell/notification_policy.rs` | Every herdr request this client rings for is remembered while its pane reads blocked, the listing naming the pane or not, so a hand's later `waiting` on that dialog does not ring it again (window B); `COMPLETION_EVIDENCE_GRACE` shared with the alerts. |
+| `src/config/model.rs` | The `[reeve] listing_command` comment names `docs/listing.md`, the settled listing doc. |
+| `README.md` | Status line for step 5, hall's side. |

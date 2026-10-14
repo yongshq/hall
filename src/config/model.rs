@@ -1039,7 +1039,7 @@ impl Default for RemoteConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(default)]
 pub struct ReeveConfig {
-    /// The command that prints reeve's listing as JSON (docs/listing-draft.md), program first.
+    /// The command that prints reeve's listing as JSON (docs/listing.md), program first.
     /// Empty leaves the sidebar as herdr draws it. Default: empty.
     pub listing_command: Vec<String>,
     /// How often the client runs the listing command, in milliseconds. Default: 1000.

@@ -3,7 +3,7 @@ name = "hall-standin"
 version = "0.1.0"
 edition.workspace = true
 publish.workspace = true
-description = "Stand-in for reeve's listing: serves the draft listing hall needs from a test reeve home."
+description = "Stand-in for reeve's listing: serves the listing (version 1) hall reads, from a test reeve home."
 
 [dependencies]
 libc = "0.2"

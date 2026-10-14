@@ -5,7 +5,7 @@ Hall is built and tested only against its test setup, never the live one (ADR [0
 - One hall session, `hall-dev`, run by the debug hall binary (`target/debug/hall`), whose folders are `~/.config/hall-dev` and `~/.local/state/hall-dev`. The session sits at `~/.config/hall-dev/sessions/hall-dev/`.
 - A test reeve home, `~/.reeve-hall-dev`.
 - Test reeves and test hands: interactive `claude` sessions on `claude-haiku-4-5-20251001`, one per roster line, each started in `<home>/work/<name>`. Each test reeve sits in a workspace of its own; each test hand is a tab in its test reeve's workspace (reeve = workspace, hand = tab, decision 34), placed by the scripts, since test reeves do not dispatch through hall before go-live (decision 36).
-- The stand-in, serving the listing (version 1) from `<home>/standin/world.toml` ([listing-draft.md](listing-draft.md)). Its `herdr_session` field holds the hall session's name, listed as `session.name` with `backend` `hall`. Or, with `--listing reeve`, reeve's own listing command on the test home, one test reeve and no test hand placed (Reeve's own listing, below).
+- The stand-in, serving the listing (version 1) from `<home>/standin/world.toml` ([listing.md](listing.md)). Its `herdr_session` field holds the hall session's name, listed as `session.name` with `backend` `hall`. Or, with `--listing reeve`, reeve's own listing command on the test home, one test reeve and no test hand placed (Reeve's own listing, below).
 
 ## Inputs
 
@@ -77,7 +77,7 @@ scripts/test-drive --listing reeve <hand errand id> dialog
 scripts/test-setup --listing reeve down --delete
 ```
 
-`up` then writes `<home>/standin/hall.toml` with `listing_command = ["<HALL_DEV_REEVE_LISTING>", "--home", "<home>"]`, reeve's own listing of the test home (version 1, [listing-draft.md](listing-draft.md)), instead of the stand-in's, and starts only the test reeve in `HALL_DEV_REEVE_ROSTER`, with no test hand placed: the test reeve dispatches its hands itself, through reeve's hall backend, as tabs in its workspace in `hall-dev`, and records them in the test home. The world file still records the test reeve's pane, so a second `up`, `status`, `test-drive` and `down` find it as before; nothing reads it as a listing. `up` refuses, before any hall call, when the listing command is not there yet: it comes with reeve's hall backend (errand step5-reeve-bridge), and until it lands on reeve's main only `--listing standin` runs end to end. `up` and `status` print reeve's listing. `test-drive` finds a hand that is not on the roster by its errand id in reeve's listing, at the pane it places in `hall-dev` with `backend` `hall`. Hand states are then reeve's, set by the hands and the test reeve's watch, not by `hall-standin set`.
+`up` then writes `<home>/standin/hall.toml` with `listing_command = ["<HALL_DEV_REEVE_LISTING>", "--home", "<home>"]`, reeve's own listing of the test home (version 1, [listing.md](listing.md)), instead of the stand-in's, and starts only the test reeve in `HALL_DEV_REEVE_ROSTER`, with no test hand placed: the test reeve dispatches its hands itself, through reeve's hall backend, as tabs in its workspace in `hall-dev`, and records them in the test home. The world file still records the test reeve's pane, so a second `up`, `status`, `test-drive` and `down` find it as before; nothing reads it as a listing. `up` refuses, before any hall call, when the listing command is not there yet: it comes with reeve's hall backend (errand step5-reeve-bridge), and until it lands on reeve's main only `--listing standin` runs end to end. `up` and `status` print reeve's listing. `test-drive` finds a hand that is not on the roster by its errand id in reeve's listing, at the pane it places in `hall-dev` with `backend` `hall`. Hand states are then reeve's, set by the hands and the test reeve's watch, not by `hall-standin set`.
 
 The step 5 check on `hall-dev` (design section 5, run by its review): with `scripts/live-check` passing first, `up` in this mode; in the test reeve, `reeve-backend resolve` prints `hall`, `reeve-doctor` lists hall, `reeve-name`, then a scout errand that asks one `needs-decision` question, with the test reeve watching. Set shorter `hand-stale` and `hand-wedged` (`<home>/config/hand-stale`, a number of seconds) to see `idle` and `wedged` soon; leave the 90 second `attn_dwell`. Then the tree, badge and alerts read from reeve's listing (Alerts, below), `down --delete`, and `scripts/live-check` again.
 
@@ -157,7 +157,7 @@ Stops `hall-dev` if it is running (`hall session stop hall-dev --json`, which re
 
 ## Setting states
 
-Any hand state, question or flag is set by editing `<home>/standin/world.toml`, or with `hall-standin set` (see [listing-draft.md](listing-draft.md)):
+Any hand state, question or flag is set by editing `<home>/standin/world.toml`, or with `hall-standin set` (see [listing.md](listing.md)):
 
 ```sh
 target/debug/hall-standin --home ~/.reeve-hall-dev set ansel-fix state=blocked

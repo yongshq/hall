@@ -95,7 +95,7 @@ seed_world() {
   text="# hall test setup world file: what the stand-in serves as the listing (version 1),
 # and where the scripts record each test claude's pane (with the reeve listing,
 # only that). Seeded by scripts/test-setup up from the roster. Edit freely, or use
-# hall-standin --home <home> set <name> <key>=<value>. Format: docs/listing-draft.md.
+# hall-standin --home <home> set <name> <key>=<value>. Format: docs/listing.md.
 # herdr_session holds the hall session's name, listed as session.name with backend hall.
 "
   for line in "${HALL_DEV_ROSTER[@]}"; do

@@ -1,7 +1,7 @@
 //! The world file: a declarative description of the test setup's reeves and
 //! errands, kept at `<test reeve home>/standin/world.toml`. Editing it is how a
 //! hand state, a question or a flag is set (the earlier plan's step 1; see
-//! docs/test-setup.md). See docs/listing-draft.md.
+//! docs/test-setup.md). See docs/listing.md.
 
 use std::collections::HashSet;
 use std::fmt;

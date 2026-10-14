@@ -36,7 +36,7 @@ env $(env | sed -nE 's/^((HERDR|HALL)_[A-Z_]*)=.*/-u \1/p') cargo test --workspa
 
 Use `sed -E` as written: macOS sed has no `\|` in a basic expression, so the `\(A\|B\)` form matches nothing and unsets nothing.
 
-Hall reads `HALL_SOCKET_PATH`, `HALL_CLIENT_SOCKET_PATH`, `HALL_SESSION`, `HALL_CONFIG_PATH`, `HALL_ENV` and `HALL_PANE_ID`. Into its panes it sets `HALL_ENV=1`, `HALL_PANE_ID`, `HALL_TAB_ID` and `HALL_WORKSPACE_ID` (decision 44b), and still herdr's names (`HERDR_SOCKET_PATH`, `HERDR_PANE_ID`, `HERDR_ENV` and the rest) until step 5 settles those (plan, "Environment names set into panes").
+Hall reads `HALL_SOCKET_PATH`, `HALL_CLIENT_SOCKET_PATH`, `HALL_SESSION`, `HALL_CONFIG_PATH`, `HALL_ENV` and `HALL_PANE_ID`. Into its panes it sets `HALL_ENV=1`, `HALL_PANE_ID`, `HALL_TAB_ID` and `HALL_WORKSPACE_ID` (decision 44b), `HALL_SOCKET_PATH`, `HALL_BIN_PATH` and `REEVE_BACKEND=hall` (decision 68), and keeps herdr's names (`HERDR_SOCKET_PATH`, `HERDR_PANE_ID`, `HERDR_ENV` and the rest; plan, "Environment names set into panes"). Unsetting every `HALL_*` name, as above, covers the new ones; `scripts/test-setup` also drops `REEVE_BACKEND` from its hall calls.
 
 ## Toolchain
 

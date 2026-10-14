@@ -1,6 +1,6 @@
 //! The listing, version 1: the format reeve's own `bin/reeve-listing` prints
 //! (decision 68), here from a world file so hall's tests and the test setup can
-//! set any state on demand. Shape: docs/listing-draft.md.
+//! set any state on demand. Shape: docs/listing.md.
 
 use serde::Serialize;
 

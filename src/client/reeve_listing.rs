@@ -1,10 +1,10 @@
 //! hall: reeve's listing, read by the client for the reeve tree (plan step 3).
 //!
-//! The listing is version 1 of the format in docs/listing-draft.md: every reeve and every
-//! errand in flight, with where each one sits. Hall never reads status files (ADR 0002); it runs the command the
-//! config names (`[reeve] listing_command`, decision 49) and reads its JSON, killing a run that
-//! outlasts `[reeve] listing_timeout_ms` (decision 56), and keeps a record of each run so the
-//! next client kills a run that a killed client left behind (decision 58).
+//! The listing is version 1, the format in docs/listing.md: every reeve and every errand in
+//! flight, with where each one sits. Hall never reads status files (ADR 0002); it runs the
+//! command the config names (`[reeve] listing_command`, decision 49) and reads its JSON, killing
+//! a run that outlasts `[reeve] listing_timeout_ms` (decision 56), and keeps a record of each run
+//! so the next client kills a run that a killed client left behind (decision 58).
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
