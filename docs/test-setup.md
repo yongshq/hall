@@ -147,7 +147,7 @@ Attached with the client config, hall alerts on the reeve tree (plan step 4, dec
 - With `[ui.toast] delay_seconds = 0` a dialog's sound and mark wait for the client to read the pane blocked, a few tens of milliseconds, so the mark is not lost.
 - A mark clears when the reeve's or the hand's pane is shown (enter, a click on its row, or the focus moving onto it), or when its trigger clears: the reeve working again, the dialog gone, the hand no longer waiting on the liege.
 - `[ui.sound] enabled = false` in the client config mutes every alert's sound and a reload (ctrl+b shift+r) applies it; the marks still show. `request_path`, `done_path` and `path` change the sounds.
-- A sound cannot be heard in a test run: start the client with `HERDR_LOG=hall=info` and each sound asked for is logged in `~/.config/hall-dev/sessions/hall-dev/herdr-client.log` as `event="sound.play"` with `played=true` or `false` (muted), beside an `event="reeve.alert"` line for each alert raised.
+- A sound cannot be heard in a test run: prefix the line `up` prints (Up, above) with `HERDR_LOG=hall=info` and each sound asked for is logged in `~/.config/hall-dev/sessions/hall-dev/herdr-client.log` as `event="sound.play"` with `played=true` or `false` (muted), beside an `event="reeve.alert"` line for each alert raised.
 
 ## Down
 
