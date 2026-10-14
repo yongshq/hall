@@ -8,9 +8,11 @@ use tracing_subscriber::EnvFilter;
 
 const DEFAULT_MAX_LOG_BYTES: u64 = 5 * 1024 * 1024;
 const DEFAULT_RETAINED_LOG_FILES: usize = 0;
-/// The filter when `HERDR_LOG` is unset: herdr's own target at info, and hall's at warn, so a
-/// warn such as a dropped reeve listing entry is written without hall's info lines.
-const DEFAULT_LOG_FILTER: &str = "herdr=info,hall=warn";
+/// The filter when `HERDR_LOG` is unset: hall's own target at warn, so a warn such as a dropped
+/// reeve listing entry is written and info lines are not. The package is `hall`, so every target
+/// in it, herdr's modules included, is `hall::...`; herdr's own default, `herdr=info`, would match
+/// none of them.
+const DEFAULT_LOG_FILTER: &str = "hall=warn";
 
 pub(crate) fn init_file_logging(file_name: &str) {
     let Ok(make_writer) = RotatingFileMakeWriter::new(
@@ -600,13 +602,26 @@ mod tests {
         tracing::subscriber::with_default(subscriber, || {
             tracing::warn!(target: "hall::client::reeve_listing", "hall warn line");
             tracing::info!(target: "hall::client::reeve_listing", "hall info line");
-            tracing::info!(target: "herdr::app", "herdr info line");
+            // A module that came from herdr logs under this crate's name, as this one does.
+            tracing::warn!("herdr-origin warn line");
+            tracing::info!("herdr-origin info line");
         });
 
         let written = String::from_utf8(buffer.0.lock().unwrap().clone()).unwrap();
         assert!(written.contains("hall warn line"), "{written}");
         assert!(!written.contains("hall info line"), "{written}");
-        assert!(written.contains("herdr info line"), "{written}");
+        assert!(written.contains("herdr-origin warn line"), "{written}");
+        assert!(!written.contains("herdr-origin info line"), "{written}");
+    }
+
+    #[test]
+    fn default_filter_names_only_this_crates_target() {
+        // A directive for any other target matches no log line here.
+        let krate = module_path!().split("::").next().unwrap();
+        for directive in DEFAULT_LOG_FILTER.split(',') {
+            let target = directive.split('=').next().unwrap();
+            assert_eq!(target.split("::").next().unwrap(), krate, "{directive}");
+        }
     }
 
     #[test]

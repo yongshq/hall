@@ -159,5 +159,5 @@ Hall is a modified version of herdr v0.9.0 (commit b99002ac99b09e00b4ca692436cb1
 | `src/config/model.rs` | The `[reeve] listing_command` comment names `docs/listing.md`, the settled listing doc. |
 | `src/app/custom_commands.rs` | Shell custom commands and tab bar status commands (`custom_command_env`) get the same three names; test. |
 | `src/cli/plugin.rs` | Plugin builds also scrub `HALL_BIN_PATH` and `REEVE_BACKEND`; test. |
-| `src/logging.rs` | Default log filter `herdr=info,hall=warn`, so hall's warns (a dropped listing entry) are written by default; test. |
+| `src/logging.rs` | Default log filter `hall=warn` (herdr's `herdr=info` matches no target in the `hall` crate), so hall's warns (a dropped listing entry) are written by default and no info line is; tests. |
 | `README.md` | Status line for step 5, hall's side. |
