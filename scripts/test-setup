@@ -99,18 +99,26 @@ seed_world() {
 # herdr_session holds the hall session's name, listed as session.name with backend hall.
 "
   for line in "${HALL_DEV_ROSTER[@]}"; do
-    roster_read "$line"
-    case $R_KIND in
-      reeve)
-        text+="
+    world_block "$line"
+    text+=$WORLD_BLOCK
+  done
+  write_file "$WORLD" "$text"
+}
+
+# world_block <roster line>: sets WORLD_BLOCK to that line's entry in the world file.
+world_block() {
+  roster_read "$1"
+  case $R_KIND in
+    reeve)
+      WORLD_BLOCK="
 [[reeve]]
 name = \"$R_NAME\"
 herdr_session = \"$R_SESSION\"
 live = true
 "
-        ;;
-      errand)
-        text+="
+      ;;
+    errand)
+      WORLD_BLOCK="
 [[errand]]
 id = \"$R_NAME\"
 office = \"$R_OFFICE\"
@@ -122,10 +130,36 @@ wedged = false
 in_flight = true
 herdr_session = \"$R_SESSION\"
 "
-        ;;
-    esac
+      ;;
+  esac
+}
+
+# add_to_world: adds to an existing world file each roster line it does not name
+# yet, keeping the rest as it is, so a home first brought up with one roster
+# (the reeve listing's one test reeve) comes up with another.
+add_to_world() {
+  local text line added=""
+  # A world file the stand-in cannot read is left alone: has would name nothing
+  # in it, and every roster line would be added twice.
+  if ! "$HALL_STANDIN" --home "$HALL_DEV_HOME" listing >/dev/null 2>&1; then
+    say "  world file $WORLD exists and does not read, kept as it is"
+    return 0
+  fi
+  text=$(<"$WORLD")
+  for line in "${HALL_DEV_ROSTER[@]}"; do
+    roster_read "$line"
+    "$HALL_STANDIN" --home "$HALL_DEV_HOME" has "$R_NAME" 2>/dev/null && continue
+    world_block "$line"
+    text+=$WORLD_BLOCK
+    added+=" $R_NAME"
   done
-  write_file "$WORLD" "$text"
+  if [ -n "$added" ]; then
+    say "  world file $WORLD exists, kept as it is but for the roster lines it lacked:$added"
+    write_file "$WORLD" "$text
+"
+  else
+    say "  world file $WORLD exists, kept as it is"
+  fi
 }
 
 # write_client_config: the hall client config naming LISTING_CMD, the stand-in's
@@ -263,7 +297,7 @@ cmd_up() {
   if [ "$DRY_RUN" = 1 ] || [ ! -e "$WORLD" ]; then
     seed_world
   else
-    say "  world file $WORLD exists, kept as it is"
+    add_to_world
   fi
   write_client_config
 

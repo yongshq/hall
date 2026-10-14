@@ -34,7 +34,7 @@ printf '%s|socket=%s|session=%s|pane=%s|env=%s|config=%s|client=%s|bin=%s|tab=%s
 next() { n=$(( $(cat "$dir/n" 2>/dev/null || echo 0) + 1 )); echo "$n" >"$dir/n"; }
 case "$*" in
   "--session hall-dev server")
-    env | sed -nE 's/^((REEVE_HAND|CLAUDECODE|CLAUDE_[A-Z_]*|HERDR_[A-Z_]*)=.*)/\1/p' | sort >>"$dir/server-env.log"
+    env | sed -nE 's/^((REEVE_HAND|REEVE_HALL_[A-Z_]*|CLAUDECODE|CLAUDE_[A-Z_]*|HERDR_[A-Z_]*)=.*)/\1/p' | sort >>"$dir/server-env.log"
     [ -e "$dir/no-start" ] || touch "$dir/running"
     ;;
   "session list --json")
@@ -90,7 +90,7 @@ esac
 const FAKE_CLAUDE: &str = r#"#!/usr/bin/env bash
 printf '%s|hand=%s|ident=%s|reeve_home=%s|xdg_config=%s|xdg_state=%s|hall_socket=%s|herdr_pane=%s|herdr=%s,%s,%s,%s,%s|hall=%s,%s,%s\n' \
   "$(basename "$PWD")" "${REEVE_HAND-unset}" \
-  "$(env | sed -nE 's/^((CLAUDECODE|CLAUDE_[A-Z_]*|HERDR_[A-Z_]*)=.*)/\1/p' | grep -v -E '^HERDR_(ENV|SOCKET_PATH|BIN_PATH|WORKSPACE_ID|TAB_ID|PANE_ID)=' | sort | tr '\n' ' ')" \
+  "$(env | sed -nE 's/^((REEVE_HALL_[A-Z_]*|CLAUDECODE|CLAUDE_[A-Z_]*|HERDR_[A-Z_]*)=.*)/\1/p' | grep -v -E '^HERDR_(ENV|SOCKET_PATH|BIN_PATH|WORKSPACE_ID|TAB_ID|PANE_ID)=' | sort | tr '\n' ' ')" \
   "${REEVE_HOME-unset}" "${XDG_CONFIG_HOME-unset}" "${XDG_STATE_HOME-unset}" "${HALL_SOCKET_PATH-unset}" \
   "${HERDR_PANE_ID-unset}" "${HERDR_ENV-unset}" "${HERDR_SOCKET_PATH-unset}" "${HERDR_BIN_PATH-unset}" \
   "${HERDR_WORKSPACE_ID-unset}" "${HERDR_TAB_ID-unset}" \
@@ -162,7 +162,11 @@ impl Rig {
         let mut c = Command::new("bash");
         // Who runs the tests does not matter: their own identity names go.
         for (k, _) in std::env::vars() {
-            if k.starts_with("CLAUDE") || k.starts_with("HERDR_") || k == "REEVE_HAND" {
+            if k.starts_with("CLAUDE")
+                || k.starts_with("HERDR_")
+                || k.starts_with("REEVE_HALL_")
+                || k == "REEVE_HAND"
+            {
                 c.env_remove(k);
             }
         }
@@ -198,6 +202,11 @@ impl Rig {
         // As run from a live claude, itself a hand (decision 48): none of
         // this may reach the test hall server or a test claude.
         .env("REEVE_HAND", "starter-hand")
+        // Reeve's hall backend overrides, read before hall's own names: a
+        // test reeve's dispatches would follow them to the live hall.
+        .env("REEVE_HALL_SOCKET", "/live/hall.sock")
+        .env("REEVE_HALL_SESSION", "default")
+        .env("REEVE_HALL_BIN", "/live/hall")
         .env("CLAUDECODE", "1")
         .env("CLAUDE_PID", "4242")
         .env("CLAUDE_EFFORT", "high")
@@ -693,7 +702,7 @@ fn a_claude_line_drops_what_a_server_up_did_not_start_holds() {
     // names the runner of up lacks (decision 48's second amendment).
     std::fs::write(
         rig.bin.join("server-env"),
-        "REEVE_HAND=server-hand\nCLAUDECODE=1\nCLAUDE_PID=7\nCLAUDE_EFFORT=low\nCLAUDE_CODE_CHILD_SESSION=1\nCLAUDE_CODE_MESSAGING_SOCKET=/other/cc.sock\nCLAUDE_CODE_MESSAGING_TOKEN=server-token\nHERDR_SESSION=other\nHERDR_CLIENT_SOCKET_PATH=/other/client.sock\n",
+        "REEVE_HAND=server-hand\nREEVE_HALL_SOCKET=/other/hall.sock\nREEVE_HALL_SESSION=other\nCLAUDECODE=1\nCLAUDE_PID=7\nCLAUDE_EFFORT=low\nCLAUDE_CODE_CHILD_SESSION=1\nCLAUDE_CODE_MESSAGING_SOCKET=/other/cc.sock\nCLAUDE_CODE_MESSAGING_TOKEN=server-token\nHERDR_SESSION=other\nHERDR_CLIENT_SOCKET_PATH=/other/client.sock\n",
     )
     .unwrap();
     rig.ok("test-setup", &["up"]);
@@ -945,4 +954,60 @@ fn the_reeve_listing_starts_one_test_reeve_and_drives_a_hand_it_dispatched() {
             .any(|c| c.starts_with("session stop hall-dev --json|"))
     );
     assert_eq!(rig.herdr_calls(), "");
+}
+
+#[test]
+fn up_with_the_stand_in_after_the_reeve_listing_adds_the_roster_to_the_world_file() {
+    // The reeve listing seeds the world file with its one test reeve; a later
+    // up with the stand-in's listing on the same home brings the whole roster.
+    let rig = Rig::new("reeve-then-standin");
+    let listing_bin = rig.user.join("yongshq/reeve/bin");
+    std::fs::create_dir_all(&listing_bin).unwrap();
+    executable(&listing_bin.join("reeve-listing"), FAKE_REEVE_LISTING);
+    rig.ok("test-setup", &["--listing", "reeve", "up"]);
+    rig.ok("test-setup", &["--listing", "reeve", "down", "--delete"]);
+
+    let up = rig.ok("test-setup", &["up"]);
+    assert!(
+        up.contains("kept as it is but for the roster lines it lacked: bertil ansel-fix ansel-review bertil-probe"),
+        "{up}"
+    );
+    let world = rig.listing();
+    let mut names: Vec<String> = world["reeves"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["name"].as_str().unwrap().to_owned())
+        .chain(
+            world["errands"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|e| e["id"].as_str().unwrap().to_owned()),
+        )
+        .collect();
+    names.sort();
+    assert_eq!(
+        names,
+        [
+            "ansel",
+            "ansel-fix",
+            "ansel-review",
+            "bertil",
+            "bertil-probe"
+        ]
+    );
+    // Every one of them is up, at a pane hall handed out.
+    for entry in world["reeves"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .chain(world["errands"].as_array().unwrap())
+    {
+        assert!(entry["session"]["pane_id"].is_string(), "{entry}");
+    }
+
+    // A third up finds nothing missing.
+    let up = rig.ok("test-setup", &["up"]);
+    assert!(up.contains("exists, kept as it is\n"), "{up}");
 }

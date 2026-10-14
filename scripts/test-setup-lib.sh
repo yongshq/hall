@@ -37,11 +37,12 @@ HALL_CLEAN_ENV=(env -u HALL_SOCKET_PATH -u HALL_CLIENT_SOCKET_PATH -u HALL_SESSI
 HALL_CLI=("${HALL_CLEAN_ENV[@]}" "$HALL_BIN")
 
 # The names in this script's environment that say who a claude is, or which
-# herdr it talks to (decision 48): REEVE_HAND, which makes reeve's hooks take a
-# test reeve for a hand; claude's own session markers, among them its messaging
-# socket and token; and every HERDR_* name, the live herdr's socket and session.
-# Dropped from the hall server up starts.
-STARTER_DROP=(REEVE_HAND CLAUDECODE CLAUDE_PID CLAUDE_EFFORT)
+# herdr or hall it talks to (decision 48): REEVE_HAND, which makes reeve's hooks
+# take a test reeve for a hand; reeve's hall backend overrides, which it reads
+# before HALL_SOCKET_PATH and HALL_SESSION; claude's own session markers, among
+# them its messaging socket and token; and every HERDR_* name, the live herdr's
+# socket and session. Dropped from the hall server up starts.
+STARTER_DROP=(REEVE_HAND REEVE_HALL_SOCKET REEVE_HALL_SESSION REEVE_HALL_BIN CLAUDECODE CLAUDE_PID CLAUDE_EFFORT)
 while read -r __name; do
   case $__name in CLAUDE_CODE_* | HERDR_*) STARTER_DROP+=("$__name") ;; esac
 done < <(compgen -e | LC_ALL=C sort)
@@ -55,15 +56,18 @@ unset __name
 # The env -u list of a claude line (decision 48 and its second amendment). The
 # pane's own shell works it out when the line runs, from what that shell holds,
 # so a hall-dev server someone else started, with names the runner of up lacks,
-# passes none of them on either: REEVE_HAND, claude's session markers, every
-# CLAUDE_CODE_* name and every HERDR_* name except the six hall sets into every
-# pane with that session's own values (its socket, binary and pane ids), which
+# passes none of them on either: REEVE_HAND, reeve's hall backend overrides
+# (REEVE_HALL_SOCKET, REEVE_HALL_SESSION, REEVE_HALL_BIN, which it reads before
+# hall's own names, so one would send the test reeve's dispatches elsewhere),
+# claude's session markers, every CLAUDE_CODE_* name and every HERDR_* name
+# except the six hall sets into every pane with that session's own values (its
+# socket, binary and pane ids), which
 # claude's herdr agent-state hook uses to report to hall-dev. Every HALL_* name
 # and REEVE_BACKEND are kept too: hall sets them into every pane with that
 # session's own values, and reeve's hall backend reads them (decision 48's
 # second amendment, decision 68). command keeps the liege's aliases for env and
 # sed out of it.
-CLAUDE_DROP='-u REEVE_HAND -u CLAUDECODE -u CLAUDE_PID -u CLAUDE_EFFORT $(command env | command sed -nE "/^HERDR_(ENV|SOCKET_PATH|BIN_PATH|WORKSPACE_ID|TAB_ID|PANE_ID)=/d;s/^((CLAUDE_CODE|HERDR)_[A-Za-z0-9_]*)=.*/-u \1/p")'
+CLAUDE_DROP='-u REEVE_HAND -u REEVE_HALL_SOCKET -u REEVE_HALL_SESSION -u REEVE_HALL_BIN -u CLAUDECODE -u CLAUDE_PID -u CLAUDE_EFFORT $(command env | command sed -nE "/^HERDR_(ENV|SOCKET_PATH|BIN_PATH|WORKSPACE_ID|TAB_ID|PANE_ID)=/d;s/^((CLAUDE_CODE|HERDR)_[A-Za-z0-9_]*)=.*/-u \1/p")'
 
 DRY_RUN=0
 CONFIG="$HALL_REPO/scripts/test-setup.conf"

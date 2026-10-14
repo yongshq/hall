@@ -50,8 +50,9 @@ fn home(test: &str) -> PathBuf {
 
 /// What the scripts' starter carries when a claude runs them from a live herdr
 /// pane (decision 48): who that claude is, and which herdr it talks to.
-const STARTER: [(&str, &str); 8] = [
+const STARTER: [(&str, &str); 9] = [
     ("REEVE_HAND", "starter-hand"),
+    ("REEVE_HALL_SOCKET", "/live/hall.sock"),
     ("CLAUDECODE", "1"),
     ("CLAUDE_PID", "4242"),
     ("CLAUDE_EFFORT", "high"),
@@ -63,19 +64,23 @@ const STARTER: [(&str, &str); 8] = [
 
 /// The `env -u` list the hall server starts under: every STARTER name, the
 /// CLAUDE_CODE_* and HERDR_* ones sorted.
-const SERVER_DROP: &str = "-u REEVE_HAND -u CLAUDECODE -u CLAUDE_PID -u CLAUDE_EFFORT -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u HERDR_PANE_ID -u HERDR_SESSION";
+const SERVER_DROP: &str = "-u REEVE_HAND -u REEVE_HALL_SOCKET -u REEVE_HALL_SESSION -u REEVE_HALL_BIN -u CLAUDECODE -u CLAUDE_PID -u CLAUDE_EFFORT -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u HERDR_PANE_ID -u HERDR_SESSION";
 /// The `env -u` list of a claude line, which the pane's shell works out when
 /// the line runs (decision 48's second amendment): the same whatever the
 /// runner of up carries. It keeps the HERDR_* names hall sets into every pane
 /// with that session's own values.
-const CLAUDE_DROP: &str = r#"-u REEVE_HAND -u CLAUDECODE -u CLAUDE_PID -u CLAUDE_EFFORT $(command env | command sed -nE "/^HERDR_(ENV|SOCKET_PATH|BIN_PATH|WORKSPACE_ID|TAB_ID|PANE_ID)=/d;s/^((CLAUDE_CODE|HERDR)_[A-Za-z0-9_]*)=.*/-u \1/p")"#;
+const CLAUDE_DROP: &str = r#"-u REEVE_HAND -u REEVE_HALL_SOCKET -u REEVE_HALL_SESSION -u REEVE_HALL_BIN -u CLAUDECODE -u CLAUDE_PID -u CLAUDE_EFFORT $(command env | command sed -nE "/^HERDR_(ENV|SOCKET_PATH|BIN_PATH|WORKSPACE_ID|TAB_ID|PANE_ID)=/d;s/^((CLAUDE_CODE|HERDR)_[A-Za-z0-9_]*)=.*/-u \1/p")"#;
 
 /// The scripts with this process's own identity names replaced by STARTER, so
 /// what they drop does not depend on who runs the tests.
 fn command(name: &str, args: &[&str]) -> Command {
     let mut c = Command::new("bash");
     for (k, _) in std::env::vars() {
-        if k.starts_with("CLAUDE") || k.starts_with("HERDR_") || k == "REEVE_HAND" {
+        if k.starts_with("CLAUDE")
+            || k.starts_with("HERDR_")
+            || k.starts_with("REEVE_HALL_")
+            || k == "REEVE_HAND"
+        {
             c.env_remove(k);
         }
     }

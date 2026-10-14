@@ -243,6 +243,13 @@ fn reeve_live_and_place() {
         1,
         "no pane recorded",
     );
+    // has: named, with a pane or not.
+    assert_eq!(ok(&["--home", hs, "has", "bertil"]), "");
+    refused(
+        &standin(&["--home", hs, "has", "nobody"]),
+        1,
+        "no reeve or errand called nobody",
+    );
 
     let sessions = ok(&["--home", hs, "sessions"]);
     assert_eq!(

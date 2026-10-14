@@ -19,6 +19,7 @@ usage: hall-standin --home <test reeve home> [command]
   place <name> <hall-session> [pane]   record where a reeve's or errand's session sits;
                                          no pane forgets the recorded one
   locate <name>                        print `<hall-session> <pane-id>` for a reeve or errand
+  has <name>                           exit 0 when the world file names that reeve or errand
   sessions                             print `<kind> <name> <hall-session> <pane-id|->` per
                                          reeve and errand in flight
   check-home                           print the test reeve home as resolved on disk, or
@@ -135,6 +136,15 @@ pub fn run(
                 Some((session, None)) => Err(CliError::Failed(format!(
                     "{target} has no pane recorded yet in hall session {session}"
                 ))),
+                None => Err(CliError::Failed(format!(
+                    "no reeve or errand called {target} in the world file"
+                ))),
+            }
+        }
+        ["has", target] => {
+            let world = World::load(&home).map_err(failed)?;
+            match locate(&world, target) {
+                Some(_) => Ok(()),
                 None => Err(CliError::Failed(format!(
                     "no reeve or errand called {target} in the world file"
                 ))),
