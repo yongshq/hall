@@ -226,10 +226,11 @@ fn a_hand_state_sets_its_mark_and_what_waits_sets_the_reeve_badge() {
     let mut state = reeve_state(listing.clone());
     let frame = compose(&mut state);
     let tree = tree_rows(&frame);
-    assert_eq!(tree[1], " · ansel               2");
+    // The first read raises the highlight of a hand with a flag up, and its reeve's.
+    assert_eq!(tree[1], "▌· ansel               2");
     assert_eq!(tree[2], "  ├ ! ansel-fix   blocked");
     // The id first; of the notes, the ones that fit after it.
-    assert_eq!(tree[3], "  └ ● ansel-review   asks");
+    assert_eq!(tree[3], "▌ └ ● ansel-review   asks");
     assert_eq!(tree[4], " · bertil");
     assert_eq!(tree[5], "  └ ✓ bertil-probe   done");
 
@@ -238,7 +239,7 @@ fn a_hand_state_sets_its_mark_and_what_waits_sets_the_reeve_badge() {
         crate::client::reeve_listing::HandState::Working;
     state.set_reeve_listing(Ok(listing));
     let tree = tree_rows(&compose(&mut state));
-    assert_eq!(tree[1], " · ansel               1");
+    assert_eq!(tree[1], "▌· ansel               1");
     assert_eq!(tree[2], "  ├ ● ansel-fix");
 }
 
@@ -254,10 +255,11 @@ fn each_flag_and_state_has_its_own_word_and_counts_once() {
     }
     let mut state = reeve_state(listing);
     let tree = tree_rows(&compose(&mut state));
-    assert_eq!(tree[4], " · bertil              1");
+    // The first read raises the highlight of a hand with a flag up, and its reeve's.
+    assert_eq!(tree[4], "▌· bertil              1");
     // At the default sidebar width the id stays whole and the notes that do not fit go: the
     // ones the mark already says (`decide`, and `asks` beside `?`) first, so `wedged` stays.
-    assert_eq!(tree[5], "  └ ? bertil-probe wedged");
+    assert_eq!(tree[5], "▌ └ ? bertil-probe wedged");
     let tree_model = state.current_reeve_tree().expect("tree");
     let probe = &tree_model.items[tree_model
         .position(&ReeveTreeKey::Hand("bertil-probe".into()))
@@ -274,7 +276,7 @@ fn each_flag_and_state_has_its_own_word_and_counts_once() {
         .chars()
         .take(49)
         .collect::<String>();
-    assert_eq!(row, "  └ ? bertil-probe     decide asks waiting wedged");
+    assert_eq!(row, "▌ └ ? bertil-probe     decide asks waiting wedged");
 }
 
 #[test]
@@ -294,8 +296,9 @@ fn a_narrow_row_keeps_the_notes_the_mark_does_not_say() {
     }
     let mut state = reeve_state(listing);
     let tree = tree_rows(&compose(&mut state));
-    assert_eq!(tree[2], "  ├ ! ansel-fix      idle");
-    assert_eq!(tree[5], "  └ ● bertil-probe   asks");
+    // The first read raises the highlight of a hand with a flag up.
+    assert_eq!(tree[2], "▌ ├ ! ansel-fix      idle");
+    assert_eq!(tree[5], "▌ └ ● bertil-probe   asks");
 }
 
 #[test]
@@ -416,7 +419,8 @@ fn at_width_25_a_hand_keeps_its_id_before_its_notes() {
     // Too long for the row: the id is cut, no note.
     assert_eq!(tree[2], "  ├ ! ansel-fix-the-lon…");
     // `decide wedged` does not fit beside the whole id: the id stays, the mark says decide.
-    assert_eq!(tree[5], "  └ ? bertil-probe");
+    // The bar is the highlight the first read raises for a hand with a flag up.
+    assert_eq!(tree[5], "▌ └ ? bertil-probe");
 }
 
 #[test]

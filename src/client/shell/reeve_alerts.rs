@@ -6,7 +6,10 @@
 //! sound when a read of the listing shows a hand newly blocked, asking or stuck. Every alert
 //! also raises a highlight on the reeve's row, and on the hand's row for a hand, apart from the
 //! sound, so it shows with the sound muted too. A highlight clears when the liege shows that
-//! reeve's or hand's pane, or when what raised it no longer holds.
+//! reeve's or hand's pane, or when what raised it no longer holds. A hand's `waiting`, `idle`
+//! or `wedged` that rises again on a spell already rung (the reeve's watch exited and came
+//! back), or is up at a client's first read, raises its highlight again without a sound,
+//! unless the liege has shown the hand since that spell rang.
 
 use super::*;
 use crate::client::reeve_listing::{FlagsSince, HandState, ListedErrand, ReeveListing};
@@ -42,6 +45,28 @@ struct HandFacts {
     /// rises again with the same `since` (the reeve's watch exited and came back, which drops
     /// the flag between) is the same spell and rings nothing.
     rung: FlagsSince,
+    /// The spell of each flag rung when the liege last showed the hand: a flag rising again on
+    /// that spell raises no highlight either.
+    shown: FlagsSince,
+}
+
+/// What this client did with herdr's request for the dialog a hand's pane stands at.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HandDialog {
+    /// None, or none that still counts.
+    None,
+    /// Holds it for the toast delay or the snapshot: it may yet ring, or be dropped as stale.
+    Held,
+    /// Rang it.
+    Rang,
+}
+
+/// What a read raised for a hand: the rises that ring, by name, and the flags back up on a
+/// spell already rung, which raise the highlight without a sound.
+#[derive(Debug, Default)]
+struct Raised {
+    rang: Vec<&'static str>,
+    again: Vec<&'static str>,
 }
 
 impl HandFacts {
@@ -58,11 +83,14 @@ impl HandFacts {
                 .filter(|question| !question.is_empty()),
             since: errand.since,
             rung: FlagsSince::default(),
+            shown: FlagsSince::default(),
         }
     }
 
     /// On the first read, which rings nothing: each flag up then counts as rung for its spell.
-    fn seed(&mut self) {
+    /// Whether one was up, which raises the hand's highlight without a sound.
+    fn seed(&mut self) -> bool {
+        let mut up_any = false;
         for (up, since, rung) in [
             (self.waiting, self.since.waiting, &mut self.rung.waiting),
             (self.idle, self.since.idle, &mut self.rung.idle),
@@ -70,33 +98,40 @@ impl HandFacts {
         ] {
             if up {
                 *rung = since;
+                up_any = true;
             }
         }
+        up_any
     }
 
-    /// What rose from `before` to `self`, by name, keeping `before`'s rung spells and noting
-    /// each spell rung now. A flag rising with the `since` it last rang with is left out; one
-    /// with no `since` rises on every rise. A rise of `waiting` is left out too when this
-    /// client rang herdr's request for the dialog the hand's pane stands at, or holds it to
-    /// ring (decisions 62, 64, 65), and its spell counts as rung.
-    fn rises(&mut self, before: &Self, dialog_rung: bool) -> Vec<&'static str> {
+    /// What rose from `before` to `self`, keeping `before`'s rung and shown spells and noting
+    /// each spell rung now. A flag rising with the `since` it last rang with rings nothing, and
+    /// raises the highlight again unless the liege has shown the hand since; one with no
+    /// `since` rises on every rise. A rise of `waiting` rings nothing either when this client
+    /// rang herdr's request for the dialog the hand's pane stands at (decisions 62, 64, 65),
+    /// and its spell counts as rung. While this client only holds that request, the rise
+    /// waits: it is taken on a later read, once the request has rung or been dropped.
+    fn rises(&mut self, before: &Self, dialog: HandDialog) -> Raised {
         self.rung = before.rung;
-        let mut rises = Vec::new();
+        self.shown = before.shown;
+        let mut raised = Raised::default();
         for (now, was, name) in [
             (self.blocked, before.blocked, "blocked"),
             (self.needs_decision, before.needs_decision, "needs-decision"),
         ] {
             if now && !was {
-                rises.push(name);
+                raised.rang.push(name);
             }
         }
-        for (now, was, since, rung, rung_elsewhere, name) in [
+        let mut waiting_held = false;
+        for (now, was, since, rung, shown, dialog, name) in [
             (
                 self.waiting,
                 before.waiting,
                 self.since.waiting,
                 &mut self.rung.waiting,
-                dialog_rung,
+                self.shown.waiting,
+                dialog,
                 "waiting",
             ),
             (
@@ -104,7 +139,8 @@ impl HandFacts {
                 before.idle,
                 self.since.idle,
                 &mut self.rung.idle,
-                false,
+                self.shown.idle,
+                HandDialog::None,
                 "idle",
             ),
             (
@@ -112,24 +148,39 @@ impl HandFacts {
                 before.wedged,
                 self.since.wedged,
                 &mut self.rung.wedged,
-                false,
+                self.shown.wedged,
+                HandDialog::None,
                 "wedged",
             ),
         ] {
-            if !now || was || (since.is_some() && since == *rung) {
+            if !now || was {
+                continue;
+            }
+            if since.is_some() && since == *rung {
+                if since != shown {
+                    raised.again.push(name);
+                }
+                continue;
+            }
+            if dialog == HandDialog::Held {
+                waiting_held = true;
                 continue;
             }
             if since.is_some() {
                 *rung = since;
             }
-            if !rung_elsewhere {
-                rises.push(name);
+            if dialog == HandDialog::None {
+                raised.rang.push(name);
             }
         }
-        if self.question.is_some() && self.question != before.question {
-            rises.push("question");
+        // Not taken yet: kept as down, so the next read sees the rise again.
+        if waiting_held {
+            self.waiting = false;
         }
-        rises
+        if self.question.is_some() && self.question != before.question {
+            raised.rang.push("question");
+        }
+        raised
     }
 
     /// What is kept of a hand that a read no longer lists: its question, so a hand coming
@@ -292,30 +343,40 @@ impl ClientShellState {
                 == Some(pane_id)
     }
 
-    /// Takes a good read for the alerts: the first seeds them and raises no sound and no
-    /// listing alert; after that, each hand whose listing entry rose (decision 62's edge rules)
-    /// raises its highlight, and the read rings one request sound. Any read, the first too,
-    /// gives a dialog this client already rang its highlight once it names the pane. A hand
-    /// alert clears when the hand leaves the listing or no longer waits on the liege. Failed
-    /// reads never come here.
+    /// Takes a good read for the alerts: the first seeds them and raises no sound, and raises
+    /// the highlight of each hand with a flag up; after that, each hand whose listing entry
+    /// rose (decision 62's edge rules) raises its highlight, and the read rings one request
+    /// sound, while a flag back up on a spell already rung raises it without a sound. Any read,
+    /// the first too, gives a dialog this client already rang its highlight once it names the
+    /// pane. A hand alert clears when the hand leaves the listing or no longer waits on the
+    /// liege. Failed reads never come here.
     pub(super) fn read_listing_alerts(&mut self) -> Vec<ClientShellNotificationEffect> {
         let Some((listing, session)) = self.alert_listing() else {
             return Vec::new();
         };
-        // A dialog this client rang, while its pane reads blocked, or one whose request it
-        // holds for the toast delay or the snapshot and rings when that is done (decision 65).
+        // A dialog this client rang, while its pane reads blocked; or one whose request it
+        // holds for the toast delay or the snapshot and rings when that is done (decision 65),
+        // unless herdr's rule drops it then.
         let now = std::time::Instant::now();
-        let dialog_rung = |pane_id: Option<&String>| {
-            pane_id.is_some_and(|pane_id| {
-                let rung = self.reeve_alerts.dialogs.get(pane_id).is_some_and(|until| {
-                    self.pane_reads_blocked(pane_id) || until.is_some_and(|until| now < until)
-                });
-                rung || self.pending_notifications.iter().any(|pending| {
-                    pending.endpoint_id == self.active_endpoint_id
-                        && pending.event.kind == SemanticNotificationKind::NeedsAttention
-                        && pending.event.pane_id.as_ref() == Some(pane_id)
-                })
-            })
+        let hand_dialog = |pane_id: Option<&String>| {
+            let Some(pane_id) = pane_id else {
+                return HandDialog::None;
+            };
+            let rang = self.reeve_alerts.dialogs.get(pane_id).is_some_and(|until| {
+                self.pane_reads_blocked(pane_id) || until.is_some_and(|until| now < until)
+            });
+            let held = self.pending_notifications.iter().any(|pending| {
+                pending.endpoint_id == self.active_endpoint_id
+                    && pending.event.kind == SemanticNotificationKind::NeedsAttention
+                    && pending.event.pane_id.as_ref() == Some(pane_id)
+            });
+            if rang {
+                HandDialog::Rang
+            } else if held {
+                HandDialog::Held
+            } else {
+                HandDialog::None
+            }
         };
         let errands = alert_errands(listing, session).collect::<Vec<_>>();
         let mut facts = errands
@@ -326,12 +387,12 @@ impl ClientShellState {
         if let Some(seen) = self.reeve_alerts.seen.as_ref() {
             for errand in &errands {
                 let before = seen.get(&errand.id).cloned().unwrap_or_default();
-                let at_dialog = dialog_rung(errand.session.pane_id.as_ref());
-                let rises = facts
+                let dialog = hand_dialog(errand.session.pane_id.as_ref());
+                let raised = facts
                     .get_mut(&errand.id)
-                    .map_or_else(Vec::new, |facts| facts.rises(&before, at_dialog));
-                if !rises.is_empty() {
-                    risen.push((errand.id.clone(), rises));
+                    .map_or_else(Raised::default, |facts| facts.rises(&before, dialog));
+                if !raised.rang.is_empty() || !raised.again.is_empty() {
+                    risen.push((errand.id.clone(), raised));
                 }
             }
             for (id, before) in seen {
@@ -342,7 +403,11 @@ impl ClientShellState {
                 }
             }
         } else {
-            facts.values_mut().for_each(HandFacts::seed);
+            for (id, facts) in &mut facts {
+                if facts.seed() {
+                    risen.push((id.clone(), Raised::default()));
+                }
+            }
         }
         let waiting = errands
             .iter()
@@ -380,17 +445,18 @@ impl ClientShellState {
             alerts.dialogs_highlighted.insert(pane_id);
         }
         alerts.hands.retain(|id| waiting.contains(id));
-        for (id, rises) in &risen {
+        for (id, raised) in &risen {
             tracing::info!(
                 event = "reeve.alert",
                 source = "listing",
                 hand = id.as_str(),
-                rises = ?rises,
+                rises = ?raised.rang,
+                again = ?raised.again,
                 "hall alert raised"
             );
             alerts.hands.insert(id.clone());
         }
-        if risen.is_empty() {
+        if risen.iter().all(|(_, raised)| raised.rang.is_empty()) {
             Vec::new()
         } else {
             vec![ClientShellNotificationEffect::Sound {
@@ -455,7 +521,8 @@ impl ClientShellState {
         }
     }
 
-    /// The liege shows a pane: the alerts of the reeve or hand it belongs to clear.
+    /// The liege shows a pane: the alerts of the reeve or hand it belongs to clear, and a
+    /// hand's flags rising again on the spells rung so far stay clear.
     pub(super) fn show_reeve_alerts(&mut self, pane_id: &str) {
         let role = self.pane_alert_role(pane_id);
         let alerts = &mut self.reeve_alerts;
@@ -465,6 +532,9 @@ impl ClientShellState {
         }
         if let Some(AlertRole::Hand(id)) = role {
             alerts.hands.remove(&id);
+            if let Some(facts) = alerts.seen.as_mut().and_then(|seen| seen.get_mut(&id)) {
+                facts.shown = facts.rung;
+            }
         }
     }
 

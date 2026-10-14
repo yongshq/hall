@@ -477,9 +477,10 @@ fn a_flag_rising_again_with_the_same_since_rings_once() {
             0,
             "{name} back on the same spell"
         );
-        assert!(
-            alerting(&mut state).is_empty(),
-            "{name} raises no highlight either"
+        assert_eq!(
+            alerting(&mut state),
+            ["bertil", "bertil-probe"],
+            "{name} raises its highlight again, without a sound"
         );
         assert_eq!(read_flag(&mut state, &mut listing, set, None), 0, "{name}");
         assert_eq!(
@@ -494,6 +495,48 @@ fn a_flag_rising_again_with_the_same_since_rings_once() {
             1,
             "{name} an older spell is not the last rung"
         );
+    }
+}
+
+#[test]
+fn a_spell_the_liege_has_shown_stays_cleared_after_a_watch_gap() {
+    for (name, set) in FLAGS {
+        let mut listing = listing();
+        let mut state = alert_state(listing.clone(), &[]);
+        assert_eq!(
+            read_flag(&mut state, &mut listing, set, Some(100)),
+            1,
+            "{name}"
+        );
+        state.show_reeve_alerts("p_b1");
+        assert!(alerting(&mut state).is_empty(), "{name} shown");
+        assert_eq!(read_flag(&mut state, &mut listing, set, None), 0, "{name}");
+        assert_eq!(
+            read_flag(&mut state, &mut listing, set, Some(100)),
+            0,
+            "{name} back on the shown spell"
+        );
+        assert!(alerting(&mut state).is_empty(), "{name} stays cleared");
+        assert_eq!(read_flag(&mut state, &mut listing, set, None), 0, "{name}");
+        assert_eq!(
+            read_flag(&mut state, &mut listing, set, Some(200)),
+            1,
+            "{name} a new spell rings"
+        );
+        assert_eq!(
+            alerting(&mut state),
+            ["bertil", "bertil-probe"],
+            "{name} and highlights"
+        );
+        // Shown while the flag is down, in the gap: the same spell stays cleared too.
+        assert_eq!(read_flag(&mut state, &mut listing, set, None), 0, "{name}");
+        state.show_reeve_alerts("p_b1");
+        assert_eq!(
+            read_flag(&mut state, &mut listing, set, Some(200)),
+            0,
+            "{name}"
+        );
+        assert!(alerting(&mut state).is_empty(), "{name} shown in the gap");
     }
 }
 
@@ -534,8 +577,8 @@ fn a_flag_with_no_since_rings_on_every_rise() {
 
 #[test]
 fn a_spell_up_at_the_first_read_counts_as_rung() {
-    // The first read seeds the alerts without ringing: the spell then up does not ring after a
-    // watch gap either.
+    // The first read seeds the alerts without ringing, but highlights the hand: the spell then
+    // up does not ring after a watch gap either.
     for (name, set) in FLAGS {
         let mut listing = listing();
         set(errand_mut(&mut listing, "bertil-probe"), Some(100));
@@ -545,12 +588,31 @@ fn a_spell_up_at_the_first_read_counts_as_rung() {
             state.set_reeve_listing(Ok(listing.clone())).is_empty(),
             "{name}"
         );
+        assert_eq!(
+            alerting(&mut state),
+            ["bertil", "bertil-probe"],
+            "{name} attached with the flag up"
+        );
         assert_eq!(read_flag(&mut state, &mut listing, set, None), 0, "{name}");
         assert_eq!(
             read_flag(&mut state, &mut listing, set, Some(100)),
             0,
             "{name}"
         );
+        assert_eq!(
+            alerting(&mut state),
+            ["bertil", "bertil-probe"],
+            "{name} back after a gap"
+        );
+        // Shown, the seeded spell stays cleared after a gap.
+        state.show_reeve_alerts("p_b1");
+        assert_eq!(read_flag(&mut state, &mut listing, set, None), 0, "{name}");
+        assert_eq!(
+            read_flag(&mut state, &mut listing, set, Some(100)),
+            0,
+            "{name}"
+        );
+        assert!(alerting(&mut state).is_empty(), "{name} shown");
         assert_eq!(read_flag(&mut state, &mut listing, set, None), 0, "{name}");
         assert_eq!(
             read_flag(&mut state, &mut listing, set, Some(200)),
@@ -618,6 +680,55 @@ fn a_waiting_spell_whose_dialog_this_client_rang_counts_as_rung() {
     assert_eq!(read_flag(&mut state, &mut listing, waiting, Some(100)), 0);
     assert_eq!(read_flag(&mut state, &mut listing, waiting, None), 0);
     assert_eq!(read_flag(&mut state, &mut listing, waiting, Some(200)), 1);
+}
+
+#[test]
+fn a_waiting_spell_whose_held_dialog_is_dropped_rings() {
+    // Herdr's request is held for the toast delay, and dropped when the pane has left the
+    // dialog by then: it never rang, so the listing's waiting on that dialog rings.
+    let mut listing = listing();
+    let mut state = alert_state(listing.clone(), &[("p_b1", AgentStatus::Blocked)]);
+    state.config.toast_delay_seconds = 1;
+    let now = std::time::Instant::now();
+    assert_eq!(
+        requests(&notify(
+            &mut state,
+            SemanticNotificationKind::NeedsAttention,
+            "p_b1",
+            "ws_b_t1",
+        )),
+        0,
+        "held"
+    );
+    let [(_, waiting), ..] = FLAGS;
+    assert_eq!(
+        read_flag(&mut state, &mut listing, waiting, Some(100)),
+        0,
+        "waiting while the request is held"
+    );
+    assert_eq!(
+        read_flag(&mut state, &mut listing, waiting, Some(100)),
+        0,
+        "still held"
+    );
+    set_statuses(&mut state, &[("p_b1", AgentStatus::Working)]);
+    let (effects, _) = state.tick_notifications(past_delay(now, 1));
+    assert!(effects.is_empty(), "dropped, never rang");
+    assert!(state.pending_notifications.is_empty());
+    assert_eq!(
+        read_flag(&mut state, &mut listing, waiting, Some(100)),
+        1,
+        "the waiting rise rings"
+    );
+    assert_eq!(alerting(&mut state), ["bertil", "bertil-probe"]);
+    assert_eq!(
+        read_flag(&mut state, &mut listing, waiting, Some(100)),
+        0,
+        "once"
+    );
+    // After a watch gap the spell rang, as any other.
+    assert_eq!(read_flag(&mut state, &mut listing, waiting, None), 0);
+    assert_eq!(read_flag(&mut state, &mut listing, waiting, Some(100)), 0);
 }
 
 #[test]

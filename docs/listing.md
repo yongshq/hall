@@ -66,11 +66,13 @@ Hall ignores fields it does not know. A command that fails shows its first non-e
 
 Reeve's listing shows a flag only while the reeve's watch runs, and the watch exits when it wakes the reeve and is started again: the flag drops for that gap and rises again on the same latch. Hall rings a hand's listing alerts on a rise only ([test-setup.md](test-setup.md), Alerts), so without `since` one spell of `idle`, say, rang once per watch (finding R2 of step5-shown-working). With it, a rise of `waiting`, `idle` or `wedged` rings only when its `since` differs from the one hall last rang for that errand and flag, and hall then keeps the new one:
 
-- the same `since` again after a gap is the same spell: no sound, no highlight (the hand still counts toward its reeve's badge);
+- during a watch gap the flag drops, as reeve's listing has it by design, and with it the hand's count in its reeve's badge, the hand's note and its highlight;
+- the same `since` again after a gap is the same spell: no sound, and the highlight comes back, unless the liege has shown the hand (enter, a click on its row, or the focus moving onto its pane) since that spell rang, which keeps it cleared for that `since`;
 - another `since` is a new spell and rings, as does a spell older than the last one rung;
 - a flag up with no `since` (absent, `null`, or one that does not read) rings on every rise, as it did before `since`, and leaves what was last rung as it was;
-- the first good read after attaching rings nothing and counts each spell then up as rung, so attaching during a spell and a watch gap after it ring nothing either;
-- a `waiting` rise left silent because this client rang herdr's request for the dialog the hand's pane stands at counts its spell as rung, so one dialog still rings once;
+- the first good read after attaching rings nothing, counts each spell then up as rung and raises the hand's highlight without a sound, so a watch gap after it rings nothing either; showing the hand clears that highlight as above;
+- a client that starts during a watch gap does not see the spell, so when the flag comes back that spell rings once more; what was rung is kept per client process, not by the server, so a restarted or reattached client can ring a spell again, and two clients attached at once ring each spell once each (two sounds);
+- a `waiting` rise left silent because this client rang herdr's request for the dialog the hand's pane stands at counts its spell as rung, so one dialog still rings once; while this client only holds that request (the toast delay, or the snapshot), the rise waits and counts nothing, and if herdr's rule then drops the request (the pane left the dialog first) the rise rings as any other;
 - an errand that leaves the listing has its spells forgotten: back with the same `since`, it rings as a hand new to the listing.
 
 ## The stand-in
