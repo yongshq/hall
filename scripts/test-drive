@@ -6,9 +6,10 @@ set -euo pipefail
 HALL_PROG=test-drive
 HALL_USAGE="usage: scripts/test-drive [options] <test reeve or test hand> dialog|turn-end|deny
 
-  dialog    prompt the test claude to create a file, which its default
-            permissions ask about, wait for hall to read it as blocked, and
-            print hall's reading; the dialog is left standing
+  dialog    prompt the test claude to fetch a page with WebFetch, which no
+            reeve office allows and claude's default permissions ask about,
+            wait for hall to read it as blocked, and print hall's reading; the
+            dialog is left standing
   turn-end  deny any standing dialog with Esc, prompt a direct question, wait
             for the turn to end, and print hall's reading
   deny      deny a standing dialog with Esc and print hall's reading
@@ -24,7 +25,13 @@ scripts/test-setup"
 # shellcheck source=test-setup-lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/test-setup-lib.sh"
 
-DIALOG_PROMPT="Create a file named hall-dialog-probe.txt in the current directory containing the single word probe."
+# A tool call claude asks about in every test claude: a test reeve or roster
+# hand at claude's default permissions, and a hand a test reeve dispatched, at
+# its office's (reeve's offices/*.settings.json). A file write is no use there:
+# every office allows Write, with acceptEdits. No office allows WebFetch, and
+# the liege's own settings allow it only for a few domains, example.com not
+# among them. The dialog is denied with Esc, so nothing is fetched.
+DIALOG_PROMPT="Use the WebFetch tool to fetch https://example.com/ and tell me the page title. Use no other tool."
 TURN_PROMPT="What is 2 + 2? Reply with the number only, without using any tools."
 WAIT_MS=120000
 DENY_WAIT_MS=10000
