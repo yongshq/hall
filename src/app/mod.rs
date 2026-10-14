@@ -373,12 +373,13 @@ impl App {
         let mut restored_terminal_runtimes = crate::terminal::TerminalRuntimeRegistry::new();
         let (workspaces, active, selected) = if !policy.restore_session {
             (Vec::new(), None, 0)
-        } else if let Some(snap) = crate::persist::load() {
-            let history = config
+        } else if let Some(mut snap) = crate::persist::load() {
+            let mut history = config
                 .experimental
                 .pane_history
                 .then(crate::persist::load_history)
                 .flatten();
+            crate::persist::drop_no_resume_panes(&mut snap, history.as_mut());
             let (ws, terminals, terminal_runtimes) = crate::persist::restore(
                 &snap,
                 history.as_ref(),

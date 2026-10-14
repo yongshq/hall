@@ -329,6 +329,23 @@ impl Rig {
 
 const CLEAN: &str = "|socket=unset|session=unset|pane=unset|env=unset|config=unset|client=unset|bin=unset|tab=unset|ws=unset|backend=unset";
 
+/// The call up makes to start the test hall server: clean, but for the client
+/// config up wrote, named as HALL_CONFIG_PATH for its `[session]` section.
+fn server_call(home: &std::path::Path) -> String {
+    format!(
+        "--session hall-dev server{}",
+        CLEAN.replace(
+            "config=unset",
+            &format!("config={}/standin/hall.toml", home.display())
+        )
+    )
+}
+
+/// A hall call with the inherited HALL_* names removed, or up's server start.
+fn is_clean(c: &str, home: &std::path::Path) -> bool {
+    c.ends_with(CLEAN) || c == server_call(home)
+}
+
 #[test]
 fn up_status_drive_down() {
     let rig = Rig::new("cycle");
@@ -342,16 +359,14 @@ fn up_status_drive_down() {
     // up started the test session itself, detached, since it was not running.
     let calls = rig.calls();
     assert!(
-        calls
-            .iter()
-            .any(|c| c == &format!("--session hall-dev server{CLEAN}")),
+        calls.iter().any(|c| c == &server_call(&rig.home)),
         "{calls:?}"
     );
     // Every hall call had the inherited HALL_* names removed and named the test
     // session; no herdr call was made at all.
     assert!(!calls.is_empty());
     for c in &calls {
-        assert!(c.ends_with(CLEAN), "{c}");
+        assert!(is_clean(c, &rig.home), "{c}");
         assert!(!c.contains("default"), "{c}");
     }
     assert_eq!(rig.herdr_calls(), "");
@@ -381,6 +396,12 @@ fn up_status_drive_down() {
             "[reeve]\nlisting_command = [\"{}\", \"--home\", \"{h}\"]\n",
             rig.standin.display()
         )),
+        "{client_config}"
+    );
+    // The server up starts reads it too: after a restart it resumes no test
+    // claude, whose XDG guard is on its launch line (decision 47).
+    assert!(
+        client_config.contains("\n[session]\nresume_agents_on_restore = false\n"),
         "{client_config}"
     );
     assert!(
@@ -567,7 +588,7 @@ fn up_status_drive_down() {
             .any(|c| c.starts_with("session stop hall-dev --json|"))
     );
     for c in &calls {
-        assert!(c.ends_with(CLEAN), "{c}");
+        assert!(is_clean(c, &rig.home), "{c}");
     }
     assert_eq!(rig.herdr_calls(), "");
     let l = rig.listing();
@@ -1111,7 +1132,7 @@ fn the_reeve_listing_starts_one_test_reeve_and_drives_a_hand_it_dispatched() {
     let up = rig.ok("test-setup", &["--listing", "reeve", "up"]);
     let calls = rig.calls();
     for c in &calls {
-        assert!(c.ends_with(CLEAN), "{c}");
+        assert!(is_clean(c, &rig.home), "{c}");
     }
     assert_eq!(rig.herdr_calls(), "");
     let count = |prefix: &str| calls.iter().filter(|c| c.starts_with(prefix)).count();

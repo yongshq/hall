@@ -337,6 +337,7 @@ impl ClientShellState {
                             focus: true,
                             label: None,
                             env: Default::default(),
+                            no_agent_resume: false,
                         }),
                         outcome,
                     );

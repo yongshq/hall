@@ -17,6 +17,10 @@ pub struct WorkspaceCreateParams {
     pub label: Option<String>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub env: HashMap<String, String>,
+    /// Hall: mark the new root pane so a restore drops it instead of
+    /// recreating it (a reeve hand).
+    #[serde(default, skip_serializing_if = "super::is_false")]
+    pub no_agent_resume: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]

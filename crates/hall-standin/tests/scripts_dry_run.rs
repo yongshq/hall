@@ -153,13 +153,14 @@ fn check_command(c: &str, home: &Path) {
     );
     let hall = hall_bin().display().to_string();
     if c.ends_with(" server &") {
-        // The hall server starts without the starter's identity names, and with
-        // the test home as REEVE_HOME for the hands a test reeve dispatches.
+        // The hall server starts without the starter's identity names, with
+        // the test home as REEVE_HOME for the hands a test reeve dispatches, and
+        // with the client config up wrote, whose [session] resumes no claude.
         assert_eq!(
             c,
             format!(
-                "{CLEAN_ENV}{SERVER_DROP} REEVE_HOME={} {hall} --session {SESSION} server &",
-                home.display()
+                "{CLEAN_ENV}{SERVER_DROP} REEVE_HOME={h} HALL_CONFIG_PATH={h}/standin/hall.toml {hall} --session {SESSION} server &",
+                h = home.display()
             )
         );
     } else if c.split_whitespace().any(|w| w == hall) {
@@ -262,7 +263,8 @@ fn up() {
     assert_eq!(count(&cmds, &format!("--session {SESSION} server &")), 1);
     // The world file, and the hall client config that turns the reeve tree on.
     assert_eq!(count(&cmds, "+ write "), 2);
-    assert_eq!(count(&cmds, "/standin/hall.toml"), 1);
+    // Written once, and named once more, as the server's HALL_CONFIG_PATH.
+    assert_eq!(count(&cmds, "/standin/hall.toml"), 2);
     assert_eq!(count(&cmds, "/xdg-config"), 1 + ROSTER);
     assert_eq!(count(&cmds, "/xdg-state"), 1 + ROSTER);
     assert_eq!(count(&cmds, "REEVE_HAND=\""), ERRANDS);

@@ -39,26 +39,37 @@ fn workspace_list(args: &[String]) -> std::io::Result<i32> {
 }
 
 fn workspace_create(args: &[String]) -> std::io::Result<i32> {
+    let params = match parse_workspace_create_args(args) {
+        Ok(params) => params,
+        Err(message) => {
+            eprintln!("{message}");
+            return Ok(2);
+        }
+    };
+
+    super::runtime::workspace_create(params)
+}
+
+fn parse_workspace_create_args(args: &[String]) -> Result<WorkspaceCreateParams, String> {
     let mut cwd = None;
     let mut focus = false;
     let mut label = None;
     let mut env = HashMap::new();
+    let mut no_agent_resume = false;
 
     let mut index = 0;
     while index < args.len() {
         match args[index].as_str() {
             "--cwd" => {
                 let Some(value) = args.get(index + 1) else {
-                    eprintln!("missing value for --cwd");
-                    return Ok(2);
+                    return Err("missing value for --cwd".into());
                 };
                 cwd = Some(value.clone());
                 index += 2;
             }
             "--label" => {
                 let Some(value) = args.get(index + 1) else {
-                    eprintln!("missing value for --label");
-                    return Ok(2);
+                    return Err("missing value for --label".into());
                 };
                 label = Some(value.clone());
                 index += 2;
@@ -71,34 +82,29 @@ fn workspace_create(args: &[String]) -> std::io::Result<i32> {
                 focus = false;
                 index += 1;
             }
+            "--no-agent-resume" => {
+                no_agent_resume = true;
+                index += 1;
+            }
             "--env" => {
                 let Some(value) = args.get(index + 1) else {
-                    eprintln!("missing value for --env");
-                    return Ok(2);
+                    return Err("missing value for --env".into());
                 };
-                let (key, value) = match super::parse_env_assignment(value) {
-                    Ok(pair) => pair,
-                    Err(err) => {
-                        eprintln!("{err}");
-                        return Ok(2);
-                    }
-                };
+                let (key, value) = super::parse_env_assignment(value)?;
                 env.insert(key, value);
                 index += 2;
             }
-            other => {
-                eprintln!("unknown option: {other}");
-                return Ok(2);
-            }
+            other => return Err(format!("unknown option: {other}")),
         }
     }
 
-    super::runtime::workspace_create(WorkspaceCreateParams {
+    Ok(WorkspaceCreateParams {
         source_workspace_id: None,
         cwd,
         focus,
         label,
         env,
+        no_agent_resume,
     })
 }
 
@@ -244,10 +250,34 @@ fn workspace_close(args: &[String]) -> std::io::Result<i32> {
 fn print_workspace_help() {
     eprintln!("hall workspace commands:");
     eprintln!("  hall workspace list");
-    eprintln!("  hall workspace create [--cwd PATH] [--label TEXT] [--env KEY=VALUE] [--focus] [--no-focus]");
+    eprintln!("  hall workspace create [--cwd PATH] [--label TEXT] [--env KEY=VALUE] [--focus] [--no-focus] [--no-agent-resume]");
     eprintln!("  hall workspace get <workspace_id>");
     eprintln!("  hall workspace focus <workspace_id>");
     eprintln!("  hall workspace rename <workspace_id> <label>");
     eprintln!("  hall workspace report-metadata <workspace_id> --source ID [--token NAME=VALUE] [--clear-token NAME] [--seq N] [--ttl-ms N]");
     eprintln!("  hall workspace close <workspace_id> [--group]");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(values: &[&str]) -> Vec<String> {
+        values.iter().map(|value| (*value).to_string()).collect()
+    }
+
+    #[test]
+    fn workspace_create_parses_no_agent_resume() {
+        let marked =
+            parse_workspace_create_args(&args(&["--cwd", "/tmp", "--no-agent-resume"])).unwrap();
+        assert!(marked.no_agent_resume);
+        assert_eq!(marked.cwd.as_deref(), Some("/tmp"));
+
+        let unmarked = parse_workspace_create_args(&args(&["--cwd", "/tmp"])).unwrap();
+        assert!(!unmarked.no_agent_resume);
+        assert_eq!(
+            parse_workspace_create_args(&args(&["--bogus"])).unwrap_err(),
+            "unknown option: --bogus"
+        );
+    }
 }

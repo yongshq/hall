@@ -136,6 +136,9 @@ impl App {
                 Err(err) => return encode_error(id, "worktree_open_failed", err.to_string()),
             }
         };
+        if created_workspace && params.no_agent_resume {
+            self.mark_root_pane_no_agent_resume(ws_idx, 0);
+        }
         self.mark_worktree_membership(
             &source,
             ws_idx,

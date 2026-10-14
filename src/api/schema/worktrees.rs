@@ -46,6 +46,11 @@ pub struct WorktreeOpenParams {
     pub focus: bool,
     #[serde(default, skip_serializing_if = "super::is_false")]
     pub trust_repository: bool,
+    /// Hall: mark the root pane of the workspace this opens, when it opens a
+    /// new one, so a restore drops it instead of recreating it (a reeve hand).
+    /// A worktree already open keeps its panes unmarked.
+    #[serde(default, skip_serializing_if = "super::is_false")]
+    pub no_agent_resume: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]

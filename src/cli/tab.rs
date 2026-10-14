@@ -51,35 +51,45 @@ fn tab_list(args: &[String]) -> std::io::Result<i32> {
 }
 
 fn tab_create(args: &[String]) -> std::io::Result<i32> {
+    let params = match parse_tab_create_args(args) {
+        Ok(params) => params,
+        Err(message) => {
+            eprintln!("{message}");
+            return Ok(2);
+        }
+    };
+
+    super::runtime::tab_create(params)
+}
+
+fn parse_tab_create_args(args: &[String]) -> Result<TabCreateParams, String> {
     let mut workspace_id = None;
     let mut cwd = None;
     let mut focus = false;
     let mut label = None;
     let mut env = HashMap::new();
+    let mut no_agent_resume = false;
 
     let mut index = 0;
     while index < args.len() {
         match args[index].as_str() {
             "--workspace" => {
                 let Some(value) = args.get(index + 1) else {
-                    eprintln!("missing value for --workspace");
-                    return Ok(2);
+                    return Err("missing value for --workspace".into());
                 };
                 workspace_id = Some(super::normalize_workspace_id(value));
                 index += 2;
             }
             "--cwd" => {
                 let Some(value) = args.get(index + 1) else {
-                    eprintln!("missing value for --cwd");
-                    return Ok(2);
+                    return Err("missing value for --cwd".into());
                 };
                 cwd = Some(value.clone());
                 index += 2;
             }
             "--label" => {
                 let Some(value) = args.get(index + 1) else {
-                    eprintln!("missing value for --label");
-                    return Ok(2);
+                    return Err("missing value for --label".into());
                 };
                 label = Some(value.clone());
                 index += 2;
@@ -92,34 +102,29 @@ fn tab_create(args: &[String]) -> std::io::Result<i32> {
                 focus = false;
                 index += 1;
             }
+            "--no-agent-resume" => {
+                no_agent_resume = true;
+                index += 1;
+            }
             "--env" => {
                 let Some(value) = args.get(index + 1) else {
-                    eprintln!("missing value for --env");
-                    return Ok(2);
+                    return Err("missing value for --env".into());
                 };
-                let (key, value) = match super::parse_env_assignment(value) {
-                    Ok(pair) => pair,
-                    Err(err) => {
-                        eprintln!("{err}");
-                        return Ok(2);
-                    }
-                };
+                let (key, value) = super::parse_env_assignment(value)?;
                 env.insert(key, value);
                 index += 2;
             }
-            other => {
-                eprintln!("unknown option: {other}");
-                return Ok(2);
-            }
+            other => return Err(format!("unknown option: {other}")),
         }
     }
 
-    super::runtime::tab_create(TabCreateParams {
+    Ok(TabCreateParams {
         workspace_id,
         cwd,
         focus,
         label,
         env,
+        no_agent_resume,
     })
 }
 
@@ -178,10 +183,49 @@ fn print_tab_help() {
     eprintln!("hall tab commands:");
     eprintln!("  hall tab list [--workspace <workspace_id>]");
     eprintln!(
-        "  hall tab create [--workspace <workspace_id>] [--cwd PATH] [--label TEXT] [--env KEY=VALUE] [--focus] [--no-focus]"
+        "  hall tab create [--workspace <workspace_id>] [--cwd PATH] [--label TEXT] [--env KEY=VALUE] [--focus] [--no-focus] [--no-agent-resume]"
     );
     eprintln!("  hall tab get <tab_id>");
     eprintln!("  hall tab focus <tab_id>");
     eprintln!("  hall tab rename <tab_id> <label>");
     eprintln!("  hall tab close <tab_id>");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(values: &[&str]) -> Vec<String> {
+        values.iter().map(|value| (*value).to_string()).collect()
+    }
+
+    #[test]
+    fn tab_create_parses_no_agent_resume() {
+        let marked =
+            parse_tab_create_args(&args(&["--workspace", "w1", "--no-agent-resume"])).unwrap();
+        assert!(marked.no_agent_resume);
+        assert_eq!(
+            serde_json::to_value(&marked).unwrap()["no_agent_resume"],
+            serde_json::json!(true)
+        );
+
+        let unmarked = parse_tab_create_args(&args(&["--workspace", "w1"])).unwrap();
+        assert!(!unmarked.no_agent_resume);
+        assert!(serde_json::to_value(&unmarked)
+            .unwrap()
+            .get("no_agent_resume")
+            .is_none());
+    }
+
+    #[test]
+    fn tab_create_reports_usage_errors() {
+        assert_eq!(
+            parse_tab_create_args(&args(&["--no-agent-resume", "--bogus"])).unwrap_err(),
+            "unknown option: --bogus"
+        );
+        assert_eq!(
+            parse_tab_create_args(&args(&["--env", "KEY"])).unwrap_err(),
+            "env must use KEY=VALUE"
+        );
+    }
 }

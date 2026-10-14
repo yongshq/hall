@@ -75,6 +75,12 @@ Reeve's listing shows a flag only while the reeve's watch runs, and the watch ex
 - a `waiting` rise left silent because this client rang herdr's request for the dialog the hand's pane stands at counts its spell as rung, so one dialog still rings once; a dialog counts as rung when its request was delivered, even if that agent's sound is off (`[ui.sound.agents]`), so the `waiting` stays silent too; while this client only holds that request (the toast delay, or the snapshot), the rise waits and counts nothing, and if herdr's rule then drops the request (the pane left the dialog first) the rise rings as any other;
 - an errand that leaves the listing has its spells forgotten: back with the same `since`, it rings as a hand new to the listing.
 
+## A hand's pane after a hall restart
+
+A reeve hand's pane is not restored (the liege's choice A, 2026-10-14). Reeve opens each hand's pane with `--no-agent-resume` (`tab create`, `worktree open` or `workspace create`), and hall saves that mark with the pane. When the server starts again and restores its session, a marked pane is not recreated at all, a tab or workspace left with no pane goes with it, and their ids are not handed out again. So after a hall restart the hand's recorded target no longer resolves: reeve's sentry reports the errand `stale:` (session gone), and the reeve sends the hand out again from its brief. Work committed on the hand's branch is kept; its unfinished conversation is not. The reeve's own pane is unmarked and resumes as before (`[session] resume_agents_on_restore`).
+
+Why: hall's native resume restarts claude as a bare `claude --resume <id>`, without the hand's launch line (`REEVE_HAND`, the office's `--settings`, `--add-dir`), so a resumed hand stalls at its next `reeve-say`. `pane get` and `pane list` show `"agent_resume": false` for a marked pane, so reeve can check the mark. A live handoff keeps marked panes, since their processes carry on.
+
 ## The stand-in
 
 The stand-in prints version 1 with every location's `backend` `hall`, the session name from the world file's `herdr_session` key, and no `open` and no `since`, so its flags ring on every rise.

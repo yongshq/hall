@@ -10,7 +10,7 @@ mod restore;
 mod snapshot;
 
 pub use self::io::{clear, clear_history, load, load_history, save};
-pub use self::restore::restore;
+pub use self::restore::{drop_no_resume_panes, restore};
 #[cfg(unix)]
 pub use self::restore::{handoff_pane_aliases, restore_handoff};
 pub use self::snapshot::{

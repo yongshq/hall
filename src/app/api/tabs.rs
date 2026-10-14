@@ -51,6 +51,7 @@ impl App {
             focus,
             label,
             env,
+            no_agent_resume,
         } = params;
         let ws_idx = if let Some(workspace_id) = workspace_id {
             let Some(ws_idx) = self.parse_workspace_id(&workspace_id) else {
@@ -92,7 +93,8 @@ impl App {
                 )
             });
         match result {
-            Ok((tab_idx, terminal, runtime)) => {
+            Ok((tab_idx, mut terminal, runtime)) => {
+                terminal.no_agent_resume = no_agent_resume;
                 self.terminal_runtimes.insert(terminal.id.clone(), runtime);
                 self.state.terminals.insert(terminal.id.clone(), terminal);
                 self.state.remove_alias_shadowed_by_new_pane(
@@ -459,6 +461,7 @@ mod tests {
                 focus: false,
                 label: None,
                 env: Default::default(),
+                no_agent_resume: false,
             },
         );
 
@@ -471,6 +474,52 @@ mod tests {
             crate::worktree::canonical_or_original(created_cwd),
             crate::worktree::canonical_or_original(&cached_cwd)
         );
+        shutdown_test_runtimes(&mut app);
+    }
+
+    #[tokio::test]
+    async fn tab_create_no_agent_resume_marks_only_its_root_pane() {
+        let event_hub = crate::api::EventHub::default();
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(
+            &Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            event_hub,
+        );
+        app.state.default_shell = exiting_test_command().into();
+        app.state.shell_mode = ShellModeConfig::NonLogin;
+        app.state.workspaces = vec![Workspace::test_new("tabs")];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.ensure_test_terminals();
+
+        let response = app.handle_tab_create(
+            "req".into(),
+            TabCreateParams {
+                workspace_id: None,
+                cwd: Some(std::env::temp_dir().display().to_string()),
+                focus: false,
+                label: Some("hand".into()),
+                env: Default::default(),
+                no_agent_resume: true,
+            },
+        );
+
+        let response: serde_json::Value = serde_json::from_str(&response).unwrap();
+        assert_eq!(
+            response["result"]["root_pane"]["agent_resume"],
+            serde_json::json!(false)
+        );
+        let reeve_root = app.state.workspaces[0].tabs[0].root_pane;
+        let reeve_pane = serde_json::to_value(app.pane_info(0, reeve_root).unwrap()).unwrap();
+        assert!(
+            reeve_pane.get("agent_resume").is_none(),
+            "an unmarked pane's JSON is unchanged"
+        );
+        let hand_root = app.state.workspaces[0].tabs[1].root_pane;
+        assert!(!app.pane_info(0, hand_root).unwrap().agent_resume);
         shutdown_test_runtimes(&mut app);
     }
 }

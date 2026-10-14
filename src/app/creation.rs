@@ -160,6 +160,23 @@ impl App {
         Ok(idx)
     }
 
+    /// Hall: mark a tab's root pane `--no-agent-resume`, so a restore drops it.
+    pub(super) fn mark_root_pane_no_agent_resume(&mut self, ws_idx: usize, tab_idx: usize) {
+        let Some(terminal_id) = self
+            .state
+            .workspaces
+            .get(ws_idx)
+            .and_then(|ws| ws.tabs.get(tab_idx))
+            .and_then(|tab| tab.panes.get(&tab.root_pane))
+            .map(|pane| pane.attached_terminal_id.clone())
+        else {
+            return;
+        };
+        if let Some(terminal) = self.state.terminals.get_mut(&terminal_id) {
+            terminal.no_agent_resume = true;
+        }
+    }
+
     pub(super) fn collect_panes_for_workspace(
         &self,
         workspace_id: Option<&str>,
@@ -352,6 +369,7 @@ impl App {
             agent_session: terminal_agent_session_info(terminal),
             scroll,
             revision: terminal.revision,
+            agent_resume: !terminal.no_agent_resume,
         })
     }
 

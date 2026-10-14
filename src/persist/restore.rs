@@ -91,6 +91,151 @@ pub fn restore(
     )
 }
 
+/// Hall: drop every pane created with `--no-agent-resume` (a reeve hand) from a
+/// snapshot before a cold restore, so it is not recreated. A tab left with no
+/// pane, and a workspace left with no tab, are dropped too; the active tab,
+/// active workspace and selected workspace move to the nearest one kept. The
+/// dropped ids stay reserved, so a later pane, tab or workspace never takes
+/// one and an old target never resolves. A live handoff does not call this:
+/// its panes' processes carry on.
+pub fn drop_no_resume_panes(
+    snapshot: &mut SessionSnapshot,
+    mut history: Option<&mut SessionHistorySnapshot>,
+) {
+    let mut kept_workspaces = Vec::new();
+    for (ws_idx, ws_snap) in snapshot.workspaces.iter_mut().enumerate() {
+        let ws_history = history
+            .as_deref_mut()
+            .and_then(|history| history.workspaces.get_mut(ws_idx));
+        if drop_no_resume_panes_in_workspace(ws_snap, ws_history) {
+            kept_workspaces.push(ws_idx);
+        }
+    }
+    if kept_workspaces.len() == snapshot.workspaces.len() {
+        return;
+    }
+
+    crate::workspace::reserve_public_workspace_ids(
+        snapshot
+            .workspaces
+            .iter()
+            .filter_map(|ws_snap| ws_snap.id.as_deref()),
+    );
+    retain_indices(&mut snapshot.workspaces, &kept_workspaces);
+    if let Some(history) = history {
+        retain_indices(&mut history.workspaces, &kept_workspaces);
+    }
+    snapshot.active = snapshot
+        .active
+        .and_then(|active| kept_index(active, &kept_workspaces));
+    snapshot.selected = kept_index(snapshot.selected, &kept_workspaces).unwrap_or(0);
+}
+
+/// Returns false when the workspace has no tab left.
+fn drop_no_resume_panes_in_workspace(
+    snap: &mut WorkspaceSnapshot,
+    mut history: Option<&mut WorkspaceHistorySnapshot>,
+) -> bool {
+    let marked_in = |tab: &TabSnapshot| -> HashSet<u32> {
+        tab.panes
+            .iter()
+            .filter(|(_, pane)| pane.no_agent_resume)
+            .map(|(old_id, _)| *old_id)
+            .collect()
+    };
+    if snap.tabs.iter().all(|tab| marked_in(tab).is_empty()) {
+        return true;
+    }
+
+    // Pin each tab's public number before the tabs shift, and keep a dropped
+    // tab's number from being reused.
+    for idx in snap.public_tab_numbers.len()..snap.tabs.len() {
+        snap.public_tab_numbers.push(idx + 1);
+    }
+    if let Some(max) = snap.public_tab_numbers.iter().copied().max() {
+        snap.next_public_tab_number = snap.next_public_tab_number.max(max + 1);
+    }
+
+    let mut kept_tabs = Vec::new();
+    for (tab_idx, tab) in snap.tabs.iter_mut().enumerate() {
+        let marked = marked_in(tab);
+        if marked.is_empty() {
+            kept_tabs.push(tab_idx);
+            continue;
+        }
+        if let Some(tab_history) = history
+            .as_deref_mut()
+            .and_then(|history| history.tabs.get_mut(tab_idx))
+        {
+            tab_history
+                .panes
+                .retain(|old_id, _| !marked.contains(old_id));
+        }
+        let layout = std::mem::replace(&mut tab.layout, LayoutSnapshot::Pane(0));
+        let Some(layout) = prune_layout_snapshot(layout, &marked) else {
+            continue;
+        };
+        tab.layout = layout;
+        tab.panes.retain(|old_id, _| !marked.contains(old_id));
+        tab.focused = tab.focused.filter(|old_id| !marked.contains(old_id));
+        tab.root_pane = tab.root_pane.filter(|old_id| !marked.contains(old_id));
+        kept_tabs.push(tab_idx);
+    }
+
+    if kept_tabs.len() != snap.tabs.len() {
+        retain_indices(&mut snap.tabs, &kept_tabs);
+        retain_indices(&mut snap.public_tab_numbers, &kept_tabs);
+        if let Some(history) = history {
+            retain_indices(&mut history.tabs, &kept_tabs);
+        }
+        snap.active_tab = kept_index(snap.active_tab, &kept_tabs).unwrap_or(0);
+    }
+    !snap.tabs.is_empty()
+}
+
+fn prune_layout_snapshot(node: LayoutSnapshot, dropped: &HashSet<u32>) -> Option<LayoutSnapshot> {
+    match node {
+        LayoutSnapshot::Pane(old_id) => (!dropped.contains(&old_id)).then_some(node),
+        LayoutSnapshot::Split {
+            direction,
+            ratio,
+            first,
+            second,
+        } => match (
+            prune_layout_snapshot(*first, dropped),
+            prune_layout_snapshot(*second, dropped),
+        ) {
+            (Some(first), Some(second)) => Some(LayoutSnapshot::Split {
+                direction,
+                ratio,
+                first: Box::new(first),
+                second: Box::new(second),
+            }),
+            (Some(remaining), None) | (None, Some(remaining)) => Some(remaining),
+            (None, None) => None,
+        },
+    }
+}
+
+/// Keep the items at `kept` (ascending indices); items past the end are ignored.
+fn retain_indices<T>(items: &mut Vec<T>, kept: &[usize]) {
+    let mut idx = 0;
+    items.retain(|_| {
+        let keep = kept.contains(&idx);
+        idx += 1;
+        keep
+    });
+}
+
+/// Where `old` lands once only `kept` (ascending indices) remain: itself if
+/// kept, else the nearest kept one before it, else the first kept one.
+fn kept_index(old: usize, kept: &[usize]) -> Option<usize> {
+    kept.iter()
+        .position(|&idx| idx == old)
+        .or_else(|| kept.iter().rposition(|&idx| idx < old))
+        .or_else(|| (!kept.is_empty()).then_some(0))
+}
+
 #[cfg(unix)]
 pub fn restore_handoff(
     snapshot: &SessionSnapshot,
@@ -496,6 +641,7 @@ fn restore_tab(
             .and_then(|pane| pane.managed_agent_kind.as_deref())
             .and_then(crate::detect::parse_canonical_agent_label);
         let saved_launch_argv = saved_pane.and_then(|p| p.launch_argv.clone());
+        let saved_no_agent_resume = saved_pane.is_some_and(|p| p.no_agent_resume);
         let saved_agent_session = saved_pane.and_then(|p| p.agent_session.as_ref());
         let saved_history =
             old_id.and_then(|old_id| history.and_then(|history| history.panes.get(old_id)));
@@ -537,6 +683,7 @@ fn restore_tab(
             let terminal_id = TerminalId::alloc();
             let mut terminal = TerminalState::new(terminal_id.clone(), cwd.clone())
                 .with_pending_agent_resume_plan(plan);
+            terminal.no_agent_resume = saved_no_agent_resume;
             if let Some(label) = saved_label {
                 terminal.set_manual_label(label);
             }
@@ -629,6 +776,7 @@ fn restore_tab(
             Ok(runtime) => {
                 let terminal_id = TerminalId::alloc();
                 let mut terminal = TerminalState::new(terminal_id.clone(), cwd.clone());
+                terminal.no_agent_resume = saved_no_agent_resume;
                 if was_imported {
                     if let Some(argv) = saved_launch_argv {
                         terminal = terminal.with_launch_argv(argv).with_respawn_shell_on_exit();
@@ -1198,6 +1346,7 @@ mod tests {
                                 value: "opencode-session".into(),
                             }),
                             launch_argv: None,
+                            no_agent_resume: false,
                         },
                     )]),
                     zoomed: false,
@@ -1279,6 +1428,7 @@ mod tests {
                                 managed_agent_kind: None,
                                 agent_session: None,
                                 launch_argv: None,
+                                no_agent_resume: false,
                             },
                         ),
                         (
@@ -1290,6 +1440,7 @@ mod tests {
                                 managed_agent_kind: None,
                                 agent_session: None,
                                 launch_argv: None,
+                                no_agent_resume: false,
                             },
                         ),
                     ]),
@@ -1343,6 +1494,7 @@ mod tests {
                     managed_agent_kind: None,
                     agent_session: None,
                     launch_argv: None,
+                    no_agent_resume: false,
                 },
             )
         };
@@ -1358,6 +1510,7 @@ mod tests {
                 value: "codex-session".into(),
             }),
             launch_argv: None,
+            no_agent_resume: false,
         };
         let snapshot = SessionSnapshot {
             version: super::super::snapshot::SNAPSHOT_VERSION,
@@ -1509,6 +1662,7 @@ mod tests {
                                 value: "codex-session".into(),
                             }),
                             launch_argv: None,
+                            no_agent_resume: false,
                         },
                     )]),
                     zoomed: false,
@@ -1658,6 +1812,258 @@ mod tests {
         let _ = runtime.try_send_bytes(bytes::Bytes::from_static(b"exit\n"));
     }
 
+    fn no_resume_pane(
+        cwd: &std::path::Path,
+        claude_session: Option<&str>,
+        no_agent_resume: bool,
+    ) -> super::super::snapshot::PaneSnapshot {
+        super::super::snapshot::PaneSnapshot {
+            cwd: cwd.to_path_buf(),
+            label: None,
+            agent_name: None,
+            managed_agent_kind: None,
+            agent_session: claude_session.map(|session| {
+                super::super::snapshot::PaneAgentSessionSnapshot {
+                    source: "herdr:claude".into(),
+                    agent: "claude".into(),
+                    kind: crate::agent_resume::AgentSessionRefKind::Id,
+                    value: session.into(),
+                }
+            }),
+            launch_argv: None,
+            no_agent_resume,
+        }
+    }
+
+    fn single_pane_tab(old_id: u32, pane: super::super::snapshot::PaneSnapshot) -> TabSnapshot {
+        TabSnapshot {
+            custom_name: None,
+            layout: LayoutSnapshot::Pane(old_id),
+            panes: HashMap::from([(old_id, pane)]),
+            zoomed: false,
+            focused: Some(old_id),
+            root_pane: Some(old_id),
+        }
+    }
+
+    fn history_for(old_ids: &[u32]) -> TabHistorySnapshot {
+        TabHistorySnapshot {
+            panes: old_ids
+                .iter()
+                .map(|old_id| {
+                    (
+                        *old_id,
+                        PaneHistorySnapshot {
+                            ansi: format!("pane {old_id}\r\n"),
+                            lines: 1,
+                        },
+                    )
+                })
+                .collect(),
+        }
+    }
+
+    /// w1: tab t1 holds the reeve's pane 10 beside a hand's pane 20, tab t2
+    /// holds only a hand's pane 30 and is active; w2 holds only a hand's pane
+    /// 40 and is the active, selected workspace.
+    fn snapshot_with_reeve_and_hands() -> (SessionSnapshot, SessionHistorySnapshot) {
+        let cwd = std::env::current_dir().unwrap();
+        let snapshot = SessionSnapshot {
+            version: super::super::snapshot::SNAPSHOT_VERSION,
+            workspaces: vec![
+                WorkspaceSnapshot {
+                    id: Some("w1".into()),
+                    custom_name: Some("Aldric".into()),
+                    identity_cwd: cwd.clone(),
+                    worktree_space: None,
+                    public_pane_numbers: HashMap::from([(10, 1), (20, 2), (30, 3)]),
+                    next_public_pane_number: 4,
+                    public_tab_numbers: vec![1, 2],
+                    next_public_tab_number: 3,
+                    tabs: vec![
+                        TabSnapshot {
+                            custom_name: None,
+                            layout: LayoutSnapshot::Split {
+                                direction: super::super::snapshot::DirectionSnapshot::Horizontal,
+                                ratio: 0.5,
+                                first: Box::new(LayoutSnapshot::Pane(10)),
+                                second: Box::new(LayoutSnapshot::Pane(20)),
+                            },
+                            panes: HashMap::from([
+                                (10, no_resume_pane(&cwd, Some("reeve-session"), false)),
+                                (20, no_resume_pane(&cwd, Some("hand-session-1"), true)),
+                            ]),
+                            zoomed: false,
+                            focused: Some(20),
+                            root_pane: Some(10),
+                        },
+                        single_pane_tab(30, no_resume_pane(&cwd, Some("hand-session-2"), true)),
+                    ],
+                    active_tab: 1,
+                },
+                WorkspaceSnapshot {
+                    id: Some("w2".into()),
+                    custom_name: Some("hand".into()),
+                    identity_cwd: cwd.clone(),
+                    worktree_space: None,
+                    public_pane_numbers: HashMap::from([(40, 1)]),
+                    next_public_pane_number: 2,
+                    public_tab_numbers: vec![1],
+                    next_public_tab_number: 2,
+                    tabs: vec![single_pane_tab(
+                        40,
+                        no_resume_pane(&cwd, Some("hand-session-3"), true),
+                    )],
+                    active_tab: 0,
+                },
+            ],
+            active: Some(1),
+            selected: 1,
+            sidebar_width: None,
+            sidebar_section_split: None,
+            collapsed_space_keys: Default::default(),
+        };
+        let history = SessionHistorySnapshot {
+            version: super::super::snapshot::SNAPSHOT_VERSION,
+            workspaces: vec![
+                WorkspaceHistorySnapshot {
+                    tabs: vec![history_for(&[10, 20]), history_for(&[30])],
+                },
+                WorkspaceHistorySnapshot {
+                    tabs: vec![history_for(&[40])],
+                },
+            ],
+        };
+        (snapshot, history)
+    }
+
+    #[test]
+    fn drop_no_resume_panes_keeps_unmarked_and_prunes_emptied_tabs_and_workspaces() {
+        let (mut snapshot, mut history) = snapshot_with_reeve_and_hands();
+
+        drop_no_resume_panes(&mut snapshot, Some(&mut history));
+
+        assert_eq!(snapshot.workspaces.len(), 1, "w2 had only a hand's pane");
+        assert_eq!(snapshot.active, Some(0), "the active w2 falls back to w1");
+        assert_eq!(snapshot.selected, 0);
+        let ws = &snapshot.workspaces[0];
+        assert_eq!(ws.id.as_deref(), Some("w1"));
+        assert_eq!(ws.tabs.len(), 1, "t2 had only a hand's pane");
+        assert_eq!(ws.active_tab, 0, "the active t2 falls back to t1");
+        assert_eq!(ws.public_tab_numbers, vec![1]);
+        assert_eq!(ws.next_public_tab_number, 3, "t2 is not handed out again");
+        let tab = &ws.tabs[0];
+        assert!(matches!(tab.layout, LayoutSnapshot::Pane(10)));
+        assert_eq!(tab.panes.keys().copied().collect::<Vec<_>>(), vec![10]);
+        assert_eq!(tab.focused, None, "the focused hand pane is gone");
+        assert_eq!(tab.root_pane, Some(10));
+
+        assert_eq!(history.workspaces.len(), 1);
+        assert_eq!(history.workspaces[0].tabs.len(), 1);
+        assert_eq!(
+            history.workspaces[0].tabs[0]
+                .panes
+                .keys()
+                .copied()
+                .collect::<Vec<_>>(),
+            vec![10]
+        );
+    }
+
+    #[test]
+    fn drop_no_resume_panes_leaves_unmarked_session_alone() {
+        let (mut snapshot, _history) = snapshot_with_reeve_and_hands();
+        for ws in &mut snapshot.workspaces {
+            for tab in &mut ws.tabs {
+                for pane in tab.panes.values_mut() {
+                    pane.no_agent_resume = false;
+                }
+            }
+        }
+        let before = serde_json::to_string(&snapshot).unwrap();
+
+        drop_no_resume_panes(&mut snapshot, None);
+
+        assert_eq!(serde_json::to_string(&snapshot).unwrap(), before);
+    }
+
+    #[test]
+    fn drop_no_resume_panes_keeps_focus_on_a_kept_active_tab() {
+        let (mut snapshot, _history) = snapshot_with_reeve_and_hands();
+        let cwd = std::env::current_dir().unwrap();
+        // A third tab after the emptied t2, active: it keeps its place.
+        snapshot.workspaces[0]
+            .tabs
+            .push(single_pane_tab(50, no_resume_pane(&cwd, None, false)));
+        snapshot.workspaces[0].public_tab_numbers.push(3);
+        snapshot.workspaces[0].next_public_tab_number = 4;
+        snapshot.workspaces[0].active_tab = 2;
+        snapshot.active = Some(0);
+
+        drop_no_resume_panes(&mut snapshot, None);
+
+        let ws = &snapshot.workspaces[0];
+        assert_eq!(ws.tabs.len(), 2);
+        assert_eq!(ws.public_tab_numbers, vec![1, 3]);
+        assert_eq!(ws.active_tab, 1);
+        assert!(matches!(ws.tabs[1].layout, LayoutSnapshot::Pane(50)));
+        assert_eq!(snapshot.active, Some(0));
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn restore_drops_hand_panes_and_still_resumes_the_reeve() {
+        let (mut snapshot, mut history) = snapshot_with_reeve_and_hands();
+        drop_no_resume_panes(&mut snapshot, Some(&mut history));
+        let (events, _event_rx) = mpsc::channel(4);
+
+        let (workspaces, terminals, runtimes) = restore(
+            &snapshot,
+            Some(&history),
+            24,
+            80,
+            0,
+            test_restore_shell(),
+            crate::config::ShellModeConfig::NonLogin,
+            true,
+            events,
+            Arc::new(Notify::new()),
+            Arc::new(RenderSignal::new()),
+        );
+
+        assert_eq!(workspaces.len(), 1);
+        let ws = &workspaces[0];
+        assert_eq!(ws.tabs.len(), 1);
+        assert_eq!(ws.tabs[0].layout.pane_ids().len(), 1);
+        assert_eq!(ws.tabs[0].number, 1);
+        assert!(ws.next_public_tab_number >= 3);
+        assert_eq!(
+            ws.public_pane_numbers.values().copied().collect::<Vec<_>>(),
+            vec![1],
+            "the reeve keeps w1:p1"
+        );
+        assert!(
+            ws.next_public_pane_number >= 4,
+            "the hands' pane numbers are not handed out again"
+        );
+        assert!(runtimes.is_empty(), "the reeve's resume is deferred");
+        assert_eq!(terminals.len(), 1);
+        let terminal = terminals.values().next().unwrap();
+        assert!(!terminal.no_agent_resume);
+        assert_eq!(
+            terminal
+                .pending_agent_resume_plan
+                .as_ref()
+                .expect("the reeve's claude still resumes")
+                .argv,
+            vec!["claude", "--resume", "reeve-session"]
+        );
+        assert!(
+            crate::workspace::generate_workspace_id() != "w2",
+            "the dropped w2 is not handed out again"
+        );
+    }
+
     fn snapshot_with_saved_pane_history() -> (SessionSnapshot, SessionHistorySnapshot) {
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
         let mut panes = HashMap::new();
@@ -1670,6 +2076,7 @@ mod tests {
                 managed_agent_kind: None,
                 agent_session: None,
                 launch_argv: None,
+                no_agent_resume: false,
             },
         );
         let history = SessionHistorySnapshot {

@@ -348,6 +348,7 @@ impl ClientShellState {
                 label: None,
                 focus: true,
                 trust_repository: false,
+                no_agent_resume: false,
             }),
             PendingEndpointKind::WorktreeOpen,
             outcome,

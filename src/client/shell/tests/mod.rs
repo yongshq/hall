@@ -163,6 +163,7 @@ fn pane_scroll_result(
                 viewport_rows,
             }),
             revision: 0,
+            agent_resume: true,
         },
     }
 }

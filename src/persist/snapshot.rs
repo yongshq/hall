@@ -107,6 +107,10 @@ pub struct PaneSnapshot {
     pub agent_session: Option<PaneAgentSessionSnapshot>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub launch_argv: Option<Vec<String>>,
+    /// Hall: the pane was created with `--no-agent-resume`; a cold restore
+    /// drops it. Absent in older files, so they load unmarked.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub no_agent_resume: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -335,6 +339,7 @@ fn capture_tab(
             })
             .unwrap_or_default();
         let launch_argv = terminal.and_then(|terminal| terminal.launch_argv.clone());
+        let no_agent_resume = terminal.is_some_and(|terminal| terminal.no_agent_resume);
         let agent_session = terminal.and_then(|terminal| {
             if let Some(authority) = terminal.hook_authority.as_ref() {
                 if let Some(session_ref) = authority.session_ref.as_ref() {
@@ -365,6 +370,7 @@ fn capture_tab(
                 managed_agent_kind,
                 agent_session,
                 launch_argv,
+                no_agent_resume,
             },
         );
     }
@@ -642,6 +648,7 @@ mod tests {
                 managed_agent_kind: None,
                 agent_session: None,
                 launch_argv: None,
+                no_agent_resume: false,
             },
         );
         panes.insert(
@@ -653,6 +660,7 @@ mod tests {
                 managed_agent_kind: None,
                 agent_session: None,
                 launch_argv: None,
+                no_agent_resume: false,
             },
         );
 
@@ -1175,6 +1183,46 @@ mod tests {
     }
 
     #[test]
+    fn no_agent_resume_mark_round_trips_through_saved_session() {
+        let mut state = state_with_workspaces(&["one"]);
+        let root = state.workspaces[0].tabs[0].root_pane;
+        state.ensure_test_terminals();
+        let terminal_id = state.workspaces[0].tabs[0].panes[&root]
+            .attached_terminal_id
+            .clone();
+        state
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .no_agent_resume = true;
+
+        let json = serde_json::to_string(&capture_from_state(&state)).unwrap();
+        assert!(json.contains(r#""no_agent_resume":true"#));
+        let restored = parse_snapshot(&json).unwrap();
+        assert!(restored.workspaces[0].tabs[0].panes[&root.raw()].no_agent_resume);
+
+        state
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .no_agent_resume = false;
+        let json = serde_json::to_string(&capture_from_state(&state)).unwrap();
+        assert!(
+            !json.contains("no_agent_resume"),
+            "an unmarked pane saves as before"
+        );
+    }
+
+    #[test]
+    fn saved_session_without_no_agent_resume_loads_unmarked() {
+        let json = r#"{"version":3,"workspaces":[{"id":"w1","identity_cwd":"/tmp","tabs":[{"layout":{"Pane":0},"panes":{"0":{"cwd":"/tmp","agent_session":{"source":"herdr:claude","agent":"claude","kind":"id","value":"abc"}}},"zoomed":false,"focused":0,"root_pane":0}]}],"active":0,"selected":0}"#;
+        let snap = parse_snapshot(json).unwrap();
+        let pane = &snap.workspaces[0].tabs[0].panes[&0];
+        assert!(!pane.no_agent_resume);
+        assert!(pane.agent_session.is_some());
+    }
+
+    #[test]
     fn old_unversioned_snapshot_loads_as_version_0() {
         let json = r#"{"workspaces":[],"active":null,"selected":0}"#;
         let snap = parse_snapshot(json).unwrap();
@@ -1206,6 +1254,7 @@ mod tests {
                 managed_agent_kind: None,
                 agent_session: None,
                 launch_argv: None,
+                no_agent_resume: false,
             },
         );
         panes.insert(
@@ -1219,6 +1268,7 @@ mod tests {
                 managed_agent_kind: None,
                 agent_session: None,
                 launch_argv: None,
+                no_agent_resume: false,
             },
         );
 

@@ -76,11 +76,12 @@ session_dir() {
 # environment is the server's, and reeve's launch line names no REEVE_HOME, so
 # without it that hand's reeve hooks would write to the live ~/.reeve. Set in
 # every listing mode, since a test reeve can dispatch through reeve's hall
-# backend in either.
+# backend in either. It reads the client config up writes first, CLIENT_CONFIG,
+# as HALL_CONFIG_PATH, for its [session] section: no test claude is resumed.
 start_session() {
   local s=$1 i dir
   check_session "$s"
-  detach "${HALL_CLEAN_ENV[@]}" "${SERVER_DROP[@]}" REEVE_HOME="$HALL_DEV_HOME" "$HALL_BIN" --session "$s" server
+  detach "${HALL_CLEAN_ENV[@]}" "${SERVER_DROP[@]}" REEVE_HOME="$HALL_DEV_HOME" HALL_CONFIG_PATH="$CLIENT_CONFIG" "$HALL_BIN" --session "$s" server
   if [ "$DRY_RUN" = 1 ]; then
     hall_session_list SESSIONS
     return 0
@@ -199,7 +200,10 @@ add_to_world() {
 # write_client_config: the hall client config naming LISTING_CMD, the stand-in's
 # or reeve's listing of this home, as the reeve tree's listing command.
 # Rewritten on every up, since it names the stand-in this checkout runs or the
-# listing chosen. Attach with HALL_CONFIG_PATH set to it.
+# listing chosen. Attach with HALL_CONFIG_PATH set to it. The hall-dev server up
+# starts reads it too, for [session]: a test claude's XDG guard is on its launch
+# line (decision 47), and hall's resume restarts claude as a bare
+# `claude --resume <id>`, so after a server restart no test claude is resumed.
 write_client_config() {
   local p
   for p in "${LISTING_CMD[0]}" "$HALL_DEV_HOME"; do
@@ -214,6 +218,11 @@ onboarding = false
 
 [reeve]
 listing_command = [\"${LISTING_CMD[0]}\", \"--home\", \"$HALL_DEV_HOME\"]
+
+# No test claude is resumed after a server restart: its launch line, the XDG
+# guard on it (decision 47) among the rest, would be lost.
+[session]
+resume_agents_on_restore = false
 "
 }
 
@@ -310,6 +319,10 @@ cmd_up() {
     die "reeve's listing command $HALL_DEV_REEVE_LISTING is not there: it comes with reeve's hall backend (plan step 5); use --listing standin until it lands"
   fi
 
+  # The client config first: the server up starts reads it.
+  make_dir "$HALL_DEV_HOME/standin"
+  write_client_config
+
   hall_session_list SESSIONS
   if session_running "$SESSIONS" "$HALL_DEV_SESSION" && [ "$DRY_RUN" = 0 ]; then
     server_has_home "$(session_socket "$SESSIONS" "$HALL_DEV_SESSION")" ||
@@ -327,7 +340,6 @@ cmd_up() {
   fi
   say "  socket: $HALL_DEV_SOCKET"
 
-  make_dir "$HALL_DEV_HOME/standin"
   make_dir "$(xdg_dir)"
   make_dir "$(xdg_state_dir)"
   if [ "$DRY_RUN" = 1 ] || [ ! -e "$WORLD" ]; then
@@ -335,7 +347,6 @@ cmd_up() {
   else
     add_to_world
   fi
-  write_client_config
 
   # Test reeves first, so each test hand has its reeve's workspace to open in.
   for line in "${HALL_DEV_ROSTER[@]}"; do

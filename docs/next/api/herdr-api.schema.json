@@ -765,6 +765,10 @@
                 "null"
               ]
             },
+            "agent_resume": {
+              "description": "Hall: false for a pane created with `--no-agent-resume`, which a\nrestore drops; left out when true.",
+              "type": "boolean"
+            },
             "agent_session": {
               "anyOf": [
                 {
@@ -4360,6 +4364,10 @@
                 "null"
               ]
             },
+            "no_agent_resume": {
+              "description": "Hall: mark the new root pane so a restore drops it instead of\nrecreating it (a reeve hand).",
+              "type": "boolean"
+            },
             "workspace_id": {
               "type": [
                 "string",
@@ -4469,6 +4477,10 @@
                 "string",
                 "null"
               ]
+            },
+            "no_agent_resume": {
+              "description": "Hall: mark the new root pane so a restore drops it instead of\nrecreating it (a reeve hand).",
+              "type": "boolean"
             },
             "source_workspace_id": {
               "description": "Workspace whose focused pane supplies the `follow` cwd policy.",
@@ -4707,6 +4719,10 @@
                 "string",
                 "null"
               ]
+            },
+            "no_agent_resume": {
+              "description": "Hall: mark the root pane of the workspace this opens, when it opens a\nnew one, so a restore drops it instead of recreating it (a reeve hand).\nA worktree already open keeps its panes unmarked.",
+              "type": "boolean"
             },
             "path": {
               "type": [
@@ -7929,6 +7945,10 @@
                 "string",
                 "null"
               ]
+            },
+            "agent_resume": {
+              "description": "Hall: false for a pane created with `--no-agent-resume`, which a\nrestore drops; left out when true.",
+              "type": "boolean"
             },
             "agent_session": {
               "anyOf": [

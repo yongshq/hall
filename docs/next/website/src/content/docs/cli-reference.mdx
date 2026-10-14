@@ -138,7 +138,7 @@ Use `default` as the session name when you need to stop the default session expl
 
 ```bash
 herdr workspace list
-herdr workspace create [--cwd PATH] [--label TEXT] [--env KEY=VALUE] [--focus] [--no-focus]
+herdr workspace create [--cwd PATH] [--label TEXT] [--env KEY=VALUE] [--focus] [--no-focus] [--no-agent-resume]
 herdr workspace get <workspace_id>
 herdr workspace focus <workspace_id>
 herdr workspace rename <workspace_id> <label>
@@ -159,7 +159,7 @@ A workspace is a top-level project or work context. Creating one also creates it
 ```bash
 herdr worktree list [--workspace ID | --cwd PATH] [--trust-repository]
 herdr worktree create [--workspace ID | --cwd PATH] [--branch NAME] [--base REF] [--path PATH] [--label TEXT] [--focus] [--no-focus] [--trust-repository]
-herdr worktree open [--workspace ID | --cwd PATH] (--path PATH | --branch NAME) [--label TEXT] [--focus] [--no-focus] [--trust-repository]
+herdr worktree open [--workspace ID | --cwd PATH] (--path PATH | --branch NAME) [--label TEXT] [--focus] [--no-focus] [--trust-repository] [--no-agent-resume]
 herdr worktree remove --workspace ID [--force] [--trust-repository]
 ```
 
@@ -173,7 +173,7 @@ Git rejects repositories owned by another user by default. If you have independe
 
 ```bash
 herdr tab list [--workspace <workspace_id>]
-herdr tab create [--workspace <workspace_id>] [--cwd PATH] [--label TEXT] [--env KEY=VALUE] [--focus] [--no-focus]
+herdr tab create [--workspace <workspace_id>] [--cwd PATH] [--label TEXT] [--env KEY=VALUE] [--focus] [--no-focus] [--no-agent-resume]
 herdr tab get <tab_id>
 herdr tab focus <tab_id>
 herdr tab rename <tab_id> <label>
@@ -183,6 +183,8 @@ herdr tab close <tab_id>
 A tab is another terminal layout inside a workspace. Without `--workspace`, `tab create` uses the active workspace and fails if none exists. Its JSON response exposes `.result.tab.tab_id` and `.result.root_pane.pane_id`. Closing a workspace's last tab also closes the workspace, matching the TUI close-tab action. If `confirm_close` is enabled and closing the tab would also close a whole worktree group, `tab close` returns a `confirmation_required` error instead.
 
 Workspace and tab creation, and pane splitting, leave focus unchanged by default. `--focus` selects the new layout; `--no-focus` states the default explicitly. Without `--cwd`, new terminals follow the configured `terminal.new_cwd` policy, which follows the source pane or workspace by default. Each `--env KEY=VALUE` adds or replaces that variable in the new root shell.
+
+Hall: `--no-agent-resume` on `workspace create`, `tab create` and `worktree open` marks the root pane that call creates; `worktree open` of a worktree already open marks nothing. The mark is saved with the session. When the server starts again and restores the session, a marked pane is not recreated at all, and a tab or workspace left with no pane is not recreated either; the focus moves to the nearest tab or workspace kept, and the dropped pane, tab and workspace IDs are not handed out again. Unmarked panes restore as before, `session.resume_agents_on_restore` included. `pane get` and `pane list` (and the create responses' `root_pane`) show `"agent_resume": false` for a marked pane and leave the field out otherwise. A live handoff keeps marked panes, since their processes carry on. Reeve marks the pane of every hand it opens this way: see `docs/listing.md`.
 
 ## Panes
 

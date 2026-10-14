@@ -199,7 +199,8 @@ fn workspace_command() -> Command {
                 .arg(option("label", "TEXT"))
                 .arg(env_option())
                 .arg(flag("focus"))
-                .arg(flag("no-focus")),
+                .arg(flag("no-focus"))
+                .arg(flag("no-agent-resume")),
         )
         .subcommand(id_command("get", "workspace_id", "Show a workspace"))
         .subcommand(id_command("focus", "workspace_id", "Focus a workspace"))
@@ -255,7 +256,8 @@ fn worktree_command() -> Command {
                 .arg(option("label", "TEXT"))
                 .arg(flag("focus"))
                 .arg(flag("no-focus"))
-                .arg(flag("trust-repository")),
+                .arg(flag("trust-repository"))
+                .arg(flag("no-agent-resume")),
         )
         .subcommand(
             Command::new("remove")
@@ -282,7 +284,8 @@ fn tab_command() -> Command {
                 .arg(option("label", "TEXT"))
                 .arg(env_option())
                 .arg(flag("focus"))
-                .arg(flag("no-focus")),
+                .arg(flag("no-focus"))
+                .arg(flag("no-agent-resume")),
         )
         .subcommand(id_command("get", "tab_id", "Show a tab"))
         .subcommand(id_command("focus", "tab_id", "Focus a tab"))

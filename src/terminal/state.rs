@@ -148,6 +148,9 @@ pub struct TerminalState {
     recent_agent_process_exit: Option<RecentAgentProcessExit>,
     agent_process_acquisition_pending: bool,
     pub pending_agent_resume_plan: Option<crate::agent_resume::AgentResumePlan>,
+    /// Hall: created with `--no-agent-resume` (a reeve hand). A cold restore
+    /// drops the pane instead of recreating it.
+    pub no_agent_resume: bool,
 }
 
 impl TerminalState {
@@ -183,6 +186,7 @@ impl TerminalState {
             recent_agent_process_exit: None,
             agent_process_acquisition_pending: false,
             pending_agent_resume_plan: None,
+            no_agent_resume: false,
         }
     }
 

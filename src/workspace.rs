@@ -149,9 +149,15 @@ pub(crate) fn public_tab_id_for_number(workspace_id: &str, tab_number: usize) ->
 }
 
 pub(crate) fn reserve_workspace_ids(workspaces: &[Workspace]) {
-    let Some(next) = workspaces
-        .iter()
-        .filter_map(|workspace| public_workspace_number(&workspace.id))
+    reserve_public_workspace_ids(workspaces.iter().map(|workspace| workspace.id.as_str()));
+}
+
+/// Keep new workspaces from taking any of these ids, as `reserve_workspace_ids`
+/// does for live workspaces.
+pub(crate) fn reserve_public_workspace_ids<'a>(ids: impl IntoIterator<Item = &'a str>) {
+    let Some(next) = ids
+        .into_iter()
+        .filter_map(public_workspace_number)
         .max()
         .and_then(|max| u64::try_from(max.checked_add(1)?).ok())
     else {

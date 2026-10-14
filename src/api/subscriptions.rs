@@ -632,6 +632,7 @@ mod tests {
             agent_session: None,
             scroll,
             revision: 0,
+            agent_resume: true,
         }
     }
 

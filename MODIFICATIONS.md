@@ -161,3 +161,24 @@ Hall is a modified version of herdr v0.9.0 (commit b99002ac99b09e00b4ca692436cb1
 | `src/cli/plugin.rs` | Plugin builds also scrub `HALL_BIN_PATH` and `REEVE_BACKEND`; test. |
 | `src/logging.rs` | Default log filter `hall=warn` (herdr's `herdr=info` matches no target in the `hall` crate), so hall's warns (a dropped listing entry) are written by default and no info line is; tests. |
 | `README.md` | Status line for step 5, hall's side. |
+
+## Hand panes not restored (the liege's choice A, 2026-10-14)
+
+| File | Change |
+|---|---|
+| `src/terminal/state.rs` | `TerminalState::no_agent_resume`, the `--no-agent-resume` mark. |
+| `src/persist/snapshot.rs` | `PaneSnapshot::no_agent_resume`, saved only when set and read as false from older files; tests of the round trip and of an older file. |
+| `src/persist/restore.rs` | `drop_no_resume_panes`: before a cold restore, marked panes are dropped from the snapshot (and its pane history), then tabs and workspaces left empty; the active tab, active and selected workspace move to the nearest one kept, and the dropped tab and workspace ids stay reserved. Restored terminals keep the mark (a live handoff, which keeps every pane). Tests: the pruning, an unmarked session left alone, and a restore that drops the hands and still resumes the reeve's claude. |
+| `src/persist.rs` | Exports `drop_no_resume_panes`. |
+| `src/workspace.rs` | `reserve_public_workspace_ids`, which `reserve_workspace_ids` now calls, for the ids of dropped workspaces. |
+| `src/app/mod.rs` | The cold restore calls `drop_no_resume_panes` first; the live handoff does not. |
+| `src/app/creation.rs` | `mark_root_pane_no_agent_resume`; `PaneInfo::agent_resume` from the mark. |
+| `src/app/api/tabs.rs`, `src/app/api/workspaces.rs`, `src/app/api/worktrees.rs` | `tab.create`, `workspace.create` and `worktree.open` (when it opens a new workspace) mark the root pane they create when asked; a test; test params gain the field. |
+| `src/api/schema.rs`, `src/api/schema/tabs.rs`, `src/api/schema/workspaces.rs`, `src/api/schema/worktrees.rs`, `src/api/schema/panes.rs` | `no_agent_resume` on the three create params, left out when false; `PaneInfo::agent_resume`, shown only when false. |
+| `src/api/schema/tests.rs`, `src/api/server.rs`, `src/api/subscriptions.rs`, `src/client/shell/tests/mod.rs`, `src/server/headless/tests/mod.rs` | Test values gain the new fields. |
+| `src/client/shell/actions.rs`, `src/client/shell/context_menu.rs`, `src/client/shell/overlay_input.rs`, `src/client/shell/worktrees.rs` | The client's own creates send `no_agent_resume: false`. |
+| `src/cli/tab.rs`, `src/cli/workspace.rs`, `src/cli/worktree.rs` | `--no-agent-resume` on `tab create`, `workspace create` and `worktree open`; each parse split out (`parse_*_args`, as `src/cli/pane.rs` has them) and tested; usage lines. |
+| `src/cli/spec.rs` | The flag in the three commands' help and completions. |
+| `docs/next/api/herdr-api.schema.json` | Regenerated with the new fields. |
+| `docs/next/website/src/content/docs/cli-reference.mdx` | The flag on the three commands, and what a restore does with a marked pane. |
+| `tests/fixtures/endpoint-method-shapes-v1.json` | New digests for `tab.create`, `workspace.create` and `worktree.open`: the added `no_agent_resume` is optional, defaults to false and is left off the wire when false (the client never sets it), so an older client or server reads the same requests. |

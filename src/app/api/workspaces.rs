@@ -67,6 +67,9 @@ impl App {
         };
         match self.create_workspace_with_launch_env(cwd, params.focus, extra_env) {
             Ok(index) => {
+                if params.no_agent_resume {
+                    self.mark_root_pane_no_agent_resume(index, 0);
+                }
                 if let Some(label) = params.label {
                     if let Some(workspace) = self.state.workspaces.get_mut(index) {
                         workspace.set_custom_name(label);
@@ -411,6 +414,7 @@ mod tests {
                 focus: true,
                 label: None,
                 env: Default::default(),
+                no_agent_resume: false,
             },
         );
         let _: SuccessResponse = serde_json::from_str(&response).unwrap();
@@ -441,6 +445,7 @@ mod tests {
                 focus: false,
                 label: None,
                 env: Default::default(),
+                no_agent_resume: false,
             },
         );
 
@@ -502,6 +507,7 @@ mod tests {
                 focus: false,
                 label: None,
                 env: Default::default(),
+                no_agent_resume: false,
             },
         );
         let success: SuccessResponse = serde_json::from_str(&response).unwrap();
@@ -522,6 +528,7 @@ mod tests {
                 focus: false,
                 label: None,
                 env: Default::default(),
+                no_agent_resume: false,
             },
         );
         let error: ErrorResponse = serde_json::from_str(&invalid).unwrap();
@@ -535,6 +542,7 @@ mod tests {
                 focus: false,
                 label: None,
                 env: Default::default(),
+                no_agent_resume: false,
             },
         );
         let success: SuccessResponse = serde_json::from_str(&captured).unwrap();

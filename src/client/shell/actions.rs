@@ -77,6 +77,7 @@ impl ClientShellState {
                                     focus: true,
                                     label: None,
                                     env: Default::default(),
+                                    no_agent_resume: false,
                                 },
                             ),
                             outcome,
@@ -1065,6 +1066,7 @@ impl ClientShellState {
                     focus: true,
                     label: None,
                     env: Default::default(),
+                    no_agent_resume: false,
                 }))
             }
             KeybindAction::FocusPaneLeft
