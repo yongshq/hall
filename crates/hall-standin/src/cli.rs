@@ -11,7 +11,7 @@ use crate::world::{World, WorldEdit, locate, world_path};
 pub const USAGE: &str = "\
 usage: hall-standin --home <test reeve home> [command]
 
-  listing                              print the draft listing as JSON (the default)
+  listing                              print the listing as JSON (the default)
   set <name> <key>=<value>...          change a reeve or errand in the world file
                                          errand keys: state, question, waiting, idle, wedged, in_flight
                                          reeve keys: live

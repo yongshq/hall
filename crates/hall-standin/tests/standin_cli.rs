@@ -100,15 +100,16 @@ fn keys(v: &Value) -> Vec<&str> {
 fn listing_shape() {
     let h = home("shape", WORLD);
     let l = listing(&h);
-    assert_eq!(keys(&l), ["draft", "errands", "reeves"]);
-    assert_eq!(l["draft"], true);
+    assert_eq!(keys(&l), ["errands", "reeves", "version"]);
+    assert_eq!(l["version"], 1);
 
     let reeves = l["reeves"].as_array().unwrap();
     assert_eq!(reeves.len(), 2);
     assert_eq!(keys(&reeves[0]), ["live", "name", "session"]);
-    assert_eq!(keys(&reeves[0]["session"]), ["herdr_session", "pane_id"]);
+    assert_eq!(keys(&reeves[0]["session"]), ["backend", "name", "pane_id"]);
+    assert_eq!(reeves[0]["session"]["backend"], "hall");
     assert_eq!(reeves[0]["name"], "ansel");
-    assert_eq!(reeves[0]["session"]["herdr_session"], "hall-dev");
+    assert_eq!(reeves[0]["session"]["name"], "hall-dev");
     assert_eq!(reeves[0]["session"]["pane_id"], "w1:p1");
     assert_eq!(reeves[0]["live"], true);
     assert_eq!(reeves[1]["live"], false);
@@ -132,7 +133,8 @@ fn listing_shape() {
     assert_eq!(e["office"], "artificer");
     assert_eq!(e["owner_reeve"], "ansel");
     assert_eq!(e["hand_state"], "working");
-    assert_eq!(e["session"]["herdr_session"], "hall-dev");
+    assert_eq!(e["session"]["backend"], "hall");
+    assert_eq!(e["session"]["name"], "hall-dev");
     assert_eq!(e["session"]["pane_id"], "w2:p1");
     for flag in ["waiting", "idle", "wedged"] {
         assert_eq!(e[flag], false, "{flag}");
@@ -639,7 +641,7 @@ fn refuses_herdr_session_default() {
     );
     // The refused edit left the world file as it was.
     assert_eq!(
-        errand(&listing(&h), "ansel-fix")["session"]["herdr_session"],
+        errand(&listing(&h), "ansel-fix")["session"]["name"],
         "hall-dev"
     );
 }

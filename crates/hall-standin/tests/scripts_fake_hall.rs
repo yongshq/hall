@@ -351,7 +351,8 @@ fn up_status_drive_down() {
     let l = rig.listing();
     let reeve_ws = |i: usize| {
         let r = &l["reeves"][i];
-        assert_eq!(r["session"]["herdr_session"], "hall-dev", "{r}");
+        assert_eq!(r["session"]["backend"], "hall", "{r}");
+        assert_eq!(r["session"]["name"], "hall-dev", "{r}");
         let pane = r["session"]["pane_id"].as_str().unwrap();
         assert!(
             calls
@@ -369,7 +370,8 @@ fn up_status_drive_down() {
     let errands = l["errands"].as_array().unwrap();
     assert_eq!(errands.len(), 3);
     for e in errands {
-        assert_eq!(e["session"]["herdr_session"], "hall-dev", "{e}");
+        assert_eq!(e["session"]["backend"], "hall", "{e}");
+        assert_eq!(e["session"]["name"], "hall-dev", "{e}");
         let pane = e["session"]["pane_id"].as_str().unwrap();
         let (ws, tab) = rig.place_of(pane);
         let owner_ws = if e["owner_reeve"] == "ansel" {
@@ -484,7 +486,7 @@ fn up_status_drive_down() {
     assert_eq!(rig.herdr_calls(), "");
     let l = rig.listing();
     assert_eq!(l["reeves"][0]["session"]["pane_id"], Value::Null);
-    assert_eq!(l["reeves"][0]["session"]["herdr_session"], "hall-dev");
+    assert_eq!(l["reeves"][0]["session"]["name"], "hall-dev");
 }
 
 #[test]

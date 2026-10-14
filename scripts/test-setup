@@ -89,10 +89,10 @@ start_session() {
 
 seed_world() {
   local text line
-  text="# hall test setup world file: what the stand-in serves as the draft listing.
+  text="# hall test setup world file: what the stand-in serves as the listing (version 1).
 # Seeded by scripts/test-setup up from the roster. Edit freely, or use
 # hall-standin --home <home> set <name> <key>=<value>. Format: docs/listing-draft.md.
-# herdr_session holds the hall session's name.
+# herdr_session holds the hall session's name, listed as session.name with backend hall.
 "
   for line in "${HALL_DEV_ROSTER[@]}"; do
     roster_read "$line"
