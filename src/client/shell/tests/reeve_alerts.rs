@@ -714,6 +714,70 @@ fn a_dialog_rung_before_the_listing_names_the_hand_is_not_rung_again_as_waiting(
 }
 
 #[test]
+fn a_dialog_rung_before_the_listing_names_the_hand_highlights_it_once_named() {
+    // Decision 63 in window B: herdr's request rang with no highlight, the pane unlisted. The
+    // read that names the hand at that dialog raises it, without a second ring.
+    let default = Config::default().ui.toast.delay_seconds;
+    for delay in [0, 1, default] {
+        let mut listing = listing();
+        let mut unlisted = listing.clone();
+        unlisted
+            .errands
+            .retain(|errand| errand.id != "bertil-probe");
+        let mut state = alert_state(unlisted, &[("p_b1", AgentStatus::Working)]);
+        state.config.toast_delay_seconds = delay;
+        let now = std::time::Instant::now();
+        let mut rung = requests(&notify(
+            &mut state,
+            SemanticNotificationKind::NeedsAttention,
+            "p_b1",
+            "ws_b_t1",
+        ));
+        compose(&mut state);
+        set_statuses(&mut state, &[("p_b1", AgentStatus::Blocked)]);
+        rung += requests(&state.tick_notifications(past_delay(now, delay)).0);
+        assert!(alerting(&mut state).is_empty(), "delay {delay}: unlisted");
+        rung += requests(&state.set_reeve_listing(Ok(listing.clone())));
+        assert_eq!(
+            alerting(&mut state),
+            ["bertil", "bertil-probe"],
+            "delay {delay}: named at its dialog"
+        );
+        errand_mut(&mut listing, "bertil-probe").waiting = true;
+        rung += requests(&state.set_reeve_listing(Ok(listing.clone())));
+        assert_eq!(rung, 1, "delay {delay}: one ring for one dialog");
+
+        // Shown, the highlight goes, and no later read of the same dialog raises it again.
+        state.show_reeve_alerts("p_b1");
+        assert!(alerting(&mut state).is_empty(), "delay {delay}: shown");
+        assert!(state.set_reeve_listing(Ok(listing.clone())).is_empty());
+        assert!(
+            !alerting(&mut state).contains(&"bertil-probe".to_owned()),
+            "delay {delay}: not raised twice"
+        );
+    }
+}
+
+#[test]
+fn a_dialog_rung_and_shown_before_the_listing_names_the_hand_is_not_raised() {
+    let listing = listing();
+    let mut unlisted = listing.clone();
+    unlisted
+        .errands
+        .retain(|errand| errand.id != "bertil-probe");
+    let mut state = alert_state(unlisted, &[("p_b1", AgentStatus::Blocked)]);
+    notify(
+        &mut state,
+        SemanticNotificationKind::NeedsAttention,
+        "p_b1",
+        "ws_b_t1",
+    );
+    state.show_reeve_alerts("p_b1");
+    state.set_reeve_listing(Ok(listing));
+    assert!(alerting(&mut state).is_empty());
+}
+
+#[test]
 fn a_rung_dialog_whose_pane_never_reads_blocked_is_forgotten_after_the_grace() {
     let mut listing = listing();
     let mut unlisted = listing.clone();

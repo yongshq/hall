@@ -98,6 +98,10 @@ pub(in crate::client) struct ReeveAlerts {
     /// delay of 0) is kept until herdr's grace for that snapshot ends, the deadline here, and
     /// from the first read of it blocked on only while it reads blocked.
     dialogs: HashMap<String, Option<std::time::Instant>>,
+    /// Panes in `dialogs` whose dialog has had its highlight, raised or shown: a dialog rung
+    /// before the listing named its pane (decision 66's window B) raises one on the first read
+    /// that names it, and only then.
+    dialogs_highlighted: HashSet<String>,
     /// Hands alerting from the listing, by errand id.
     hands: HashSet<String>,
     /// The focused pane as last composed, to see the liege move to an alerting pane; None
@@ -271,8 +275,32 @@ impl ClientShellState {
             .filter(|errand| errand.waits_on_liege())
             .map(|errand| errand.id.clone())
             .collect::<HashSet<_>>();
+        // A hand's dialog this client rang while the listing did not name its pane yet rang
+        // with no highlight; it gets one now, without a sound, while it reads blocked
+        // (decision 63).
+        let unhighlighted = errands
+            .iter()
+            .filter_map(|errand| errand.session.pane_id.clone())
+            .filter(|pane_id| {
+                self.reeve_alerts.dialogs.contains_key(pane_id)
+                    && !self.reeve_alerts.dialogs_highlighted.contains(pane_id)
+                    && self.pane_reads_blocked(pane_id)
+            })
+            .collect::<Vec<_>>();
         let alerts = &mut self.reeve_alerts;
         alerts.seen = Some(facts);
+        for pane_id in unhighlighted {
+            if !alerts.panes.contains_key(&pane_id) {
+                tracing::info!(
+                    event = "reeve.alert",
+                    source = "dialog",
+                    pane_id = pane_id.as_str(),
+                    "hall alert raised"
+                );
+                alerts.panes.insert(pane_id.clone(), PaneAlert::Dialog);
+            }
+            alerts.dialogs_highlighted.insert(pane_id);
+        }
         alerts.hands.retain(|id| waiting.contains(id));
         for (id, rises) in &risen {
             tracing::info!(
@@ -334,6 +362,10 @@ impl ClientShellState {
                 until.is_some_and(|until| now < until)
             }
         });
+        let dialogs = &self.reeve_alerts.dialogs;
+        self.reeve_alerts
+            .dialogs_highlighted
+            .retain(|pane_id| dialogs.contains_key(pane_id));
         let moved = self
             .reeve_alerts
             .focused_pane
@@ -350,6 +382,9 @@ impl ClientShellState {
         let role = self.pane_alert_role(pane_id);
         let alerts = &mut self.reeve_alerts;
         alerts.panes.remove(pane_id);
+        if alerts.dialogs.contains_key(pane_id) {
+            alerts.dialogs_highlighted.insert(pane_id.to_owned());
+        }
         if let Some(AlertRole::Hand(id)) = role {
             alerts.hands.remove(&id);
         }
