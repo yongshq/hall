@@ -1514,6 +1514,8 @@ fn scrub_herdr_runtime_env(command: &mut Command) {
         crate::integration::HALL_WORKSPACE_ID_ENV_VAR,
         crate::integration::HALL_TAB_ID_ENV_VAR,
         crate::integration::HALL_PANE_ID_ENV_VAR,
+        crate::integration::HALL_BIN_PATH_ENV_VAR,
+        crate::integration::REEVE_BACKEND_ENV_VAR,
     ] {
         command.env_remove(key);
     }
@@ -1719,6 +1721,26 @@ mod tests {
             },
             warnings: vec![],
         }
+    }
+
+    #[test]
+    fn plugin_build_env_drops_halls_pane_names() {
+        let mut command = Command::new("true");
+        for key in [
+            "HERDR_BIN_PATH",
+            "HALL_SOCKET_PATH",
+            "HALL_BIN_PATH",
+            "REEVE_BACKEND",
+        ] {
+            command.env(key, "set");
+        }
+        scrub_herdr_runtime_env(&mut command);
+        let set = command
+            .get_envs()
+            .filter(|(_, value)| value.is_some())
+            .map(|(key, _)| key.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(set, Vec::<String>::new());
     }
 
     #[test]

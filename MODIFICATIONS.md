@@ -150,11 +150,13 @@ Hall is a modified version of herdr v0.9.0 (commit b99002ac99b09e00b4ca692436cb1
 
 | File | Change |
 |---|---|
-| `src/integration/env.rs`, `src/integration/mod.rs` | `HALL_SOCKET_PATH` (this hall's socket), `HALL_BIN_PATH` (the running binary) and `REEVE_BACKEND=hall`, set into every pane after its launch's own env; herdr's outbound names kept. |
+| `src/integration/env.rs`, `src/integration/mod.rs` | `HALL_SOCKET_PATH` (this hall's socket), `HALL_BIN_PATH` (the running binary) and `REEVE_BACKEND=hall`, set into every pane after its launch's own env; herdr's outbound names kept; the names' constants exported for the plugin build scrub. |
 | `src/pane.rs` | Test: a pane gets those three over any `--env` extra, and keeps `HERDR_SOCKET_PATH` and `HERDR_BIN_PATH`. |
 | `src/app/api/plugins/runtime.rs` | Plugin commands get the same three names. |
 | `src/app/api/plugins/panes.rs` | Plugin panes get the same three names, protected from the plugin's own env. |
 | `src/app/api/plugins/mod.rs` | Tests: a plugin pane's env cannot override the three names; a plugin command gets them. |
 | `src/client/shell/notification_policy.rs` | Every herdr request this client rings for is remembered while its pane reads blocked, the listing naming the pane or not, so a hand's later `waiting` on that dialog does not ring it again (window B); `COMPLETION_EVIDENCE_GRACE` shared with the alerts. |
 | `src/config/model.rs` | The `[reeve] listing_command` comment names `docs/listing.md`, the settled listing doc. |
+| `src/app/custom_commands.rs` | Shell custom commands and tab bar status commands (`custom_command_env`) get the same three names; test. |
+| `src/cli/plugin.rs` | Plugin builds also scrub `HALL_BIN_PATH` and `REEVE_BACKEND`; test. |
 | `README.md` | Status line for step 5, hall's side. |

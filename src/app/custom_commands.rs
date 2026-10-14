@@ -252,6 +252,9 @@ impl App {
                 current_exe.display().to_string(),
             ));
         }
+        // hall: shell custom commands and tab bar status commands get hall's names too, as
+        // every pane does (decision 68).
+        env.extend(crate::integration::hall_pane_env());
 
         let mut cwd = None;
         if let Some(ws_idx) = self.state.active {
@@ -595,6 +598,22 @@ mod tests {
 
     fn install(app: &mut crate::app::App, binding: crate::config::CustomCommandKeybind) {
         app.endpoint_commands = super::EndpointCommandRegistry::new(&[binding]);
+    }
+
+    #[test]
+    fn custom_command_env_names_hall_beside_herdr() {
+        let env = test_app().custom_command_env().0;
+        let value = |key: &str| {
+            env.iter()
+                .find(|(name, _)| name == key)
+                .map(|(_, value)| value.as_str())
+        };
+        let socket = crate::api::socket_path().display().to_string();
+        assert_eq!(value("HERDR_SOCKET_PATH"), Some(socket.as_str()));
+        assert_eq!(value("HALL_SOCKET_PATH"), Some(socket.as_str()));
+        assert_eq!(value("HALL_BIN_PATH"), value("HERDR_BIN_PATH"));
+        assert!(value("HALL_BIN_PATH").is_some());
+        assert_eq!(value("REEVE_BACKEND"), Some("hall"));
     }
 
     #[test]
