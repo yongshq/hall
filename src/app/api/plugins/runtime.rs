@@ -56,6 +56,8 @@ impl App {
                 current_exe.display().to_string(),
             ));
         }
+        // hall: this hall's socket, binary and reeve backend (decision 68).
+        env.extend(crate::integration::hall_pane_env());
         if let Some(action_id) = action_id.as_ref() {
             env.push(("HERDR_PLUGIN_ACTION_ID".to_string(), action_id.clone()));
         }

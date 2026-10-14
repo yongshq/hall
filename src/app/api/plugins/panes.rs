@@ -270,6 +270,9 @@ impl App {
                 current_exe.display().to_string(),
             ));
         }
+        // hall: this hall's socket, binary and reeve backend, which a plugin's env may not set
+        // (decision 68).
+        env.extend(crate::integration::hall_pane_env());
         Ok(env)
     }
 
@@ -348,17 +351,18 @@ impl App {
 }
 
 fn plugin_pane_protected_env_key(key: &str) -> bool {
-    matches!(
-        key,
-        crate::api::PANE_SOCKET_PATH_ENV_VAR
-            | "HERDR_ENV"
-            | crate::NESTED_GUARD_ENV_VAR
-            | "HERDR_PLUGIN_ID"
-            | "HERDR_PLUGIN_ROOT"
-            | "HERDR_PLUGIN_CONFIG_DIR"
-            | "HERDR_PLUGIN_STATE_DIR"
-            | "HERDR_PLUGIN_ENTRYPOINT_ID"
-            | "HERDR_PLUGIN_CONTEXT_JSON"
-            | "HERDR_BIN_PATH"
-    )
+    crate::integration::is_hall_pane_env_key(key)
+        || matches!(
+            key,
+            crate::api::PANE_SOCKET_PATH_ENV_VAR
+                | "HERDR_ENV"
+                | crate::NESTED_GUARD_ENV_VAR
+                | "HERDR_PLUGIN_ID"
+                | "HERDR_PLUGIN_ROOT"
+                | "HERDR_PLUGIN_CONFIG_DIR"
+                | "HERDR_PLUGIN_STATE_DIR"
+                | "HERDR_PLUGIN_ENTRYPOINT_ID"
+                | "HERDR_PLUGIN_CONTEXT_JSON"
+                | "HERDR_BIN_PATH"
+        )
 }

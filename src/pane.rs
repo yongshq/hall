@@ -3435,6 +3435,28 @@ mod tests {
     }
 
     #[test]
+    fn pane_launch_env_sets_hall_socket_binary_and_reeve_backend_over_extras() {
+        let mut cmd = CommandBuilder::new("shell");
+        cmd.env("HALL_SOCKET_PATH", "/outer/hall.sock");
+        let launch_env = PaneLaunchEnv::from_extra(vec![
+            ("HALL_SOCKET_PATH".into(), "/extra/hall.sock".into()),
+            ("HALL_BIN_PATH".into(), "/extra/hall".into()),
+            ("REEVE_BACKEND".into(), "herdr".into()),
+        ]);
+
+        apply_pane_launch_env(&mut cmd, &launch_env);
+
+        let get = |key: &str| cmd.get_env(key).and_then(std::ffi::OsStr::to_str);
+        let socket = crate::api::socket_path().display().to_string();
+        let exe = std::env::current_exe().expect("current exe");
+        assert_eq!(get("HALL_SOCKET_PATH"), Some(socket.as_str()));
+        assert_eq!(get("HALL_BIN_PATH"), exe.to_str());
+        assert_eq!(get("REEVE_BACKEND"), Some("hall"));
+        assert_eq!(get("HERDR_SOCKET_PATH"), Some(socket.as_str()), "kept");
+        assert_eq!(get("HERDR_BIN_PATH"), exe.to_str(), "kept");
+    }
+
+    #[test]
     fn pane_launch_env_omit_pane_removes_both_pane_ids() {
         let mut cmd = CommandBuilder::new("shell");
         cmd.env("HALL_PANE_ID", "outer");

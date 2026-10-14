@@ -1865,6 +1865,122 @@ command = ["sh", "-c", "printf '%s\n%s\n%s\n' \"$HERDR_PLUGIN_ROOT\" \"$HERDR_PL
         let _ = std::fs::remove_dir_all(root);
     }
 
+    /// hall: what a plugin pane or command prints for the names step 5 sets (decision 68).
+    #[cfg(unix)]
+    const HALL_NAMES_SCRIPT: &str = "printf '%s\\n%s\\n%s\\n%s\\n' \\\"$HALL_SOCKET_PATH\\\" \\\"$HALL_BIN_PATH\\\" \\\"$REEVE_BACKEND\\\" \\\"$HERDR_SOCKET_PATH\\\"";
+
+    #[cfg(unix)]
+    fn assert_hall_names(text: &str) {
+        let socket = crate::api::socket_path().display().to_string();
+        let exe = std::env::current_exe()
+            .expect("current exe should resolve")
+            .display()
+            .to_string();
+        let lines = text.lines().collect::<Vec<_>>();
+        assert_eq!(
+            lines,
+            [socket.as_str(), exe.as_str(), "hall", socket.as_str()]
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn plugin_pane_open_sets_hall_names_its_env_cannot_override() {
+        let mut app = test_app();
+        app.state.workspaces = vec![crate::workspace::Workspace::test_new("plugin-hall-env")];
+        app.state.ensure_test_terminals();
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.mode = crate::app::Mode::Terminal;
+        let root = unique_temp_path("plugin-pane-hall-env");
+        let capture = root.join("capture.txt");
+        write_manifest_content(
+            &root,
+            &format!(
+                r#"
+id = "example.hall-env"
+name = "Hall Env"
+version = "0.1.0"
+min_herdr_version = "0.6.10"
+platforms = ["linux", "macos"]
+
+[[panes]]
+id = "board"
+title = "Plugin Board"
+command = ["sh", "-c", "{HALL_NAMES_SCRIPT} > {}"]
+"#,
+                capture.display()
+            ),
+        );
+        link_manifest(&mut app, &root);
+
+        let open = app.handle_api_request(Request {
+            id: "pane-open".into(),
+            method: Method::PluginPaneOpen(PluginPaneOpenParams {
+                plugin_id: "example.hall-env".into(),
+                entrypoint: "board".into(),
+                placement: Some(PluginPanePlacement::Overlay),
+                width: None,
+                height: None,
+                workspace_id: None,
+                target_pane_id: None,
+                direction: None,
+                cwd: None,
+                focus: true,
+                env: std::collections::HashMap::from([
+                    (
+                        "HALL_SOCKET_PATH".to_string(),
+                        "/tmp/spoofed.sock".to_string(),
+                    ),
+                    ("HALL_BIN_PATH".to_string(), "/tmp/spoofed-hall".to_string()),
+                    ("REEVE_BACKEND".to_string(), "herdr".to_string()),
+                ]),
+            }),
+        });
+        let ResponseResult::PluginPaneOpened { .. } = response_result(&open) else {
+            panic!("expected plugin pane opened response: {open}");
+        };
+
+        assert_hall_names(&read_capture_when_ready(&capture, || {}));
+
+        for (_, runtime) in app.terminal_runtimes.drain() {
+            runtime.shutdown();
+        }
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn plugin_commands_get_the_hall_names() {
+        let mut app = test_app();
+        let root = unique_temp_path("plugin-command-hall-env");
+        let capture = root.join("startup.txt");
+        write_manifest_content(
+            &root,
+            &format!(
+                r#"
+id = "example.hall-startup"
+name = "Hall Startup"
+version = "0.1.0"
+min_herdr_version = "0.6.10"
+platforms = ["linux", "macos"]
+
+[[startup]]
+command = ["sh", "-c", "{HALL_NAMES_SCRIPT} > {}"]
+"#,
+                capture.display()
+            ),
+        );
+        link_manifest(&mut app, &root);
+
+        app.run_plugin_startup_hooks();
+
+        assert_hall_names(&read_capture_when_ready(&capture, || {
+            app.drain_all_internal_events();
+        }));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     #[cfg(unix)]
     #[tokio::test]
     async fn plugin_pane_open_tab_emits_tab_created_before_pane_created() {

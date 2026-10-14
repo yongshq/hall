@@ -145,3 +145,13 @@ Hall is a modified version of herdr v0.9.0 (commit b99002ac99b09e00b4ca692436cb1
 | `src/client/shell/tests/mod.rs` | The `reeve_alerts` tests. |
 | `README.md` | Status line for step 4. |
 | `docs/next/website/src/data/config-reference.json` | `reeve.alert_focused_reply`. |
+
+## Step 5: bridge to reeve (decisions 66 to 68)
+
+| File | Change |
+|---|---|
+| `src/integration/env.rs`, `src/integration/mod.rs` | `HALL_SOCKET_PATH` (this hall's socket), `HALL_BIN_PATH` (the running binary) and `REEVE_BACKEND=hall`, set into every pane after its launch's own env; herdr's outbound names kept. |
+| `src/pane.rs` | Test: a pane gets those three over any `--env` extra, and keeps `HERDR_SOCKET_PATH` and `HERDR_BIN_PATH`. |
+| `src/app/api/plugins/runtime.rs` | Plugin commands get the same three names. |
+| `src/app/api/plugins/panes.rs` | Plugin panes get the same three names, protected from the plugin's own env. |
+| `src/app/api/plugins/mod.rs` | Tests: a plugin pane's env cannot override the three names; a plugin command gets them. |

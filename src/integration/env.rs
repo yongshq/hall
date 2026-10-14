@@ -13,6 +13,12 @@ pub(crate) const HERDR_WORKSPACE_ID_ENV_VAR: &str = "HERDR_WORKSPACE_ID";
 pub(crate) const HALL_PANE_ID_ENV_VAR: &str = "HALL_PANE_ID";
 pub(crate) const HALL_TAB_ID_ENV_VAR: &str = "HALL_TAB_ID";
 pub(crate) const HALL_WORKSPACE_ID_ENV_VAR: &str = "HALL_WORKSPACE_ID";
+// hall: how a pane reaches its own hall, and which reeve backend a reeve started there uses
+// (plan step 5, decision 68). Set after any launch's own env, so nothing overrides them.
+pub(crate) const HALL_SOCKET_PATH_ENV_VAR: &str = "HALL_SOCKET_PATH";
+pub(crate) const HALL_BIN_PATH_ENV_VAR: &str = "HALL_BIN_PATH";
+pub(crate) const REEVE_BACKEND_ENV_VAR: &str = "REEVE_BACKEND";
+pub(crate) const REEVE_BACKEND_VALUE: &str = "hall";
 
 pub(crate) const PI_CODING_AGENT_DIR_ENV_VAR: &str = "PI_CODING_AGENT_DIR";
 pub(crate) const OMP_CONFIG_DIR_ENV_VAR: &str = "PI_CONFIG_DIR";
@@ -38,6 +44,37 @@ pub(crate) fn apply_pane_base_env(cmd: &mut CommandBuilder) {
     if let Ok(executable) = std::env::current_exe() {
         cmd.env("HERDR_BIN_PATH", executable);
     }
+    for (key, value) in hall_pane_env() {
+        cmd.env(key, value);
+    }
+}
+
+/// hall: the names step 5 sets into every pane, plugin pane and plugin command beside herdr's:
+/// this hall's socket and binary, and `REEVE_BACKEND=hall` (decision 68).
+pub(crate) fn hall_pane_env() -> Vec<(String, String)> {
+    let mut env = vec![(
+        HALL_SOCKET_PATH_ENV_VAR.to_string(),
+        crate::api::socket_path().display().to_string(),
+    )];
+    if let Ok(executable) = std::env::current_exe() {
+        env.push((
+            HALL_BIN_PATH_ENV_VAR.to_string(),
+            executable.display().to_string(),
+        ));
+    }
+    env.push((
+        REEVE_BACKEND_ENV_VAR.to_string(),
+        REEVE_BACKEND_VALUE.to_string(),
+    ));
+    env
+}
+
+/// Whether `key` is one of the names `hall_pane_env` sets, which a launch's own env may not.
+pub(crate) fn is_hall_pane_env_key(key: &str) -> bool {
+    matches!(
+        key,
+        HALL_SOCKET_PATH_ENV_VAR | HALL_BIN_PATH_ENV_VAR | REEVE_BACKEND_ENV_VAR
+    )
 }
 
 pub(crate) fn pi_extension_dir() -> io::Result<PathBuf> {
