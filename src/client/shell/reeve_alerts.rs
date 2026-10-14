@@ -85,6 +85,23 @@ impl HandFacts {
     }
 }
 
+/// The errands in the hall session `session` that the tree shows a row for: those whose owner
+/// is a reeve listed there. One whose owner names no such reeve (a null `owner_reeve`, say)
+/// nests under no reeve (docs/listing.md), so no row could show its highlight: it raises no
+/// alert, and its pane keeps herdr's own notifications as any pane the listing does not name.
+fn alert_errands<'a>(
+    listing: &'a ReeveListing,
+    session: &'a str,
+) -> impl Iterator<Item = &'a ListedErrand> {
+    listing.errands.iter().filter(move |errand| {
+        errand.session.in_session(session)
+            && listing
+                .reeves
+                .iter()
+                .any(|reeve| reeve.name == errand.owner_reeve && reeve.session.in_session(session))
+    })
+}
+
 #[derive(Debug, Default)]
 pub(in crate::client) struct ReeveAlerts {
     /// The hands as the last good read listed them, and the question of each hand that has
@@ -141,9 +158,7 @@ impl ClientShellState {
         if listing.reeves.iter().any(|reeve| names(&reeve.session)) {
             return Some(AlertRole::Reeve);
         }
-        listing
-            .errands
-            .iter()
+        alert_errands(listing, session)
             .find(|errand| names(&errand.session))
             .map(|errand| AlertRole::Hand(errand.id.clone()))
     }
@@ -220,10 +235,12 @@ impl ClientShellState {
                 == Some(pane_id)
     }
 
-    /// Takes a good read for the alerts: the first seeds them and raises nothing; after that,
-    /// each hand whose listing entry rose (decision 62's edge rules) raises its highlight, and
-    /// the read rings one request sound. A hand alert clears when the hand leaves the listing
-    /// or no longer waits on the liege. Failed reads never come here.
+    /// Takes a good read for the alerts: the first seeds them and raises no sound and no
+    /// listing alert; after that, each hand whose listing entry rose (decision 62's edge rules)
+    /// raises its highlight, and the read rings one request sound. Any read, the first too,
+    /// gives a dialog this client already rang its highlight once it names the pane. A hand
+    /// alert clears when the hand leaves the listing or no longer waits on the liege. Failed
+    /// reads never come here.
     pub(super) fn read_listing_alerts(&mut self) -> Vec<ClientShellNotificationEffect> {
         let Some((listing, session)) = self.alert_listing() else {
             return Vec::new();
@@ -243,11 +260,7 @@ impl ClientShellState {
                 })
             })
         };
-        let errands = listing
-            .errands
-            .iter()
-            .filter(|errand| errand.session.in_session(session))
-            .collect::<Vec<_>>();
+        let errands = alert_errands(listing, session).collect::<Vec<_>>();
         let mut facts = errands
             .iter()
             .map(|errand| (errand.id.clone(), HandFacts::of(errand)))
@@ -275,12 +288,16 @@ impl ClientShellState {
             .filter(|errand| errand.waits_on_liege())
             .map(|errand| errand.id.clone())
             .collect::<HashSet<_>>();
-        // A hand's dialog this client rang while the listing did not name its pane yet rang
-        // with no highlight; it gets one now, without a sound, while it reads blocked
-        // (decision 63).
-        let unhighlighted = errands
+        // A reeve's or a hand's dialog this client rang while the listing did not name its
+        // pane (a hand's first seconds, a reeve's while no good read had named it) rang with no
+        // highlight; it gets one now, without a sound, while it reads blocked (decision 63).
+        let unhighlighted = listing
+            .reeves
             .iter()
-            .filter_map(|errand| errand.session.pane_id.clone())
+            .filter(|reeve| reeve.session.in_session(session))
+            .map(|reeve| &reeve.session)
+            .chain(errands.iter().map(|errand| &errand.session))
+            .filter_map(|located| located.pane_id.clone())
             .filter(|pane_id| {
                 self.reeve_alerts.dialogs.contains_key(pane_id)
                     && !self.reeve_alerts.dialogs_highlighted.contains(pane_id)

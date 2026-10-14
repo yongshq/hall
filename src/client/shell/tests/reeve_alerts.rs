@@ -878,3 +878,86 @@ fn a_dialog_in_view_keeps_its_highlight_when_focus_comes_back() {
     state.handle_raw_events(vec![crate::raw_input::RawInputEvent::OuterFocusGained]);
     assert_eq!(alerting(&mut state), ["ansel"]);
 }
+
+#[test]
+fn a_hand_whose_owner_is_no_listed_reeve_raises_no_alert() {
+    // Reeve's listing prints `"owner_reeve": null` for a hand whose owner it cannot tell: the
+    // hand nests under no reeve, so no row could show its highlight (decision 63).
+    let mut listing = listing();
+    errand_mut(&mut listing, "bertil-probe").owner_reeve = String::new();
+    let mut state = alert_state(listing.clone(), &[("p_b1", AgentStatus::Blocked)]);
+    errand_mut(&mut listing, "bertil-probe").hand_state = HandState::Blocked;
+    errand_mut(&mut listing, "bertil-probe").question = Some("Which base?".into());
+    assert!(
+        state.set_reeve_listing(Ok(listing.clone())).is_empty(),
+        "no listing sound for a hand no row shows"
+    );
+    assert!(alerting(&mut state).is_empty());
+    // Its pane is a plain pane to the alerts: herdr's request rings on herdr's rule and
+    // highlights nothing, and herdr's done is not dropped as a hand's.
+    let effects = notify(
+        &mut state,
+        SemanticNotificationKind::NeedsAttention,
+        "p_b1",
+        "ws_b_t1",
+    );
+    assert_eq!(sounds(&effects), [crate::sound::Sound::Request]);
+    assert!(alerting(&mut state).is_empty());
+    // Its tab shows as a plain tab of bertil's workspace.
+    let rows = tree_rows(&compose(&mut state));
+    assert!(
+        rows.iter().any(|row| row.ends_with("tab bertil-probe")),
+        "{rows:?}"
+    );
+
+    // The same hand owned by a reeve in another session is no row of this one either.
+    let mut listing = super::reeve_tree::listing();
+    errand_mut(&mut listing, "bertil-probe").owner_reeve = "elsewhere".into();
+    let mut state = alert_state(listing.clone(), &[]);
+    errand_mut(&mut listing, "bertil-probe").hand_state = HandState::Blocked;
+    assert!(state.set_reeve_listing(Ok(listing)).is_empty());
+    assert!(alerting(&mut state).is_empty());
+}
+
+#[test]
+fn a_reeve_dialog_rung_before_the_listing_names_the_reeve_highlights_it_once_named() {
+    // A reeve at a permission dialog while no good read names its pane (the listing failing
+    // or timing out, or not yet naming a reeve just started): herdr's request rings with no
+    // highlight. The first read that names the reeve at that dialog raises it, without a sound.
+    let default = Config::default().ui.toast.delay_seconds;
+    for delay in [0, 1, default] {
+        let listing = listing();
+        let mut unlisted = listing.clone();
+        unlisted.reeves.retain(|reeve| reeve.name != "bertil");
+        let mut state = alert_state(unlisted, &[("p_b0", AgentStatus::Working)]);
+        state.config.toast_delay_seconds = delay;
+        let now = std::time::Instant::now();
+        let mut rung = requests(&notify(
+            &mut state,
+            SemanticNotificationKind::NeedsAttention,
+            "p_b0",
+            "ws_b_t0",
+        ));
+        compose(&mut state);
+        set_statuses(&mut state, &[("p_b0", AgentStatus::Blocked)]);
+        rung += requests(&state.tick_notifications(past_delay(now, delay)).0);
+        assert_eq!(rung, 1, "delay {delay}: herdr's request rings, unlisted");
+        assert!(alerting(&mut state).is_empty(), "delay {delay}: unlisted");
+        assert!(state
+            .set_reeve_listing(Err("timed out after 5s".into()))
+            .is_empty());
+        rung += requests(&state.set_reeve_listing(Ok(listing.clone())));
+        assert_eq!(
+            alerting(&mut state),
+            ["bertil"],
+            "delay {delay}: named at its dialog"
+        );
+        assert_eq!(rung, 1, "delay {delay}: one ring for one dialog");
+
+        // Shown, the highlight goes and is not raised again for the same dialog.
+        state.show_reeve_alerts("p_b0");
+        assert!(alerting(&mut state).is_empty(), "delay {delay}: shown");
+        assert!(state.set_reeve_listing(Ok(listing)).is_empty());
+        assert!(alerting(&mut state).is_empty(), "delay {delay}: not twice");
+    }
+}
