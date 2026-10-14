@@ -95,6 +95,35 @@ start_session() {
   die "hall session $s did not start within $((START_WAIT / 10)).$((START_WAIT % 10))s; its server log is in its session folder, ${dir:-not given by the session list}"
 }
 
+# server_has_home <socket>: 0 when every process holding the session's socket
+# (lsof: the server; a client's end of a connection names no path) has the test
+# reeve home as REEVE_HOME in its environment (ps eww). Otherwise 1, with
+# SERVER_WHY saying what was found. A hall-dev server up did not start (the
+# hall client starts one itself when none is listening) may lack it, and a hand
+# a test reeve dispatches there would then write to another reeve home.
+server_has_home() {
+  local sock=$1 pids pid line found=0 re=' REEVE_HOME=([^ ]*) '
+  say "+ $(q lsof -nP -t "$sock") (each pid: $(q ps eww -o command= -p '<pid>'))"
+  pids=$(lsof -nP -t "$sock" 2>/dev/null) || true
+  for pid in $pids; do
+    [[ $pid =~ ^[0-9]+$ ]] || continue
+    line=$(ps eww -o command= -p "$pid" 2>/dev/null) && [ -n "$line" ] || continue
+    if [[ " $line " =~ $re ]]; then
+      if [ "${BASH_REMATCH[1]}" != "$HALL_DEV_HOME" ]; then
+        SERVER_WHY="its server, pid $pid, has REEVE_HOME=${BASH_REMATCH[1]}, not $HALL_DEV_HOME"
+        return 1
+      fi
+    else
+      SERVER_WHY="its server, pid $pid, has no REEVE_HOME"
+      return 1
+    fi
+    found=1
+  done
+  [ "$found" = 1 ] && return 0
+  SERVER_WHY="no process holding its socket $sock could be read (lsof, ps), so its REEVE_HOME is unknown"
+  return 1
+}
+
 seed_world() {
   local text line
   text="# hall test setup world file: what the stand-in serves as the listing (version 1),
@@ -283,7 +312,9 @@ cmd_up() {
 
   hall_session_list SESSIONS
   if session_running "$SESSIONS" "$HALL_DEV_SESSION" && [ "$DRY_RUN" = 0 ]; then
-    say "  hall session $HALL_DEV_SESSION is running, kept as it is: a server up did not start may lack REEVE_HOME=$HALL_DEV_HOME for the hands a test reeve dispatches; down, then up, starts one that has it"
+    server_has_home "$(session_socket "$SESSIONS" "$HALL_DEV_SESSION")" ||
+      die "hall session $HALL_DEV_SESSION is running, but $SERVER_WHY: a hand a test reeve dispatches there would write its reeve state outside the test home; scripts/test-setup down, then up, starts one that has REEVE_HOME=$HALL_DEV_HOME"
+    say "  hall session $HALL_DEV_SESSION is running with REEVE_HOME=$HALL_DEV_HOME, kept as it is"
   else
     start_session "$HALL_DEV_SESSION"
   fi
@@ -318,7 +349,9 @@ cmd_up() {
 
   say "listing:"
   print_listing || say "  CHECK: the listing command failed; see above"
-  say "next: answer any folder trust dialog yourself (attach with $(q "${HALL_CLEAN_ENV[@]}" HALL_CONFIG_PATH="$CLIENT_CONFIG" "$HALL_BIN" --session "$HALL_DEV_SESSION"), which shows the reeve tree), then scripts/test-setup status"
+  say "next: answer any folder trust dialog yourself, attached with this line, which shows the reeve tree and, should $HALL_DEV_SESSION have stopped, starts its server as up does:"
+  say "  $(q "${HALL_CLEAN_ENV[@]}") $ATTACH_DROP $(q REEVE_HOME="$HALL_DEV_HOME" HALL_CONFIG_PATH="$CLIENT_CONFIG" "$HALL_BIN" --session "$HALL_DEV_SESSION")"
+  say "then scripts/test-setup status"
 }
 
 cmd_down() {
@@ -349,6 +382,13 @@ cmd_status() {
   hall_session_list sessions
   [ "$DRY_RUN" = 1 ] ||
     say "  $HALL_DEV_SESSION: $(printf '%s' "$sessions" | jq -c --arg n "$HALL_DEV_SESSION" '[.sessions[]? | select(.name == $n) | {running, socket_path}] | first // "not listed"')"
+  if [ "$DRY_RUN" = 0 ] && session_running "$sessions" "$HALL_DEV_SESSION"; then
+    if server_has_home "$(session_socket "$sessions" "$HALL_DEV_SESSION")"; then
+      say "  $HALL_DEV_SESSION's server has REEVE_HOME=$HALL_DEV_HOME"
+    else
+      say "  CHECK: hall session $HALL_DEV_SESSION is running, but $SERVER_WHY: a hand a test reeve dispatches there would write its reeve state outside the test home; down, then up"
+    fi
+  fi
 
   say "test session:"
   [ "$HOME_WALKED" = 1 ] || say "  CHECK: recorded panes not read: the test reeve home fails the check inside it"

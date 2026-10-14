@@ -19,8 +19,10 @@ use serde_json::Value;
 /// server` logs the identity names it was started with (decision 48) and its
 /// REEVE_HOME, which every tab it opens holds (a hand a test reeve dispatches
 /// among them), marks
-/// the session running and exits, as a detached server would return control;
-/// `session stop` marks it stopped. `pane run` runs the line in a shell, with
+/// the session running, with a pid and environment for the fake lsof and ps to
+/// report, and exits, as a detached server would return control; `--session
+/// hall-dev` alone, the client the attach line runs, logs the same names and
+/// REEVE_HOME; `session stop` marks it stopped. `pane run` runs the line in a shell, with
 /// the HERDR_* and HALL_* names and REEVE_BACKEND hall sets into a pane, as a
 /// pane's shell would, and with
 /// the names in a `server-env` file, if present, as a pane of a hall server
@@ -38,7 +40,18 @@ case "$*" in
   "--session hall-dev server")
     env | sed -nE 's/^((REEVE_HAND|REEVE_HALL_[A-Z_]*|CLAUDECODE|CLAUDE_[A-Z_]*|HERDR_[A-Z_]*)=.*)/\1/p' | sort >>"$dir/server-env.log"
     printf '%s\n' "${REEVE_HOME-unset}" >>"$dir/server-reeve-home.log"
-    [ -e "$dir/no-start" ] || touch "$dir/running"
+    if [ ! -e "$dir/no-start" ]; then
+      touch "$dir/running"
+      # What the fake lsof and ps report of the running server.
+      echo 4242 >"$dir/server-pid"
+      printf '%s --session hall-dev server %s\n' "$0" "$(env | tr '\n' ' ')" >"$dir/server-ps"
+    fi
+    ;;
+  "--session hall-dev")
+    # The client, attaching: logged as the server above, since with no server
+    # listening it starts one with its own environment.
+    env | sed -nE 's/^((REEVE_HAND|REEVE_HALL_[A-Z_]*|CLAUDECODE|CLAUDE_[A-Z_]*|HERDR_[A-Z_]*)=.*)/\1/p' | sort >>"$dir/client-env.log"
+    printf '%s\n' "${REEVE_HOME-unset}" >>"$dir/client-reeve-home.log"
     ;;
   "session list --json")
     if [ -e "$dir/running" ]; then running=true; else running=false; fi
@@ -72,7 +85,7 @@ case "$*" in
       HALL_WORKSPACE_ID=$ws HALL_BIN_PATH=$0 HALL_SOCKET_PATH=$sock REEVE_BACKEND=hall bash -c "$4"
     echo '{"result":{}}'
     ;;
-  "session stop "*) rm -f "$dir/running"; echo '{"result":{}}' ;;
+  "session stop "*) rm -f "$dir/running" "$dir/server-pid" "$dir/server-ps"; echo '{"result":{}}' ;;
   # A blocked file stands for a dialog, which Esc clears.
   "agent explain "*)
     if [ -e "$dir/blocked" ]; then
@@ -98,6 +111,32 @@ printf '%s|hand=%s|ident=%s|reeve_home=%s|xdg_config=%s|xdg_state=%s|hall_socket
   "${HERDR_PANE_ID-unset}" "${HERDR_ENV-unset}" "${HERDR_SOCKET_PATH-unset}" "${HERDR_BIN_PATH-unset}" \
   "${HERDR_WORKSPACE_ID-unset}" "${HERDR_TAB_ID-unset}" \
   "${REEVE_BACKEND-unset}" "${HALL_BIN_PATH-unset}" "${HALL_PANE_ID-unset}" >>"$(dirname "$0")/claude.log"
+"#;
+
+/// `lsof -nP -t <socket>`, as up and status ask it for the process holding
+/// hall-dev's socket: the fake server's pid while it runs. Any other call is
+/// the real lsof's (scripts/live-check's).
+const FAKE_LSOF: &str = r#"#!/bin/sh
+dir=$(dirname "$0")
+if [ "$1 $2" = "-nP -t" ]; then
+  [ "$3" = "$dir/cfg/sessions/hall-dev/herdr.sock" ] && [ -e "$dir/running" ] && [ -e "$dir/server-pid" ] || exit 1
+  cat "$dir/server-pid"
+  exit 0
+fi
+exec /usr/sbin/lsof "$@"
+"#;
+
+/// `ps eww -o command= -p <pid>`, as up and status read the server's
+/// environment: the fake server's command and environment. Any other call is
+/// the real ps's.
+const FAKE_PS: &str = r#"#!/bin/sh
+dir=$(dirname "$0")
+if [ "$1 $2 $3 $4" = "eww -o command= -p" ]; then
+  [ -e "$dir/server-pid" ] && [ "$5" = "$(cat "$dir/server-pid")" ] || exit 1
+  cat "$dir/server-ps"
+  exit 0
+fi
+exec /bin/ps "$@"
 "#;
 
 /// Any herdr call at all is a failure: this one only records it.
@@ -136,6 +175,8 @@ impl Rig {
         executable(&bin.join("hall"), FAKE_HALL);
         executable(&bin.join("herdr"), FAKE_HERDR);
         executable(&bin.join("claude"), FAKE_CLAUDE);
+        executable(&bin.join("lsof"), FAKE_LSOF);
+        executable(&bin.join("ps"), FAKE_PS);
         let home = user.join(".reeve-hall-dev");
         // Claude's folder trust: granted for one test reeve's directory only.
         let trusted = home.join("work/ansel");
@@ -156,13 +197,35 @@ impl Rig {
         }
     }
 
+    /// The test home as the scripts name it: resolved on disk, whether it
+    /// exists yet or not.
+    fn home_real(&self) -> PathBuf {
+        self.user.canonicalize().unwrap().join(".reeve-hall-dev")
+    }
+
     fn run(&self, script: &str, args: &[&str]) -> Output {
         self.run_with(script, args, &[])
     }
 
     fn run_with(&self, script: &str, args: &[&str], envs: &[(&str, &str)]) -> Output {
+        self.starter(Command::new("bash"))
+            .arg(
+                Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../scripts")
+                    .join(script),
+            )
+            .arg("--home")
+            .arg(&self.home)
+            .args(args)
+            .envs(envs.iter().copied())
+            .output()
+            .unwrap()
+    }
+
+    /// `c` with the fake bin first on PATH, the fake HOME, and the environment
+    /// of a starter inside a live hall or herdr pane, run from a claude.
+    fn starter(&self, mut c: Command) -> Command {
         let path = format!("{}:{}", self.bin.display(), std::env::var("PATH").unwrap());
-        let mut c = Command::new("bash");
         // Who runs the tests does not matter: their own identity names go.
         for (k, _) in std::env::vars() {
             if k.starts_with("CLAUDE")
@@ -173,55 +236,45 @@ impl Rig {
                 c.env_remove(k);
             }
         }
-        c.arg(
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../scripts")
-                .join(script),
-        )
-        .arg("--home")
-        .arg(&self.home)
-        .args(args)
-        .env("HOME", &self.user)
-        .env("PATH", path)
-        .env("HALL_STANDIN_BIN", &self.standin)
-        .env("HALL_DEBUG_BIN", self.bin.join("hall"))
-        // scripts/live-check, which status runs, reads this instead of /var/tmp.
-        .env("HALL_LIVE_CHECK_VAR_TMP", &self.var_tmp)
-        // As inside a hall pane, and a live herdr pane before it: the
-        // scripts must not pass the HALL_* names on.
-        .env("HALL_SOCKET_PATH", "/live/hall.sock")
-        .env("HALL_SESSION", "default")
-        .env("HALL_PANE_ID", "w9:p9")
-        .env("HALL_ENV", "1")
-        .env("HALL_CONFIG_PATH", "/live/config.toml")
-        .env("HALL_CLIENT_SOCKET_PATH", "/live/hall-client.sock")
-        .env("HALL_BIN_PATH", "/live/hall")
-        .env("HALL_TAB_ID", "w9:t9")
-        .env("HALL_WORKSPACE_ID", "w9")
-        .env("REEVE_BACKEND", "hall")
-        .env("HERDR_SOCKET_PATH", "/live/herdr.sock")
-        .env("HERDR_SESSION", "default")
-        .env("HERDR_PANE_ID", "w9:p9")
-        // As run from a live claude, itself a hand (decision 48): none of
-        // this may reach the test hall server or a test claude.
-        .env("REEVE_HAND", "starter-hand")
-        // A starter's own reeve home, the live one: the test hall server must
-        // carry the test home instead.
-        .env("REEVE_HOME", self.user.join(".reeve"))
-        // Reeve's hall backend overrides, read before hall's own names: a
-        // test reeve's dispatches would follow them to the live hall.
-        .env("REEVE_HALL_SOCKET", "/live/hall.sock")
-        .env("REEVE_HALL_SESSION", "default")
-        .env("REEVE_HALL_BIN", "/live/hall")
-        .env("CLAUDECODE", "1")
-        .env("CLAUDE_PID", "4242")
-        .env("CLAUDE_EFFORT", "high")
-        .env("CLAUDE_CODE_SESSION_ID", "starter-session")
-        .env("CLAUDE_CODE_MESSAGING_SOCKET", "/live/cc.sock")
-        .env("CLAUDE_CODE_MESSAGING_TOKEN", "starter-token")
-        .envs(envs.iter().copied())
-        .output()
-        .unwrap()
+        c.env("HOME", &self.user)
+            .env("PATH", path)
+            .env("HALL_STANDIN_BIN", &self.standin)
+            .env("HALL_DEBUG_BIN", self.bin.join("hall"))
+            // scripts/live-check, which status runs, reads this instead of /var/tmp.
+            .env("HALL_LIVE_CHECK_VAR_TMP", &self.var_tmp)
+            // As inside a hall pane, and a live herdr pane before it: the
+            // scripts must not pass the HALL_* names on.
+            .env("HALL_SOCKET_PATH", "/live/hall.sock")
+            .env("HALL_SESSION", "default")
+            .env("HALL_PANE_ID", "w9:p9")
+            .env("HALL_ENV", "1")
+            .env("HALL_CONFIG_PATH", "/live/config.toml")
+            .env("HALL_CLIENT_SOCKET_PATH", "/live/hall-client.sock")
+            .env("HALL_BIN_PATH", "/live/hall")
+            .env("HALL_TAB_ID", "w9:t9")
+            .env("HALL_WORKSPACE_ID", "w9")
+            .env("REEVE_BACKEND", "hall")
+            .env("HERDR_SOCKET_PATH", "/live/herdr.sock")
+            .env("HERDR_SESSION", "default")
+            .env("HERDR_PANE_ID", "w9:p9")
+            // As run from a live claude, itself a hand (decision 48): none of
+            // this may reach the test hall server or a test claude.
+            .env("REEVE_HAND", "starter-hand")
+            // A starter's own reeve home, the live one: the test hall server must
+            // carry the test home instead.
+            .env("REEVE_HOME", self.user.join(".reeve"))
+            // Reeve's hall backend overrides, read before hall's own names: a
+            // test reeve's dispatches would follow them to the live hall.
+            .env("REEVE_HALL_SOCKET", "/live/hall.sock")
+            .env("REEVE_HALL_SESSION", "default")
+            .env("REEVE_HALL_BIN", "/live/hall")
+            .env("CLAUDECODE", "1")
+            .env("CLAUDE_PID", "4242")
+            .env("CLAUDE_EFFORT", "high")
+            .env("CLAUDE_CODE_SESSION_ID", "starter-session")
+            .env("CLAUDE_CODE_MESSAGING_SOCKET", "/live/cc.sock")
+            .env("CLAUDE_CODE_MESSAGING_TOKEN", "starter-token");
+        c
     }
 
     fn ok(&self, script: &str, args: &[&str]) -> String {
@@ -807,18 +860,177 @@ fn up_and_drive_refuse_a_link_in_herdrs_folder_inside_the_xdg_folders() {
     rig.ok("test-drive", &["ansel", "turn-end"]);
 }
 
+/// Marks hall-dev running, as a server up did not start, with `env` as the
+/// environment the fake ps reports for it; with no `env`, no process is found
+/// holding its socket.
+fn foreign_server(rig: &Rig, env: Option<&str>) {
+    std::fs::write(rig.bin.join("running"), "").unwrap();
+    if let Some(env) = env {
+        std::fs::write(rig.bin.join("server-pid"), "5151\n").unwrap();
+        std::fs::write(
+            rig.bin.join("server-ps"),
+            format!("/x/hall server HOME=/u {env} TERM=xterm\n"),
+        )
+        .unwrap();
+    }
+}
+
 #[test]
 fn up_keeps_a_running_test_session() {
     let rig = Rig::new("running");
-    std::fs::write(rig.bin.join("running"), "").unwrap();
+    let h = rig.home_real();
+    foreign_server(&rig, Some(&format!("REEVE_HOME={}", h.display())));
     let up = rig.ok("test-setup", &["up"]);
-    assert!(up.contains("hall session hall-dev is running"), "{up}");
+    assert!(
+        up.contains(&format!(
+            "hall session hall-dev is running with REEVE_HOME={}, kept as it is",
+            h.display()
+        )),
+        "{up}"
+    );
     assert!(
         !rig.calls().iter().any(|c| c.contains(" server|")),
         "{:?}",
         rig.calls()
     );
     assert_eq!(rig.herdr_calls(), "");
+    let status = rig.ok("test-setup", &["status"]);
+    assert!(
+        status.contains(&format!("hall-dev's server has REEVE_HOME={}", h.display())),
+        "{status}"
+    );
+    assert!(!status.contains("CHECK"), "{status}");
+}
+
+#[test]
+fn up_refuses_a_running_test_session_without_the_test_home() {
+    // A hall-dev server the hall client started itself, from a terminal with
+    // no REEVE_HOME or the live one: a hand a test reeve dispatches there would
+    // write the live reeve state (review-mend-step5-test-setup, finding 1).
+    let live = format!("REEVE_HOME={}/.reeve", rig_user("no-home-live").display());
+    for (test, env, why) in [
+        (
+            "no-home",
+            Some("PATH=/bin"),
+            "its server, pid 5151, has no REEVE_HOME",
+        ),
+        (
+            "no-home-live",
+            Some(live.as_str()),
+            "its server, pid 5151, has REEVE_HOME=",
+        ),
+        ("no-home-unknown", None, "no process holding its socket"),
+    ] {
+        let rig = Rig::new(test);
+        foreign_server(&rig, env);
+        let out = rig.run("test-setup", &["up"]);
+        assert_eq!(out.status.code(), Some(1), "{test}: {out:?}");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            err.contains("hall session hall-dev is running, but ") && err.contains(why),
+            "{test}: {err}"
+        );
+        assert!(
+            err.contains("scripts/test-setup down, then up"),
+            "{test}: {err}"
+        );
+        // Nothing was opened or started in it.
+        assert!(
+            !rig.calls()
+                .iter()
+                .any(|c| c.starts_with("workspace create ") || c.starts_with("pane run ")),
+            "{test}: {:?}",
+            rig.calls()
+        );
+        assert_eq!(rig.read_bin("claude.log"), "", "{test}");
+        // status says so.
+        let status = String::from_utf8(rig.run("test-setup", &["status"]).stdout).unwrap();
+        assert!(
+            status.contains(&format!(
+                "CHECK: hall session hall-dev is running, but {why}"
+            )),
+            "{test}: {status}"
+        );
+        // down, then up, starts one that has it.
+        rig.ok("test-setup", &["down"]);
+        rig.ok("test-setup", &["up"]);
+        assert_eq!(
+            rig.read_bin("server-reeve-home.log"),
+            format!("{}\n", rig.home_real().display()),
+            "{test}"
+        );
+        assert_eq!(rig.herdr_calls(), "", "{test}");
+    }
+}
+
+/// The fake HOME a Rig named `test` has, before the Rig exists.
+fn rig_user(test: &str) -> PathBuf {
+    Path::new(env!("CARGO_TARGET_TMPDIR"))
+        .join("scripts-fake-hall")
+        .join(test)
+        .join("user")
+}
+
+#[test]
+fn the_attach_line_starts_a_server_with_the_test_home() {
+    // Should hall-dev stop, the client the printed attach line runs starts its
+    // server itself, with the client's environment: the line gives it what up
+    // gives the server it starts (review-mend-step5-test-setup, finding 1).
+    let rig = Rig::new("attach");
+    let up = rig.ok("test-setup", &["up"]);
+    let line = up
+        .lines()
+        .skip_while(|l| !l.starts_with("next: "))
+        .nth(1)
+        .unwrap_or_else(|| panic!("{up}"))
+        .trim();
+    let h = rig.home_real();
+    assert!(
+        line.contains(&format!(
+            " REEVE_HOME={} HALL_CONFIG_PATH={}/standin/hall.toml {} --session hall-dev",
+            h.display(),
+            h.display(),
+            rig.bin.join("hall").display()
+        )),
+        "{line}"
+    );
+    let shells: Vec<&str> = ["bash", "/bin/zsh"]
+        .into_iter()
+        .filter(|s| !s.starts_with('/') || Path::new(s).exists())
+        .collect();
+    for shell in &shells {
+        // Run as the liege would, from a terminal holding a claude's and the
+        // live herdr's names, and a name the runner of up lacked.
+        let mut c = rig.starter(Command::new(shell));
+        let out = c
+            .env("CLAUDE_CODE_CHILD_SESSION", "1")
+            .env("HERDR_CLIENT_SOCKET_PATH", "/live/client.sock")
+            .arg("-c")
+            .arg(line)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{shell}: {out:?}");
+    }
+    assert_eq!(
+        rig.read_bin("client-reeve-home.log"),
+        format!("{}\n", h.display()).repeat(shells.len())
+    );
+    assert_eq!(rig.read_bin("client-env.log"), "");
+    let attaches: Vec<String> = rig
+        .calls()
+        .into_iter()
+        .filter(|c| c.starts_with("--session hall-dev|"))
+        .collect();
+    assert_eq!(attaches.len(), shells.len(), "{attaches:?}");
+    for a in &attaches {
+        assert_eq!(
+            a,
+            &format!(
+                "--session hall-dev|socket=unset|session=unset|pane=unset|env=unset|config={}/standin/hall.toml|client=unset|bin=unset|tab=unset|ws=unset|backend=unset",
+                h.display()
+            )
+        );
+    }
 }
 
 #[test]

@@ -18,7 +18,9 @@
 # - the hall server up starts carries REEVE_HOME=<test home>, so a hand a test
 #   reeve dispatches, whose tab has the server's environment and whose launch
 #   line is reeve's, writes under the test home too (it has no XDG guard: see
-#   docs/test-setup.md, What the guard costs);
+#   docs/test-setup.md, What the guard costs); so does the attach line up
+#   prints, for a server the hall client starts itself, and up refuses a
+#   running hall server that does not carry it;
 # - nothing about a test claude's identity is inherited from whoever ran the
 #   script (decision 48): the hall server up starts drops the names in
 #   STARTER_DROP, every claude line drops CLAUDE_DROP's names in the pane's own
@@ -46,7 +48,8 @@ HALL_CLI=("${HALL_CLEAN_ENV[@]}" "$HALL_BIN")
 # before HALL_SOCKET_PATH and HALL_SESSION; claude's own session markers, among
 # them its messaging socket and token; and every HERDR_* name, the live herdr's
 # socket and session. Dropped from the hall server up starts.
-STARTER_DROP=(REEVE_HAND REEVE_HALL_SOCKET REEVE_HALL_SESSION REEVE_HALL_BIN CLAUDECODE CLAUDE_PID CLAUDE_EFFORT)
+STARTER_FIXED=(REEVE_HAND REEVE_HALL_SOCKET REEVE_HALL_SESSION REEVE_HALL_BIN CLAUDECODE CLAUDE_PID CLAUDE_EFFORT)
+STARTER_DROP=("${STARTER_FIXED[@]}")
 while read -r __name; do
   case $__name in CLAUDE_CODE_* | HERDR_*) STARTER_DROP+=("$__name") ;; esac
 done < <(compgen -e | LC_ALL=C sort)
@@ -57,6 +60,18 @@ for __name in "${STARTER_DROP[@]}"; do
   SERVER_DROP+=(-u "$__name")
 done
 unset __name
+# The env -u list of the attach line up prints, as shell text. With no hall-dev
+# server listening, the hall client starts one itself, with the client's own
+# environment (src/server/autodetect.rs), so the line drops what the server's
+# start drops: the STARTER_FIXED names, and every CLAUDE_CODE_* and HERDR_* name
+# the shell that runs the line holds, worked out there, since whoever attaches
+# may hold names the runner of up lacked. command keeps aliases out of it.
+ATTACH_DROP=""
+for __name in "${STARTER_FIXED[@]}"; do
+  ATTACH_DROP+="-u $__name "
+done
+unset __name
+ATTACH_DROP+='$(command env | command sed -nE "s/^((CLAUDE_CODE|HERDR)_[A-Za-z0-9_]*)=.*/-u \1/p")'
 # The env -u list of a claude line (decision 48 and its second amendment). The
 # pane's own shell works it out when the line runs, from what that shell holds,
 # so a hall-dev server someone else started, with names the runner of up lacks,
