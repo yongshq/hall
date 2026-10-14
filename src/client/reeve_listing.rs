@@ -6,11 +6,13 @@
 //! a run that outlasts `[reeve] listing_timeout_ms` (decision 56), and keeps a record of each run
 //! so the next client kills a run that a killed client left behind (decision 58).
 
+use std::collections::BTreeSet;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
+use std::sync::Mutex;
 #[cfg(not(unix))]
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -105,8 +107,19 @@ struct ListingDocument {
 
 /// Parses a listing: version 1 only, a missing or other version refused with a reason, and every
 /// reeve and errand outside hall dropped before anything matches on it. An entry in hall that
-/// does not read is dropped alone, so one odd record never hides the rest.
+/// does not read is dropped alone, so one odd record never hides the rest, and logged.
 fn parse_listing(output: &[u8]) -> ReeveListingRead {
+    parse_listing_logged(output, &LOGGED_UNREAD)
+}
+
+/// The reasons this client has logged for a dropped entry: a listing read every second logs each
+/// distinct one once, up to `MAX_LOGGED_UNREAD`.
+static LOGGED_UNREAD: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
+/// How many distinct reasons are logged at most, so a listing whose odd values change on every
+/// read does not grow the set without end.
+const MAX_LOGGED_UNREAD: usize = 64;
+
+fn parse_listing_logged(output: &[u8], logged: &Mutex<BTreeSet<String>>) -> ReeveListingRead {
     let document: ListingDocument =
         serde_json::from_slice(output).map_err(|error| format!("unreadable JSON: {error}"))?;
     match document.version {
@@ -115,23 +128,53 @@ fn parse_listing(output: &[u8]) -> ReeveListingRead {
         None => return Err(format!("listing names no version, not {LISTING_VERSION}")),
     }
     Ok(ReeveListing {
-        reeves: hall_entries(document.reeves),
-        errands: hall_entries(document.errands),
+        reeves: hall_entries("reeve", document.reeves, logged),
+        errands: hall_entries("errand", document.errands, logged),
     })
 }
 
 /// The entries whose session is in hall, by the raw `session.backend`, each read on its own and
-/// dropped when it does not read.
-fn hall_entries<T: serde::de::DeserializeOwned>(entries: Vec<serde_json::Value>) -> Vec<T> {
+/// dropped when it does not read. One with no `session.backend` to tell is not taken for another
+/// backend's: it does not read either. Each dropped entry's reason is logged at warn the first
+/// time this client meets it (`event="reeve.listing"`), so a drift in reeve's listing that drops
+/// every entry the same way leaves its cause in the client log, where the tree shows only that
+/// no reeve is listed.
+fn hall_entries<T: serde::de::DeserializeOwned>(
+    kind: &'static str,
+    entries: Vec<serde_json::Value>,
+    logged: &Mutex<BTreeSet<String>>,
+) -> Vec<T> {
     entries
         .into_iter()
         .filter(|entry| {
-            entry
-                .pointer("/session/backend")
-                .and_then(serde_json::Value::as_str)
-                == Some("hall")
+            matches!(
+                entry
+                    .pointer("/session/backend")
+                    .and_then(serde_json::Value::as_str),
+                None | Some("hall")
+            )
         })
-        .filter_map(|entry| serde_json::from_value(entry).ok())
+        .filter_map(|entry| {
+            let name = ["id", "name"]
+                .iter()
+                .find_map(|field| entry.get(field)?.as_str())
+                .unwrap_or("?")
+                .to_owned();
+            serde_json::from_value(entry)
+                .map_err(|error| {
+                    let reason = format!("{kind}: {error}");
+                    let mut logged = logged.lock().unwrap_or_else(|poison| poison.into_inner());
+                    if logged.len() < MAX_LOGGED_UNREAD && logged.insert(reason.clone()) {
+                        tracing::warn!(
+                            event = "reeve.listing",
+                            entry = name.as_str(),
+                            reason = reason.as_str(),
+                            "hall dropped a listing entry that does not read"
+                        );
+                    }
+                })
+                .ok()
+        })
         .collect()
 }
 
@@ -856,6 +899,75 @@ mod tests {
         let errands: Vec<_> = listing.errands.iter().map(|e| e.id.as_str()).collect();
         assert_eq!(reeves, ["ansel"]);
         assert_eq!(errands, ["ok", "fine"]);
+    }
+
+    /// What the client log takes from `read`, at its default level.
+    fn logged<T>(read: impl FnOnce() -> T) -> (T, String) {
+        #[derive(Clone, Default)]
+        struct Log(std::sync::Arc<Mutex<Vec<u8>>>);
+        impl std::io::Write for Log {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(bytes);
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let log = Log::default();
+        let writer = log.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(move || writer.clone())
+            .with_ansi(false)
+            .finish();
+        let result = tracing::subscriber::with_default(subscriber, read);
+        let text = String::from_utf8(log.0.lock().unwrap().clone()).unwrap();
+        (result, text)
+    }
+
+    #[test]
+    fn a_dropped_entry_is_logged_once_with_its_reason() {
+        // A drift in reeve's listing that breaks every hall entry the same way: the tree has
+        // only its "no reeve" note, so the reason goes to the client log, once.
+        let two_reeves = LISTING.replace(
+            r#"{ "name": "ansel", "session": { "backend": "hall", "name": "hall-dev", "pane_id": "w1:p1" }, "live": true }"#,
+            r#"{ "name": "ansel", "session": { "backend": "hall", "name": "hall-dev", "pane_id": "w1:p1" }, "live": "true" },
+               { "name": "bertil", "session": { "backend": "hall", "name": "hall-dev", "pane_id": "w1:p2" }, "live": "true" },
+               { "name": "osric", "live": true }"#,
+        );
+        let seen = Mutex::new(BTreeSet::new());
+        let (reads, log) =
+            logged(|| [0, 1].map(|_| parse_listing_logged(two_reeves.as_bytes(), &seen).unwrap()));
+        assert!(reads.iter().all(|listing| listing.reeves.is_empty()));
+        assert_eq!(reads[0].errands.len(), 1, "the errand still reads");
+        let lines = log.lines().collect::<Vec<_>>();
+        assert_eq!(
+            lines.len(),
+            2,
+            "one line per reason, not per entry or read: {log}"
+        );
+        assert!(lines[0].contains("WARN"), "{log}");
+        assert!(
+            lines[0].contains("hall dropped a listing entry that does not read")
+                && lines[0].contains(r#"entry="ansel""#)
+                && lines[0].contains(r#"invalid type: string \"true\", expected a boolean"#),
+            "{log}"
+        );
+        assert!(
+            lines[1].contains(r#"entry="osric""#)
+                && lines[1].contains("reeve: missing field `session`"),
+            "a reeve with no session is dropped as unread, not as another backend's: {log}"
+        );
+        // An entry of another backend is dropped without a word.
+        let (_, log) = logged(|| {
+            parse_listing_logged(
+                LISTING
+                    .replace(r#""backend": "hall""#, r#""backend": "herdr""#)
+                    .as_bytes(),
+                &Mutex::new(BTreeSet::new()),
+            )
+        });
+        assert_eq!(log, "");
     }
 
     #[test]
