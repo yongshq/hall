@@ -9,7 +9,8 @@
 //! reeve's or hand's pane, or when what raised it no longer holds. A hand's `waiting`, `idle`
 //! or `wedged` that rises again on a spell already rung (the reeve's watch exited and came
 //! back), or is up at a client's first read, raises its highlight again without a sound,
-//! unless the liege has shown the hand since that spell rang.
+//! unless the liege has shown the hand since that spell rang, or is looking at its pane at
+//! that first read.
 
 use super::*;
 use crate::client::reeve_listing::{FlagsSince, HandState, ListedErrand, ReeveListing};
@@ -45,8 +46,8 @@ struct HandFacts {
     /// rises again with the same `since` (the reeve's watch exited and came back, which drops
     /// the flag between) is the same spell and rings nothing.
     rung: FlagsSince,
-    /// The spell of each flag rung when the liege last showed the hand: a flag rising again on
-    /// that spell raises no highlight either.
+    /// The spell of each flag rung when the liege last showed the hand, or rung by a dialog the
+    /// liege had shown: a flag rising again on that spell raises no highlight either.
     shown: FlagsSince,
 }
 
@@ -59,6 +60,8 @@ enum HandDialog {
     Held,
     /// Rang it.
     Rang,
+    /// Rang it, and the liege has shown the pane since.
+    Shown,
 }
 
 /// What a read raised for a hand: the rises that ring, by name, and the flags back up on a
@@ -109,8 +112,9 @@ impl HandFacts {
     /// raises the highlight again unless the liege has shown the hand since; one with no
     /// `since` rises on every rise. A rise of `waiting` rings nothing either when this client
     /// rang herdr's request for the dialog the hand's pane stands at (decisions 62, 64, 65),
-    /// and its spell counts as rung. While this client only holds that request, the rise
-    /// waits: it is taken on a later read, once the request has rung or been dropped.
+    /// and its spell counts as rung, and as shown when the liege has shown that dialog. While
+    /// this client only holds that request, the rise waits: it is taken on a later read, once
+    /// the request has rung or been dropped.
     fn rises(&mut self, before: &Self, dialog: HandDialog) -> Raised {
         self.rung = before.rung;
         self.shown = before.shown;
@@ -130,7 +134,7 @@ impl HandFacts {
                 before.waiting,
                 self.since.waiting,
                 &mut self.rung.waiting,
-                self.shown.waiting,
+                &mut self.shown.waiting,
                 dialog,
                 "waiting",
             ),
@@ -139,7 +143,7 @@ impl HandFacts {
                 before.idle,
                 self.since.idle,
                 &mut self.rung.idle,
-                self.shown.idle,
+                &mut self.shown.idle,
                 HandDialog::None,
                 "idle",
             ),
@@ -148,7 +152,7 @@ impl HandFacts {
                 before.wedged,
                 self.since.wedged,
                 &mut self.rung.wedged,
-                self.shown.wedged,
+                &mut self.shown.wedged,
                 HandDialog::None,
                 "wedged",
             ),
@@ -157,7 +161,7 @@ impl HandFacts {
                 continue;
             }
             if since.is_some() && since == *rung {
-                if since != shown {
+                if since != *shown {
                     raised.again.push(name);
                 }
                 continue;
@@ -168,6 +172,9 @@ impl HandFacts {
             }
             if since.is_some() {
                 *rung = since;
+                if dialog == HandDialog::Shown {
+                    *shown = since;
+                }
             }
             if dialog == HandDialog::None {
                 raised.rang.push(name);
@@ -227,6 +234,9 @@ pub(in crate::client) struct ReeveAlerts {
     /// before the listing named its pane (decision 66's window B) raises one on the first read
     /// that names it, and only then.
     dialogs_highlighted: HashSet<String>,
+    /// Panes in `dialogs` whose rung dialog the liege has shown: a `waiting` that dialog
+    /// absorbs counts as shown for its spell too.
+    dialogs_shown: HashSet<String>,
     /// Hands alerting from the listing, by errand id.
     hands: HashSet<String>,
     /// The focused pane as last composed, to see the liege move to an alerting pane; None
@@ -300,6 +310,7 @@ impl ClientShellState {
         let until =
             (!self.pane_reads_blocked(pane_id)).then(|| now.checked_add(grace).unwrap_or(now));
         self.reeve_alerts.dialogs.insert(pane_id.to_owned(), until);
+        self.reeve_alerts.dialogs_shown.remove(pane_id);
     }
 
     /// Whether this client's snapshot reads the pane blocked.
@@ -344,7 +355,8 @@ impl ClientShellState {
     }
 
     /// Takes a good read for the alerts: the first seeds them and raises no sound, and raises
-    /// the highlight of each hand with a flag up; after that, each hand whose listing entry
+    /// the highlight of each hand with a flag up, but the one whose pane is focused, which
+    /// counts as shown; after that, each hand whose listing entry
     /// rose (decision 62's edge rules) raises its highlight, and the read rings one request
     /// sound, while a flag back up on a spell already rung raises it without a sound. Any read,
     /// the first too, gives a dialog this client already rang its highlight once it names the
@@ -370,7 +382,9 @@ impl ClientShellState {
                     && pending.event.kind == SemanticNotificationKind::NeedsAttention
                     && pending.event.pane_id.as_ref() == Some(pane_id)
             });
-            if rang {
+            if rang && self.reeve_alerts.dialogs_shown.contains(pane_id) {
+                HandDialog::Shown
+            } else if rang {
                 HandDialog::Rang
             } else if held {
                 HandDialog::Held
@@ -403,9 +417,22 @@ impl ClientShellState {
                 }
             }
         } else {
-            for (id, facts) in &mut facts {
-                if facts.seed() {
-                    risen.push((id.clone(), Raised::default()));
+            // The hand whose pane the liege is looking at counts as shown, not highlighted.
+            let focused = self
+                .snapshot
+                .as_deref()
+                .and_then(|snapshot| snapshot.focused_pane_id.as_ref());
+            for errand in &errands {
+                let Some(facts) = facts.get_mut(&errand.id) else {
+                    continue;
+                };
+                if !facts.seed() {
+                    continue;
+                }
+                if focused.is_some() && errand.session.pane_id.as_ref() == focused {
+                    facts.shown = facts.rung;
+                } else {
+                    risen.push((errand.id.clone(), Raised::default()));
                 }
             }
         }
@@ -510,6 +537,9 @@ impl ClientShellState {
         self.reeve_alerts
             .dialogs_highlighted
             .retain(|pane_id| dialogs.contains_key(pane_id));
+        self.reeve_alerts
+            .dialogs_shown
+            .retain(|pane_id| dialogs.contains_key(pane_id));
         let moved = self
             .reeve_alerts
             .focused_pane
@@ -522,13 +552,15 @@ impl ClientShellState {
     }
 
     /// The liege shows a pane: the alerts of the reeve or hand it belongs to clear, and a
-    /// hand's flags rising again on the spells rung so far stay clear.
+    /// hand's flags rising again on the spells rung so far stay clear, as does a `waiting` the
+    /// dialog this client rang on that pane absorbs later.
     pub(super) fn show_reeve_alerts(&mut self, pane_id: &str) {
         let role = self.pane_alert_role(pane_id);
         let alerts = &mut self.reeve_alerts;
         alerts.panes.remove(pane_id);
         if alerts.dialogs.contains_key(pane_id) {
             alerts.dialogs_highlighted.insert(pane_id.to_owned());
+            alerts.dialogs_shown.insert(pane_id.to_owned());
         }
         if let Some(AlertRole::Hand(id)) = role {
             alerts.hands.remove(&id);

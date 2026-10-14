@@ -623,6 +623,45 @@ fn a_spell_up_at_the_first_read_counts_as_rung() {
 }
 
 #[test]
+fn a_spell_up_at_the_first_read_on_the_focused_pane_counts_as_shown() {
+    // The liege attaches looking at the hand's pane: no highlight there to clear in place.
+    for (name, set) in FLAGS {
+        let mut listing = listing();
+        set(errand_mut(&mut listing, "bertil-probe"), Some(100));
+        let mut state = alert_state(ReeveListing::default(), &[]);
+        let mut snapshot = agents_snapshot(&[]);
+        snapshot.focused_workspace_id = Some("ws_b".into());
+        snapshot.focused_tab_id = Some("ws_b_t1".into());
+        snapshot.focused_pane_id = Some("p_b1".into());
+        state.set_snapshot(Box::new(snapshot));
+        state.reset_reeve_listing();
+        assert!(
+            state.set_reeve_listing(Ok(listing.clone())).is_empty(),
+            "{name}"
+        );
+        assert!(alerting(&mut state).is_empty(), "{name} in view");
+        assert_eq!(read_flag(&mut state, &mut listing, set, None), 0, "{name}");
+        assert_eq!(
+            read_flag(&mut state, &mut listing, set, Some(100)),
+            0,
+            "{name}"
+        );
+        assert!(alerting(&mut state).is_empty(), "{name} back after a gap");
+        assert_eq!(read_flag(&mut state, &mut listing, set, None), 0, "{name}");
+        assert_eq!(
+            read_flag(&mut state, &mut listing, set, Some(200)),
+            1,
+            "{name} a new spell rings"
+        );
+        assert_eq!(
+            alerting(&mut state),
+            ["bertil", "bertil-probe"],
+            "{name} and highlights"
+        );
+    }
+}
+
+#[test]
 fn a_hand_leaving_the_listing_forgets_its_rung_spells() {
     for (name, set) in FLAGS {
         let mut listing = listing();
@@ -830,6 +869,27 @@ fn waiting_on_a_rung_dialog_the_liege_has_shown_is_not_rung_again() {
     compose(&mut state);
     errand_mut(&mut listing, "bertil-probe").waiting = true;
     assert_eq!(state.set_reeve_listing(Ok(listing)).len(), 1);
+}
+
+#[test]
+fn waiting_absorbed_by_a_dialog_the_liege_has_shown_stays_cleared_after_a_watch_gap() {
+    // The liege shows the hand at its dialog before reeve lists `waiting` (90 s on): the spell
+    // the dialog then absorbs counts as shown, so the watch gap brings no highlight back.
+    let mut listing = listing();
+    let mut state = alert_state(listing.clone(), &[("p_b1", AgentStatus::Blocked)]);
+    notify(
+        &mut state,
+        SemanticNotificationKind::NeedsAttention,
+        "p_b1",
+        "ws_b_t1",
+    );
+    state.show_reeve_alerts("p_b1");
+    let [(_, waiting), ..] = FLAGS;
+    assert_eq!(read_flag(&mut state, &mut listing, waiting, Some(100)), 0);
+    assert!(alerting(&mut state).is_empty());
+    assert_eq!(read_flag(&mut state, &mut listing, waiting, None), 0);
+    assert_eq!(read_flag(&mut state, &mut listing, waiting, Some(100)), 0);
+    assert!(alerting(&mut state).is_empty(), "stays cleared");
 }
 
 #[test]
