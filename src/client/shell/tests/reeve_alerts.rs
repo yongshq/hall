@@ -1,4 +1,4 @@
-//! hall: alerts on the reeve tree (plan step 4, decisions 62 to 64).
+//! hall: alerts on the reeve tree (plan step 4, decisions 62 to 65; step 5, decision 68).
 
 use super::reeve_tree::{
     compose, errand_mut, hall_dev_snapshot, listing, picked_method, reeve_state, tree_rows,
@@ -656,6 +656,90 @@ fn a_hand_dialog_rings_once_whatever_the_toast_delay() {
 
 fn past_delay(now: std::time::Instant, delay: u64) -> std::time::Instant {
     now + std::time::Duration::from_secs(delay) + std::time::Duration::from_millis(200)
+}
+
+#[test]
+fn a_dialog_rung_before_the_listing_names_the_hand_is_not_rung_again_as_waiting() {
+    // Decision 66's window B, fixed by decision 68: reeve records a hand's pane only once its
+    // launch is proven, so a dialog in the hand's first seconds rings on herdr's plain rule,
+    // unlisted; the listing's waiting on that dialog, read later, is the same dialog.
+    let default = Config::default().ui.toast.delay_seconds;
+    for delay in [0, 1, default] {
+        let mut listing = listing();
+        let mut unlisted = listing.clone();
+        unlisted
+            .errands
+            .retain(|errand| errand.id != "bertil-probe");
+        let mut state = alert_state(unlisted, &[("p_b1", AgentStatus::Working)]);
+        state.config.toast_delay_seconds = delay;
+        let now = std::time::Instant::now();
+        let mut rung = requests(&notify(
+            &mut state,
+            SemanticNotificationKind::NeedsAttention,
+            "p_b1",
+            "ws_b_t1",
+        ));
+        // At delay 0 herdr's rule rings an unlisted pane's request before the snapshot reads
+        // it blocked; composing then must not forget the dialog.
+        compose(&mut state);
+        set_statuses(&mut state, &[("p_b1", AgentStatus::Blocked)]);
+        rung += requests(&state.tick_notifications(past_delay(now, delay)).0);
+        assert_eq!(rung, 1, "delay {delay}: herdr's request rings, unlisted");
+        assert!(
+            alerting(&mut state).is_empty(),
+            "delay {delay}: no reeve's pane"
+        );
+        // The listing names the hand, then reads its waiting on that dialog.
+        rung += requests(&state.set_reeve_listing(Ok(listing.clone())));
+        compose(&mut state);
+        errand_mut(&mut listing, "bertil-probe").waiting = true;
+        rung += requests(&state.set_reeve_listing(Ok(listing.clone())));
+        assert_eq!(rung, 1, "delay {delay}: one ring for one dialog");
+
+        // Answered, the dialog is forgotten as before: a later one this client did not ring
+        // rings as waiting.
+        set_statuses(&mut state, &[("p_b1", AgentStatus::Working)]);
+        compose(&mut state);
+        errand_mut(&mut listing, "bertil-probe").waiting = false;
+        state.set_reeve_listing(Ok(listing.clone()));
+        set_statuses(&mut state, &[("p_b1", AgentStatus::Blocked)]);
+        compose(&mut state);
+        errand_mut(&mut listing, "bertil-probe").waiting = true;
+        assert_eq!(
+            requests(&state.set_reeve_listing(Ok(listing))),
+            1,
+            "delay {delay}: a dialog this client did not ring"
+        );
+    }
+}
+
+#[test]
+fn a_rung_dialog_whose_pane_never_reads_blocked_is_forgotten_after_the_grace() {
+    let mut listing = listing();
+    let mut unlisted = listing.clone();
+    unlisted
+        .errands
+        .retain(|errand| errand.id != "bertil-probe");
+    let mut state = alert_state(unlisted, &[("p_b1", AgentStatus::Working)]);
+    assert_eq!(
+        requests(&notify(
+            &mut state,
+            SemanticNotificationKind::NeedsAttention,
+            "p_b1",
+            "ws_b_t1",
+        )),
+        1,
+        "delay 0, unlisted: herdr's rule rings at once"
+    );
+    std::thread::sleep(
+        super::notification_policy::COMPLETION_EVIDENCE_GRACE
+            + std::time::Duration::from_millis(50),
+    );
+    compose(&mut state);
+    state.set_reeve_listing(Ok(listing.clone()));
+    set_statuses(&mut state, &[("p_b1", AgentStatus::Blocked)]);
+    errand_mut(&mut listing, "bertil-probe").waiting = true;
+    assert_eq!(requests(&state.set_reeve_listing(Ok(listing))), 1);
 }
 
 #[test]

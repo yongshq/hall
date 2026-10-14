@@ -92,9 +92,12 @@ pub(in crate::client) struct ReeveAlerts {
     seen: Option<HashMap<String, HandFacts>>,
     /// Reeve and hand panes alerting from herdr's notifications, by pane id.
     panes: HashMap<String, PaneAlert>,
-    /// Panes whose dialog this client rang for, while they read blocked, apart from whether
-    /// the liege has since shown them.
-    dialogs: HashSet<String>,
+    /// Panes whose dialog this client rang for, listed or not, while they read blocked, apart
+    /// from whether the liege has since shown them. One rung before this client's snapshot
+    /// reads it blocked (herdr's rule rings an unlisted pane's request at once with a toast
+    /// delay of 0) is kept until herdr's grace for that snapshot ends, the deadline here, and
+    /// from the first read of it blocked on only while it reads blocked.
+    dialogs: HashMap<String, Option<std::time::Instant>>,
     /// Hands alerting from the listing, by errand id.
     hands: HashSet<String>,
     /// The focused pane as last composed, to see the liege move to an alerting pane; None
@@ -154,13 +157,32 @@ impl ClientShellState {
             in_view,
             "hall alert raised"
         );
-        if alert == PaneAlert::Dialog {
-            self.reeve_alerts.dialogs.insert(pane_id.to_owned());
-        }
         if alert == PaneAlert::Reply && in_view {
             return;
         }
         self.reeve_alerts.panes.insert(pane_id.to_owned(), alert);
+    }
+
+    /// Herdr's request for a dialog on `pane_id` rang in this client: remembered while the
+    /// pane reads blocked, whether the listing names the pane yet or not, so a listing
+    /// `waiting` on that dialog does not ring it again (decision 68). A hand's first seconds go
+    /// unlisted, since reeve records its pane only once its launch is proven, and its request
+    /// then rings on herdr's plain rule (decision 66's window B).
+    pub(super) fn note_rung_dialog(&mut self, pane_id: &str, now: std::time::Instant) {
+        let grace = super::notification_policy::COMPLETION_EVIDENCE_GRACE;
+        let until =
+            (!self.pane_reads_blocked(pane_id)).then(|| now.checked_add(grace).unwrap_or(now));
+        self.reeve_alerts.dialogs.insert(pane_id.to_owned(), until);
+    }
+
+    /// Whether this client's snapshot reads the pane blocked.
+    fn pane_reads_blocked(&self, pane_id: &str) -> bool {
+        self.snapshot.as_deref().is_some_and(|snapshot| {
+            snapshot.agents.iter().any(|agent| {
+                agent.pane_id == pane_id
+                    && agent.agent_status == crate::api::schema::AgentStatus::Blocked
+            })
+        })
     }
 
     /// The hall window has focus again: a reply on the pane in view is seen, as herdr counts it
@@ -204,15 +226,12 @@ impl ClientShellState {
         };
         // A dialog this client rang, while its pane reads blocked, or one whose request it
         // holds for the toast delay or the snapshot and rings when that is done (decision 65).
+        let now = std::time::Instant::now();
         let dialog_rung = |pane_id: Option<&String>| {
             pane_id.is_some_and(|pane_id| {
-                let rung = self.reeve_alerts.dialogs.contains(pane_id)
-                    && self.snapshot.as_deref().is_some_and(|snapshot| {
-                        snapshot.agents.iter().any(|agent| {
-                            &agent.pane_id == pane_id
-                                && agent.agent_status == crate::api::schema::AgentStatus::Blocked
-                        })
-                    });
+                let rung = self.reeve_alerts.dialogs.get(pane_id).is_some_and(|until| {
+                    self.pane_reads_blocked(pane_id) || until.is_some_and(|until| now < until)
+                });
                 rung || self.pending_notifications.iter().any(|pending| {
                     pending.endpoint_id == self.active_endpoint_id
                         && pending.event.kind == SemanticNotificationKind::NeedsAttention
@@ -306,9 +325,15 @@ impl ClientShellState {
                     PaneAlert::Dialog => status(pane_id) == Some(AgentStatus::Blocked),
                 }
         });
-        self.reeve_alerts
-            .dialogs
-            .retain(|pane_id| status(pane_id) == Some(AgentStatus::Blocked));
+        let now = std::time::Instant::now();
+        self.reeve_alerts.dialogs.retain(|pane_id, until| {
+            if status(pane_id) == Some(AgentStatus::Blocked) {
+                *until = None;
+                true
+            } else {
+                until.is_some_and(|until| now < until)
+            }
+        });
         let moved = self
             .reeve_alerts
             .focused_pane

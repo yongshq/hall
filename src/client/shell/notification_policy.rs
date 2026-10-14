@@ -1,7 +1,7 @@
 use super::*;
 
 const MAX_QUEUED_NOTIFICATIONS: usize = 8;
-const COMPLETION_EVIDENCE_GRACE: std::time::Duration = std::time::Duration::from_secs(1);
+pub(super) const COMPLETION_EVIDENCE_GRACE: std::time::Duration = std::time::Duration::from_secs(1);
 pub(super) const COMPLETION_RECHECK_INTERVAL: std::time::Duration =
     std::time::Duration::from_millis(50);
 
@@ -215,6 +215,16 @@ impl ClientShellState {
                 self.notification_target_is_active(&pending.endpoint_id, &pending.event);
             let suppress_external = target_active && self.outer_focused != Some(false);
             let suppress_sound = finished && suppress_external && !reeve_reply_lifted;
+            // hall: every dialog this client rings for is remembered while its pane reads
+            // blocked, the listing naming the pane or not, so a hand's `waiting` on it later
+            // does not ring it again (decision 68).
+            if pending.event.kind == SemanticNotificationKind::NeedsAttention
+                && pending.endpoint_id == self.active_endpoint_id
+            {
+                if let Some(pane_id) = pending.event.pane_id.as_deref() {
+                    self.note_rung_dialog(pane_id, now);
+                }
+            }
             // hall: the highlight rises with every alert that rings, apart from the sound and
             // whether it is muted (decision 63).
             if let (Some(role), Some(pane_id)) = (&alert_role, pending.event.pane_id.as_deref()) {
