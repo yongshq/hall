@@ -45,14 +45,17 @@ part passes, 1 when any fails, 2 on a usage error:
       and `ansel-fix` is its own name.
 
   reeve-hall-dev
-      No new file under ~/.reeve/state (read only) names the debug hall's
-      folder `hall-dev` or the test hall session from scripts/test-setup.conf,
-      in its contents or in its own path, as a whole word as above: a pane key
-      `<pane>@<home>/.config/hall-dev/sessions/hall-dev/...` written by a reeve
-      hook running in a test pane without the test home. Judged against the
-      baseline's `reeve-hall-dev` entries, files under ~/.reeve/state: a file
-      not in it fails until accepted. A baseline recorded before this part
-      existed has none.
+      No new file under ~/.reeve/state (read only) holds a hall-dev path in its
+      contents: a pane key `<pane>@<home>/.config/hall-dev/sessions/hall-dev/...`
+      written by a reeve hook running in a test pane without the test home.
+      The forms are the debug hall's folder `/.config/hall-dev/`, a session
+      folder under it `/hall-dev/sessions/` (wherever XDG_CONFIG_HOME puts
+      it), and the test hall session's folder `/sessions/<session>/`, the
+      session from scripts/test-setup.conf. The bare word is not matched: a
+      live errand whose id is exactly hall-dev names it in its own files.
+      Judged against the baseline's `reeve-hall-dev` entries, files under
+      ~/.reeve/state: a file not in it fails until accepted. A baseline
+      recorded before this part existed has none.
 
 The check never calls herdr: it reads the filesystem and the process table only.
 
@@ -67,7 +70,7 @@ that.
       baseline, recording who accepted it, why, and when. The entry `.` is the
       place's folder itself: it accepts a folder that was absent in the
       baseline and is present now. The place `reeve-hall-dev` takes a file
-      under ~/.reeve/state, relative to it, that names hall-dev now.
+      under ~/.reeve/state, relative to it, that holds a hall-dev path now.
 
 HALL_LIVE_CHECK_VAR_TMP replaces /var/tmp as the pane-graphics folder's parent;
 the tests use it. Every line names the folder it read.
@@ -83,10 +86,10 @@ import time
 
 PLACES = ("config", "state", "worktrees", "pane-graphics")
 # The baseline key, and accept's place, of the files under ~/.reeve/state that
-# name hall-dev.
+# hold a hall-dev path.
 HALL_DEV_PART = "reeve-hall-dev"
-# The debug hall's folder name (src/config/io.rs app_dir_name): in every hall-dev
-# socket path, so in every pane key a reeve hook writes for a hall-dev pane.
+# The debug hall's folder name (src/config/io.rs app_dir_name): in every debug
+# hall socket path, so in every pane key a reeve hook writes for a hall-dev pane.
 DEBUG_HALL_DIR = "hall-dev"
 REPO = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 EXIT_USAGE = 2
@@ -372,6 +375,18 @@ def whole_words(words):
     return r"(?<![A-Za-z0-9_-])(?:" + "|".join(re.escape(w) for w in words) + r")(?![A-Za-z0-9_-])"
 
 
+def hall_dev_forms(session):
+    """The path forms a hall-dev pane key holds (`<pane>@<hall-dev's socket>`):
+    the debug hall's folder under ~/.config, a session folder under the debug
+    hall's folder wherever XDG_CONFIG_HOME puts it, and the test session's
+    folder under any hall's. Never the bare word: a live errand whose id is
+    exactly hall-dev names it in its meta file, branch and errand folder."""
+    forms = [f"/.config/{DEBUG_HALL_DIR}/", f"/{DEBUG_HALL_DIR}/sessions/"]
+    if session:
+        forms.append(f"/sessions/{session}/")
+    return forms
+
+
 def scan_reeve_state():
     """Reads every regular file under ~/.reeve/state once, for reeve-state and
     reeve-hall-dev. Raises RuntimeError when the test names do not read."""
@@ -379,8 +394,8 @@ def scan_reeve_state():
     test_home, session, names = test_names()
     home_re = re.escape(os.path.basename(test_home.rstrip("/")))
     test_pattern = re.compile((rf"/{home_re}(?![A-Za-z0-9_.-])|" + whole_words(names)).encode())
-    hall_dev = sorted({DEBUG_HALL_DIR, session} - {""})
-    hall_dev_pattern = re.compile(whole_words(hall_dev).encode())
+    hall_dev = hall_dev_forms(session)
+    hall_dev_pattern = re.compile("|".join(re.escape(f) for f in hall_dev).encode())
     scan = {
         "root": root,
         "home": test_home,
@@ -409,12 +424,14 @@ def scan_reeve_state():
             except OSError as e:
                 scan["unread"].append((p, e.strerror))
                 continue
-            # The file's own path under the state folder counts as naming too.
+            # For reeve-state, the file's own path under the state folder
+            # counts as naming the test setup too; a hall-dev path is only
+            # ever in a file's contents.
             rel = os.path.relpath(p, root)
             m = test_pattern.search(rel.encode()) or test_pattern.search(data)
             if m:
                 scan["hits"].append((p, m.group(0).decode(errors="replace")))
-            m = hall_dev_pattern.search(rel.encode()) or hall_dev_pattern.search(data)
+            m = hall_dev_pattern.search(data)
             if m:
                 scan["hall_dev_hits"].append((rel, m.group(0).decode(errors="replace")))
     return scan

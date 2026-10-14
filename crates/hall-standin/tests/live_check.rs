@@ -686,12 +686,14 @@ fn reeve_state_naming_hall_dev_fails_until_accepted() {
     .unwrap();
     let (stdout, stderr) = fails(&rig.run(&[]));
     assert!(
-        line(&stdout, "reeve-hall-dev").contains("FAIL 1 new files name hall-dev"),
+        line(&stdout, "reeve-hall-dev").contains(
+            "FAIL 1 new files name /.config/hall-dev/, /hall-dev/sessions/, /sessions/hall-dev/"
+        ),
         "{stdout}"
     );
     assert!(line(&stdout, "reeve-state").contains("pass"), "{stdout}");
     assert!(
-        stderr.contains("reeve-hall-dev: new sessions/s2/pane names hall-dev (born 20"),
+        stderr.contains("reeve-hall-dev: new sessions/s2/pane names /.config/hall-dev/ (born 20"),
         "{stderr}"
     );
     assert!(stderr.contains("accept reeve-hall-dev <file>"), "{stderr}");
@@ -730,14 +732,40 @@ fn reeve_state_naming_hall_dev_fails_until_accepted() {
     assert_eq!(accepted[0]["entry"], "sessions/s2/pane");
     passes(&rig.run(&[]));
 
-    // A file whose own path names the test hall session is new too.
+    // A live errand whose id is exactly hall-dev names neither the debug
+    // hall's folder nor a session folder: its meta file, branch, errand folder
+    // and worktree pass (review-mend-step5-test-setup, finding 2).
+    std::fs::write(
+        state.join("hall-dev.meta"),
+        "branch=docs/hall-dev\nworktree=/u/yongshq/hall.worktrees/scout-hall-dev\nbrief=/u/.reeve/errands/hall-dev/brief.md\n",
+    )
+    .unwrap();
     touch(&state.join("groups/hall-dev/w1"));
-    let (stdout, stderr) = fails(&rig.run(&[]));
-    assert!(
-        line(&stdout, "reeve-hall-dev").contains("FAIL 1 new files"),
-        "{stdout}"
-    );
-    assert!(stderr.contains("new groups/hall-dev/w1"), "{stderr}");
+    let stdout = passes(&rig.run(&[]));
+    assert!(line(&stdout, "reeve-hall-dev").contains("pass"), "{stdout}");
+
+    // The other forms are new too: a pane key of the debug hall's default
+    // session, of hall-dev's folder under another XDG_CONFIG_HOME, and of the
+    // test session in another hall's folder.
+    for (file, key) in [
+        ("s3", "w1:p1@/u/.config/hall-dev/herdr.sock"),
+        ("s4", "w1:p1@/x/xdg/hall-dev/sessions/other/herdr.sock"),
+        ("s5", "w1:p1@/u/.config/hall/sessions/hall-dev/herdr.sock"),
+    ] {
+        let pane = state.join("sessions").join(file).join("pane");
+        std::fs::create_dir_all(pane.parent().unwrap()).unwrap();
+        std::fs::write(&pane, format!("{key}\n")).unwrap();
+        let (stdout, stderr) = fails(&rig.run(&[]));
+        assert!(
+            line(&stdout, "reeve-hall-dev").contains("FAIL 1 new files"),
+            "{key}: {stdout}"
+        );
+        assert!(
+            stderr.contains(&format!("new sessions/{file}/pane")),
+            "{key}: {stderr}"
+        );
+        std::fs::remove_file(&pane).unwrap();
+    }
 }
 
 #[test]
