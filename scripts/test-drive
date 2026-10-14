@@ -15,7 +15,10 @@ HALL_USAGE="usage: scripts/test-drive [options] <test reeve or test hand> dialog
 
 A dialog is never answered with allow.
 
-options: --home, --session, --config, --dry-run, as for
+With the reeve listing (--listing reeve), a hand the test reeve dispatched
+itself is found by its errand id in reeve's listing.
+
+options: --home, --session, --config, --listing, --dry-run, as for
 scripts/test-setup"
 
 # shellcheck source=test-setup-lib.sh
@@ -33,15 +36,30 @@ ACTION=${REST[1]}
 case $ACTION in dialog | turn-end | deny) ;; *) usage_die "unknown action $ACTION" ;; esac
 load_inputs
 
-roster_find "$NAME" || die "$NAME is not in the roster"
-
-loc=""
-run_into loc "$R_SESSION <pane-of-$NAME>" "$HALL_STANDIN" --home "$HALL_DEV_HOME" locate "$NAME" ||
-  die "no pane recorded for $NAME; run scripts/test-setup up first"
-S=${loc%% *}
-P=${loc#* }
+if roster_find "$NAME"; then
+  loc=""
+  run_into loc "$R_SESSION <pane-of-$NAME>" "$HALL_STANDIN" --home "$HALL_DEV_HOME" locate "$NAME" ||
+    die "no pane recorded for $NAME; run scripts/test-setup up first"
+  S=${loc%% *}
+  P=${loc#* }
+  if [ "$R_KIND" = reeve ]; then KIND="test reeve"; else KIND="test hand"; fi
+elif [ "$HALL_DEV_LISTING" = reeve ]; then
+  # A hand the test reeve dispatched itself: its pane is where reeve's listing
+  # places it in the test hall session.
+  listed=""
+  run_into listed '{}' "${LISTING_CMD[@]}" || die "reeve's listing failed; see above"
+  S=$HALL_DEV_SESSION
+  P="<pane-of-$NAME>"
+  if [ "$DRY_RUN" = 0 ]; then
+    P=$(printf '%s' "$listed" | jq -r --arg id "$NAME" --arg s "$S" 'first(.errands[]? | select(.id == $id and .session.backend == "hall" and .session.name == $s) | .session.pane_id // empty) // empty')
+    [ -n "$P" ] || die "$NAME is neither in the roster nor a hand reeve's listing places in $S"
+    check_pane_id "$P" "reeve's listing for $NAME"
+  fi
+  KIND="test hand"
+else
+  die "$NAME is not in the roster"
+fi
 check_session "$S"
-if [ "$R_KIND" = reeve ]; then KIND="test reeve"; else KIND="test hand"; fi
 say "$KIND $NAME: pane $P in $S, action $ACTION"
 
 deny() {

@@ -19,15 +19,18 @@ use serde_json::Value;
 /// server` logs the identity names it was started with (decision 48), marks
 /// the session running and exits, as a detached server would return control;
 /// `session stop` marks it stopped. `pane run` runs the line in a shell, with
-/// the HERDR_* names hall sets into a pane, as a pane's shell would, and with
+/// the HERDR_* and HALL_* names and REEVE_BACKEND hall sets into a pane, as a
+/// pane's shell would, and with
 /// the names in a `server-env` file, if present, as a pane of a hall server
 /// someone else started would hold them.
 const FAKE_HALL: &str = r#"#!/usr/bin/env bash
 set -euo pipefail
 dir=$(dirname "$0")
-printf '%s|socket=%s|session=%s|pane=%s|env=%s|config=%s|client=%s\n' "$*" \
+printf '%s|socket=%s|session=%s|pane=%s|env=%s|config=%s|client=%s|bin=%s|tab=%s|ws=%s|backend=%s\n' "$*" \
   "${HALL_SOCKET_PATH-unset}" "${HALL_SESSION-unset}" "${HALL_PANE_ID-unset}" \
-  "${HALL_ENV-unset}" "${HALL_CONFIG_PATH-unset}" "${HALL_CLIENT_SOCKET_PATH-unset}" >>"$dir/calls.log"
+  "${HALL_ENV-unset}" "${HALL_CONFIG_PATH-unset}" "${HALL_CLIENT_SOCKET_PATH-unset}" \
+  "${HALL_BIN_PATH-unset}" "${HALL_TAB_ID-unset}" "${HALL_WORKSPACE_ID-unset}" \
+  "${REEVE_BACKEND-unset}" >>"$dir/calls.log"
 next() { n=$(( $(cat "$dir/n" 2>/dev/null || echo 0) + 1 )); echo "$n" >"$dir/n"; }
 case "$*" in
   "--session hall-dev server")
@@ -60,8 +63,10 @@ case "$*" in
   "pane run "*)
     if [ -e "$dir/server-env" ]; then set -a; . "$dir/server-env"; set +a; fi
     read -r _ ws tab < <(grep "^$3 " "$dir/panes")
+    sock="$dir/cfg/sessions/hall-dev/herdr.sock"
     HERDR_ENV=1 HERDR_PANE_ID=$3 HERDR_TAB_ID=$tab HERDR_WORKSPACE_ID=$ws HERDR_BIN_PATH=$0 \
-      HERDR_SOCKET_PATH="$dir/cfg/sessions/hall-dev/herdr.sock" bash -c "$4"
+      HERDR_SOCKET_PATH=$sock HALL_ENV=1 HALL_SESSION=hall-dev HALL_PANE_ID=$3 HALL_TAB_ID=$tab \
+      HALL_WORKSPACE_ID=$ws HALL_BIN_PATH=$0 HALL_SOCKET_PATH=$sock REEVE_BACKEND=hall bash -c "$4"
     echo '{"result":{}}'
     ;;
   "session stop "*) rm -f "$dir/running"; echo '{"result":{}}' ;;
@@ -79,15 +84,17 @@ esac
 "#;
 
 /// Records, per claude line it is started from, its working directory's name,
-/// the names that say who it is or where it writes, and the six HERDR_* names
-/// hall sets into a pane.
+/// the names that say who it is or where it writes, the six HERDR_* names
+/// hall sets into a pane, and three of hall's own: REEVE_BACKEND, HALL_BIN_PATH
+/// and HALL_PANE_ID.
 const FAKE_CLAUDE: &str = r#"#!/usr/bin/env bash
-printf '%s|hand=%s|ident=%s|reeve_home=%s|xdg_config=%s|xdg_state=%s|hall_socket=%s|herdr_pane=%s|herdr=%s,%s,%s,%s,%s\n' \
+printf '%s|hand=%s|ident=%s|reeve_home=%s|xdg_config=%s|xdg_state=%s|hall_socket=%s|herdr_pane=%s|herdr=%s,%s,%s,%s,%s|hall=%s,%s,%s\n' \
   "$(basename "$PWD")" "${REEVE_HAND-unset}" \
   "$(env | sed -nE 's/^((CLAUDECODE|CLAUDE_[A-Z_]*|HERDR_[A-Z_]*)=.*)/\1/p' | grep -v -E '^HERDR_(ENV|SOCKET_PATH|BIN_PATH|WORKSPACE_ID|TAB_ID|PANE_ID)=' | sort | tr '\n' ' ')" \
   "${REEVE_HOME-unset}" "${XDG_CONFIG_HOME-unset}" "${XDG_STATE_HOME-unset}" "${HALL_SOCKET_PATH-unset}" \
   "${HERDR_PANE_ID-unset}" "${HERDR_ENV-unset}" "${HERDR_SOCKET_PATH-unset}" "${HERDR_BIN_PATH-unset}" \
-  "${HERDR_WORKSPACE_ID-unset}" "${HERDR_TAB_ID-unset}" >>"$(dirname "$0")/claude.log"
+  "${HERDR_WORKSPACE_ID-unset}" "${HERDR_TAB_ID-unset}" \
+  "${REEVE_BACKEND-unset}" "${HALL_BIN_PATH-unset}" "${HALL_PANE_ID-unset}" >>"$(dirname "$0")/claude.log"
 "#;
 
 /// Any herdr call at all is a failure: this one only records it.
@@ -181,6 +188,10 @@ impl Rig {
         .env("HALL_ENV", "1")
         .env("HALL_CONFIG_PATH", "/live/config.toml")
         .env("HALL_CLIENT_SOCKET_PATH", "/live/hall-client.sock")
+        .env("HALL_BIN_PATH", "/live/hall")
+        .env("HALL_TAB_ID", "w9:t9")
+        .env("HALL_WORKSPACE_ID", "w9")
+        .env("REEVE_BACKEND", "hall")
         .env("HERDR_SOCKET_PATH", "/live/herdr.sock")
         .env("HERDR_SESSION", "default")
         .env("HERDR_PANE_ID", "w9:p9")
@@ -248,7 +259,7 @@ impl Rig {
     }
 }
 
-const CLEAN: &str = "|socket=unset|session=unset|pane=unset|env=unset|config=unset|client=unset";
+const CLEAN: &str = "|socket=unset|session=unset|pane=unset|env=unset|config=unset|client=unset|bin=unset|tab=unset|ws=unset|backend=unset";
 
 #[test]
 fn up_status_drive_down() {
@@ -337,8 +348,8 @@ fn up_status_drive_down() {
             let pane = pane_of(name);
             let (ws, tab) = rig.place_of(&pane);
             format!(
-                "{name}|hand={hand}|ident=|reeve_home={h}|xdg_config={h}/xdg-config|xdg_state={h}/xdg-state|hall_socket={socket}|herdr_pane={pane}|herdr=1,{socket},{},{ws},{tab}",
-                rig.bin.join("hall").display()
+                "{name}|hand={hand}|ident=|reeve_home={h}|xdg_config={h}/xdg-config|xdg_state={h}/xdg-state|hall_socket={socket}|herdr_pane={pane}|herdr=1,{socket},{bin},{ws},{tab}|hall=hall,{bin},{pane}",
+                bin = rig.bin.join("hall").display()
             )
         })
         .collect();
@@ -817,7 +828,7 @@ fn up_refuses_an_old_roster_with_session_numbers() {
     let conf = rig.bin.join("old.conf");
     std::fs::write(
         &conf,
-        "HALL_DEV_HOME=\"$HOME/.reeve-hall-dev\"\nHALL_DEV_SESSION=hall-dev\nHALL_DEV_ROSTER=(\"reeve ansel\" \"errand ansel-fix 1 ansel artificer\")\n",
+        "HALL_DEV_HOME=\"$HOME/.reeve-hall-dev\"\nHALL_DEV_SESSION=hall-dev\nHALL_DEV_LISTING=standin\nHALL_DEV_ROSTER=(\"reeve ansel\" \"errand ansel-fix 1 ansel artificer\")\n",
     )
     .unwrap();
     let out = rig.run("test-setup", &["--config", conf.to_str().unwrap(), "up"]);
@@ -825,4 +836,113 @@ fn up_refuses_an_old_roster_with_session_numbers() {
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(err.contains("no session number since step 2"), "{err}");
     assert!(rig.calls().is_empty(), "{:?}", rig.calls());
+}
+
+/// Stands in for reeve's own listing command (step 5): logs its arguments and
+/// prints a version 1 listing with the test reeve, a hand it dispatched in
+/// hall-dev, and a herdr entry under the same id, which no script may use.
+const FAKE_REEVE_LISTING: &str = r#"#!/bin/sh
+printf '%s\n' "$*" >>"$(dirname "$0")/reeve-listing.log"
+cat <<'JSON'
+{"version": 1,
+ "reeves": [{"name": "ansel", "session": {"backend": "hall", "name": "hall-dev", "pane_id": "w1:p1"}, "live": true}],
+ "errands": [
+  {"id": "scout-1", "owner_reeve": "ansel", "hand_state": "working",
+   "session": {"backend": "herdr", "name": null, "pane_id": "w7:p7"}},
+  {"id": "scout-1", "owner_reeve": "ansel", "hand_state": "needs-decision", "question": "Which?", "open": 1,
+   "session": {"backend": "hall", "name": "hall-dev", "pane_id": "w1:t5:p1"}}
+ ]}
+JSON
+"#;
+
+#[test]
+fn the_reeve_listing_starts_one_test_reeve_and_drives_a_hand_it_dispatched() {
+    let rig = Rig::new("reeve-listing");
+    let h = rig.home.to_str().unwrap();
+
+    // Before reeve's listing command is there, up refuses before any hall call.
+    let out = rig.run("test-setup", &["--listing", "reeve", "up"]);
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("use --listing standin until it lands"),
+        "{out:?}"
+    );
+    assert!(rig.calls().is_empty(), "{:?}", rig.calls());
+
+    let listing_bin = rig.user.join("yongshq/reeve/bin");
+    std::fs::create_dir_all(&listing_bin).unwrap();
+    let listing = listing_bin.join("reeve-listing");
+    executable(&listing, FAKE_REEVE_LISTING);
+
+    let up = rig.ok("test-setup", &["--listing", "reeve", "up"]);
+    let calls = rig.calls();
+    for c in &calls {
+        assert!(c.ends_with(CLEAN), "{c}");
+    }
+    assert_eq!(rig.herdr_calls(), "");
+    let count = |prefix: &str| calls.iter().filter(|c| c.starts_with(prefix)).count();
+    assert_eq!(count("workspace create "), 1, "{calls:?}");
+    assert_eq!(count("tab create "), 0, "{calls:?}");
+    assert_eq!(count("pane run "), 1, "{calls:?}");
+    // The one test reeve's claude keeps hall's pane names: reeve's hall backend
+    // reads them (decision 68).
+    let claudes = rig.read_bin("claude.log");
+    assert_eq!(claudes.lines().count(), 1, "{claudes}");
+    assert!(claudes.starts_with("ansel|hand=unset|ident=|"), "{claudes}");
+    assert!(
+        claudes.contains(&format!(
+            "|hall=hall,{},w1:p1",
+            rig.bin.join("hall").display()
+        )),
+        "{claudes}"
+    );
+    // The client config names reeve's listing of the test home, and up printed it.
+    let client_config = std::fs::read_to_string(rig.home.join("standin/hall.toml")).unwrap();
+    assert!(
+        client_config.contains(&format!(
+            "[reeve]\nlisting_command = [\"{}\", \"--home\", \"{h}\"]\n",
+            listing.display()
+        )),
+        "{client_config}"
+    );
+    assert!(up.contains("\"scout-1\""), "{up}");
+    assert_eq!(
+        std::fs::read_to_string(listing_bin.join("reeve-listing.log")).unwrap(),
+        format!("--home {h}\n")
+    );
+    // The world file records the test reeve's pane, and no hand.
+    let world = rig.listing();
+    assert_eq!(world["reeves"][0]["session"]["pane_id"], "w1:p1");
+    assert_eq!(world["errands"], serde_json::json!([]));
+
+    let status = rig.ok("test-setup", &["--listing", "reeve", "status"]);
+    assert!(!status.contains("CHECK"), "{status}");
+    assert!(status.contains("\"scout-1\""), "{status}");
+
+    // test-drive finds the hand at the pane reeve's listing places in hall-dev,
+    // never at the herdr entry's.
+    std::fs::write(rig.bin.join("blocked"), "").unwrap();
+    let drive = rig.ok("test-drive", &["--listing", "reeve", "scout-1", "deny"]);
+    assert!(
+        drive.contains("test hand scout-1: pane w1:t5:p1 in hall-dev"),
+        "{drive}"
+    );
+    assert!(
+        rig.calls()
+            .iter()
+            .any(|c| c.starts_with("agent send-keys w1:t5:p1 esc --session hall-dev|")),
+        "{:?}",
+        rig.calls()
+    );
+    assert!(!rig.calls().iter().any(|c| c.contains("w7:p7")));
+    let out = rig.run("test-drive", &["--listing", "reeve", "scout-2", "deny"]);
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+
+    rig.ok("test-setup", &["--listing", "reeve", "down", "--delete"]);
+    assert!(
+        rig.calls()
+            .iter()
+            .any(|c| c.starts_with("session stop hall-dev --json|"))
+    );
+    assert_eq!(rig.herdr_calls(), "");
 }

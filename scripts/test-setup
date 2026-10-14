@@ -8,7 +8,8 @@ HALL_USAGE="usage: scripts/test-setup [options] up|down|status
   up      start the test hall session if it is not running, seed the world
           file, start a claude session per roster line (each test reeve in a
           workspace of its own, each test hand a tab in its reeve's workspace),
-          record where each one sits, print the listing
+          record where each one sits, print the listing; with the reeve
+          listing, start the one test reeve and place no test hand
   down    stop the test hall session and forget the recorded panes
   status  read only: the test hall session, each recorded pane's hall reading,
           and scripts/live-check, the check that the live setup is untouched
@@ -16,6 +17,8 @@ HALL_USAGE="usage: scripts/test-setup [options] up|down|status
 options:
   --home <path>        test reeve home (else HALL_DEV_HOME from the config)
   --session <name>     test hall session (else HALL_DEV_SESSION)
+  --listing <which>    standin or reeve: the listing the reeve tree reads
+                       (else HALL_DEV_LISTING)
   --config <file>      config to source (default scripts/test-setup.conf)
   --delete             with down: also delete the stopped hall session's saved state
   --dry-run            print every command, run none"
@@ -40,7 +43,7 @@ load_inputs
 
 WORLD="$HALL_DEV_HOME/standin/world.toml"
 # The hall client config that turns the reeve tree on (decision 49): hall reads
-# the listing by running the stand-in on this home.
+# the listing by running LISTING_CMD, the stand-in's or reeve's, on this home.
 CLIENT_CONFIG="$HALL_DEV_HOME/standin/hall.toml"
 # How long up waits for a hall server it started to answer, in tenths of a
 # second. HALL_START_WAIT overrides it (the tests do).
@@ -89,8 +92,9 @@ start_session() {
 
 seed_world() {
   local text line
-  text="# hall test setup world file: what the stand-in serves as the listing (version 1).
-# Seeded by scripts/test-setup up from the roster. Edit freely, or use
+  text="# hall test setup world file: what the stand-in serves as the listing (version 1),
+# and where the scripts record each test claude's pane (with the reeve listing,
+# only that). Seeded by scripts/test-setup up from the roster. Edit freely, or use
 # hall-standin --home <home> set <name> <key>=<value>. Format: docs/listing-draft.md.
 # herdr_session holds the hall session's name, listed as session.name with backend hall.
 "
@@ -124,31 +128,25 @@ herdr_session = \"$R_SESSION\"
   write_file "$WORLD" "$text"
 }
 
-# write_client_config: the hall client config naming the stand-in's listing of
-# this home as the reeve tree's listing command. Rewritten on every up, since
-# it names the stand-in this checkout runs. Attach with HALL_CONFIG_PATH set to it.
+# write_client_config: the hall client config naming LISTING_CMD, the stand-in's
+# or reeve's listing of this home, as the reeve tree's listing command.
+# Rewritten on every up, since it names the stand-in this checkout runs or the
+# listing chosen. Attach with HALL_CONFIG_PATH set to it.
 write_client_config() {
   local p
-  for p in "$HALL_STANDIN" "$HALL_DEV_HOME"; do
+  for p in "${LISTING_CMD[0]}" "$HALL_DEV_HOME"; do
     # Each goes into a TOML string as it is, so it must be plain.
     [[ $p =~ ^/[A-Za-z0-9_./-]+$ ]] || die "refusing $(q "$p") in the hall client config: use letters, digits, '.', '_', '-' and '/' only"
   done
   write_file "$CLIENT_CONFIG" "# hall client config for the test setup, written by scripts/test-setup up.
-# The reeve tree reads the stand-in's listing of the test reeve home (decision 49).
+# The reeve tree reads the $HALL_DEV_LISTING listing of the test reeve home (decision 49).
 # Attach with HALL_CONFIG_PATH set to this file: see docs/test-setup.md.
 # No first-run overlay: this config is the test view's, not a first run of hall.
 onboarding = false
 
 [reeve]
-listing_command = [\"$HALL_STANDIN\", \"--home\", \"$HALL_DEV_HOME\"]
+listing_command = [\"${LISTING_CMD[0]}\", \"--home\", \"$HALL_DEV_HOME\"]
 "
-}
-
-# check_pane_id <id> <what>: the stand-in's pane id rule (is_pane_id), checked
-# before the id reaches hall's command line, where a leading '-' would read as
-# an option.
-check_pane_id() {
-  [[ $1 =~ ^[A-Za-z0-9:_][A-Za-z0-9:_-]*$ ]] || die "refusing pane id $(q "$1") from $2: not letters, digits, ':', '_' and '-', starting with no '-'"
 }
 
 # The workspace each test reeve sits in, by name, so its test hands open as
@@ -210,6 +208,15 @@ up_line() {
   standin place "$R_NAME" "$R_SESSION" "$pane"
 }
 
+# print_listing: the listing the reeve tree reads, as it reads it now.
+print_listing() {
+  if [ "$HALL_DEV_LISTING" = reeve ]; then
+    run "${LISTING_CMD[@]}"
+  else
+    standin listing
+  fi
+}
+
 cmd_up() {
   local line
   if [ "$DRY_RUN" = 0 ]; then
@@ -231,6 +238,9 @@ cmd_up() {
     run "${HALL_CLEAN_ENV[@]}" cargo build --quiet --manifest-path "$HALL_REPO/Cargo.toml" "${build[@]}"
   fi
   [ "$DRY_RUN" = 1 ] || [ -x "$HALL_BIN" ] || die "hall $HALL_BIN is not built"
+  if [ "$HALL_DEV_LISTING" = reeve ] && [ "$DRY_RUN" = 0 ] && [ ! -x "$HALL_DEV_REEVE_LISTING" ]; then
+    die "reeve's listing command $HALL_DEV_REEVE_LISTING is not there: it comes with reeve's hall backend (plan step 5); use --listing standin until it lands"
+  fi
 
   hall_session_list SESSIONS
   if session_running "$SESSIONS" "$HALL_DEV_SESSION" && [ "$DRY_RUN" = 0 ]; then
@@ -268,7 +278,7 @@ cmd_up() {
   done
 
   say "listing:"
-  standin listing
+  print_listing || say "  CHECK: the listing command failed; see above"
   say "next: answer any folder trust dialog yourself (attach with $(q "${HALL_CLEAN_ENV[@]}" HALL_CONFIG_PATH="$CLIENT_CONFIG" "$HALL_BIN" --session "$HALL_DEV_SESSION"), which shows the reeve tree), then scripts/test-setup status"
 }
 
@@ -336,9 +346,9 @@ cmd_status() {
 
   if [ "$HOME_WALKED" = 0 ]; then
     say "listing: not read, the test reeve home fails the check inside it"
-  elif [ "$DRY_RUN" = 1 ] || { [ -x "$HALL_STANDIN" ] && [ -e "$WORLD" ]; }; then
+  elif [ "$DRY_RUN" = 1 ] || { [ -x "${LISTING_CMD[0]}" ] && { [ "$HALL_DEV_LISTING" = reeve ] || [ -e "$WORLD" ]; }; }; then
     say "listing:"
-    standin listing || true
+    print_listing || true
   fi
 
   # The live setup check is its own tool, which makes no herdr call (decision 40).

@@ -4,8 +4,9 @@
 # The rules every function here keeps (ADR 0003, decisions 26, 33, 38 and 47):
 # - no herdr call at all: every call runs the debug hall binary, names the one
 #   hall session with --session on the command line, and runs under `env -u` of
-#   the HALL_* names hall reads, because a process inside a hall pane inherits
-#   HALL_SESSION, HALL_PANE_ID and the rest;
+#   the HALL_* names hall reads or sets into its panes and of REEVE_BACKEND,
+#   because a process inside a hall pane inherits HALL_SESSION, HALL_PANE_ID,
+#   HALL_SOCKET_PATH, REEVE_BACKEND=hall and the rest;
 # - the hall session default and the reeve home ~/.reeve are refused, the home
 #   by the stand-in's check-root before anything else happens;
 # - every test reeve and test hand claude starts with REEVE_HOME=<test home>,
@@ -29,8 +30,10 @@ HALL_STANDIN="${HALL_STANDIN_BIN:-$HALL_REPO/target/debug/hall-standin}"
 # A prebuilt hall may be named here (the tests name a fake one); otherwise up
 # builds the debug hall, whose folders are ~/.config/hall-dev and the rest.
 HALL_BIN="${HALL_DEBUG_BIN:-$HALL_REPO/target/debug/hall}"
-# The HALL_* names hall reads, dropped from every hall call and build.
-HALL_CLEAN_ENV=(env -u HALL_SOCKET_PATH -u HALL_CLIENT_SOCKET_PATH -u HALL_SESSION -u HALL_CONFIG_PATH -u HALL_ENV -u HALL_PANE_ID)
+# The HALL_* names hall reads or sets into its panes, and the reeve backend it
+# sets there (decision 68), dropped from every hall call and build: the test
+# setup is run from inside live hall panes too, whose values name the live hall.
+HALL_CLEAN_ENV=(env -u HALL_SOCKET_PATH -u HALL_CLIENT_SOCKET_PATH -u HALL_SESSION -u HALL_CONFIG_PATH -u HALL_ENV -u HALL_PANE_ID -u HALL_BIN_PATH -u HALL_TAB_ID -u HALL_WORKSPACE_ID -u REEVE_BACKEND)
 HALL_CLI=("${HALL_CLEAN_ENV[@]}" "$HALL_BIN")
 
 # The names in this script's environment that say who a claude is, or which
@@ -55,14 +58,18 @@ unset __name
 # passes none of them on either: REEVE_HAND, claude's session markers, every
 # CLAUDE_CODE_* name and every HERDR_* name except the six hall sets into every
 # pane with that session's own values (its socket, binary and pane ids), which
-# claude's herdr agent-state hook uses to report to hall-dev. command keeps the
-# liege's aliases for env and sed out of it.
+# claude's herdr agent-state hook uses to report to hall-dev. Every HALL_* name
+# and REEVE_BACKEND are kept too: hall sets them into every pane with that
+# session's own values, and reeve's hall backend reads them (decision 48's
+# second amendment, decision 68). command keeps the liege's aliases for env and
+# sed out of it.
 CLAUDE_DROP='-u REEVE_HAND -u CLAUDECODE -u CLAUDE_PID -u CLAUDE_EFFORT $(command env | command sed -nE "/^HERDR_(ENV|SOCKET_PATH|BIN_PATH|WORKSPACE_ID|TAB_ID|PANE_ID)=/d;s/^((CLAUDE_CODE|HERDR)_[A-Za-z0-9_]*)=.*/-u \1/p")'
 
 DRY_RUN=0
 CONFIG="$HALL_REPO/scripts/test-setup.conf"
 ARG_HOME=""
 ARG_SESSION=""
+ARG_LISTING=""
 # The hall session's API socket, from hall's session list; the test claudes'
 # HALL_SOCKET_PATH. Set by up.
 HALL_DEV_SOCKET=""
@@ -224,6 +231,7 @@ parse_common() {
       --dry-run) DRY_RUN=1 ;;
       --home) [ $# -ge 2 ] || usage_die "--home needs a path"; ARG_HOME=$2; shift ;;
       --session) [ $# -ge 2 ] || usage_die "--session needs a name"; ARG_SESSION=$2; shift ;;
+      --listing) [ $# -ge 2 ] || usage_die "--listing needs standin or reeve"; ARG_LISTING=$2; shift ;;
       --config) [ $# -ge 2 ] || usage_die "--config needs a file"; CONFIG=$2; shift ;;
       -h | --help) say "$HALL_USAGE"; exit 0 ;;
       --*) usage_die "unknown option $1" ;;
@@ -236,8 +244,9 @@ parse_common() {
 # load_inputs: the config file, then the flags over it; then every input checked and printed.
 load_inputs() {
   : "${HOME:?HOME must be set, to rule out the live reeve home}"
-  HALL_DEV_HOME="" HALL_DEV_SESSION=""
+  HALL_DEV_HOME="" HALL_DEV_SESSION="" HALL_DEV_LISTING="" HALL_DEV_REEVE_LISTING=""
   HALL_DEV_ROSTER=()
+  HALL_DEV_REEVE_ROSTER=()
   if [ -n "$CONFIG" ]; then
     [ -f "$CONFIG" ] || die "config file $CONFIG not found"
     # shellcheck source=test-setup.conf
@@ -245,7 +254,9 @@ load_inputs() {
   fi
   [ -n "$ARG_HOME" ] && HALL_DEV_HOME=$ARG_HOME
   [ -n "$ARG_SESSION" ] && HALL_DEV_SESSION=$ARG_SESSION
+  [ -n "$ARG_LISTING" ] && HALL_DEV_LISTING=$ARG_LISTING
   case $HALL_DEV_HOME in "~/"*) HALL_DEV_HOME="$HOME/${HALL_DEV_HOME#"~/"}" ;; esac
+  case $HALL_DEV_REEVE_LISTING in "~/"*) HALL_DEV_REEVE_LISTING="$HOME/${HALL_DEV_REEVE_LISTING#"~/"}" ;; esac
 
   [ -n "$HALL_DEV_HOME" ] || usage_die "no reeve home: pass --home or set HALL_DEV_HOME in the config"
   [ -n "$HALL_DEV_SESSION" ] || usage_die "no hall session: pass --session or set HALL_DEV_SESSION"
@@ -254,15 +265,43 @@ load_inputs() {
   [ "${#HALL_DEV_ROSTER[@]}" -gt 0 ] || die "no roster: set HALL_DEV_ROSTER in the config"
   local line
   for line in "${HALL_DEV_ROSTER[@]}"; do roster_read "$line"; done
+  check_listing
 
   say "test setup inputs:"
   say "  reeve home:      $HALL_DEV_HOME"
   say "  hall session:    $HALL_DEV_SESSION"
   say "  hall:            $HALL_BIN"
   say "  config:          ${CONFIG:-none}"
+  if [ "$HALL_DEV_LISTING" = reeve ]; then
+    say "  listing:         reeve's, $HALL_DEV_REEVE_LISTING --home $HALL_DEV_HOME (one test reeve, no hands placed)"
+  else
+    say "  listing:         the stand-in's, from the world file"
+  fi
   [ "$HOME_WALKED" = 1 ] || say "  WARNING:         the test reeve home fails the check inside it (see stderr); nothing inside it is read or written"
   [ "$DRY_RUN" = 1 ] && say "  dry run:         printing commands, running none"
   return 0
+}
+
+# check_listing: which listing the reeve tree reads (HALL_DEV_LISTING or
+# --listing). `standin`: the stand-in's, from the world file, with the whole
+# roster placed. `reeve`: reeve's own listing command (HALL_DEV_REEVE_LISTING)
+# on the test home, and the roster is HALL_DEV_REEVE_ROSTER, one test reeve and
+# no test hand: the test reeve dispatches its hands itself, through reeve's hall
+# backend (plan step 5, decision 68). The command goes into hall.toml as it is,
+# so it must be a plain absolute path. Sets LISTING_CMD to the command.
+check_listing() {
+  case $HALL_DEV_LISTING in
+    standin) LISTING_CMD=("$HALL_STANDIN" --home "$HALL_DEV_HOME") ;;
+    reeve)
+      [[ $HALL_DEV_REEVE_LISTING =~ ^/[A-Za-z0-9_./-]+$ ]] || die "refusing reeve listing command $(q "$HALL_DEV_REEVE_LISTING"): set HALL_DEV_REEVE_LISTING to an absolute path of letters, digits, '.', '_', '-' and '/' only"
+      [ "${#HALL_DEV_REEVE_ROSTER[@]}" -eq 1 ] || die "the reeve listing starts one test reeve: set HALL_DEV_REEVE_ROSTER to one 'reeve <name>' line"
+      roster_read "${HALL_DEV_REEVE_ROSTER[0]}"
+      [ "$R_KIND" = reeve ] || die "the reeve listing places no test hand: HALL_DEV_REEVE_ROSTER is one 'reeve <name>' line"
+      HALL_DEV_ROSTER=("${HALL_DEV_REEVE_ROSTER[@]}")
+      LISTING_CMD=("$HALL_DEV_REEVE_LISTING" --home "$HALL_DEV_HOME")
+      ;;
+    *) usage_die "unknown listing ${HALL_DEV_LISTING:-(none)}: set HALL_DEV_LISTING or pass --listing, standin or reeve" ;;
+  esac
 }
 
 # roster_find <name>: sets R_KIND R_NAME R_SESSION R_OWNER R_OFFICE for that line.
@@ -288,6 +327,13 @@ roster_read() {
     *) die "roster line '$1': kind is reeve or errand" ;;
   esac
   [[ $R_NAME =~ ^[a-z][a-z0-9-]{0,31}$ ]] || die "roster name $R_NAME: use a-z, 0-9 and '-', starting with a letter"
+}
+
+# check_pane_id <id> <what>: the stand-in's pane id rule (is_pane_id), checked
+# before the id reaches hall's command line, where a leading '-' would read as
+# an option.
+check_pane_id() {
+  [[ $1 =~ ^[A-Za-z0-9:_][A-Za-z0-9:_-]*$ ]] || die "refusing pane id $(q "$1") from $2: not letters, digits, ':', '_' and '-', starting with no '-'"
 }
 
 work_dir() { printf '%s/work/%s\n' "$HALL_DEV_HOME" "$1"; }

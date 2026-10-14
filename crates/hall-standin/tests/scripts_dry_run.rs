@@ -10,7 +10,7 @@ use std::process::{Command, Output};
 
 const SESSION: &str = "hall-dev";
 const MODEL: &str = "claude-haiku-4-5-20251001";
-const CLEAN_ENV: &str = "+ env -u HALL_SOCKET_PATH -u HALL_CLIENT_SOCKET_PATH -u HALL_SESSION -u HALL_CONFIG_PATH -u HALL_ENV -u HALL_PANE_ID ";
+const CLEAN_ENV: &str = "+ env -u HALL_SOCKET_PATH -u HALL_CLIENT_SOCKET_PATH -u HALL_SESSION -u HALL_CONFIG_PATH -u HALL_ENV -u HALL_PANE_ID -u HALL_BIN_PATH -u HALL_TAB_ID -u HALL_WORKSPACE_ID -u REEVE_BACKEND ";
 const REEVES: [&str; 2] = ["ansel", "bertil"];
 const ERRANDS: usize = 3;
 const HANDS: [&str; ERRANDS] = ["ansel-fix", "ansel-review", "bertil-probe"];
@@ -815,4 +815,137 @@ fn inputs_are_required() {
     );
     assert_eq!(out.status.code(), Some(2), "{out:?}");
     assert!(String::from_utf8_lossy(&out.stderr).contains("no reeve home"));
+}
+
+/// Where the shipped config finds reeve's listing command, under the HOME the
+/// dry runs see.
+fn reeve_listing() -> String {
+    format!(
+        "{}/yongshq/reeve/bin/reeve-listing",
+        std::env::var("HOME").unwrap()
+    )
+}
+
+#[test]
+fn up_with_the_reeve_listing_starts_one_test_reeve_and_places_no_hand() {
+    let h = home("up-reeve-listing");
+    let out = script(
+        "test-setup",
+        &[
+            "--dry-run",
+            "--home",
+            h.to_str().unwrap(),
+            "--listing",
+            "reeve",
+            "up",
+        ],
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    let cmds = dry_output("test-setup", &h, &["--listing", "reeve", "up"], out);
+    assert!(
+        stdout.contains(&format!(
+            "  listing:         reeve's, {} --home {}",
+            reeve_listing(),
+            h.display()
+        )),
+        "{stdout}"
+    );
+    assert_eq!(count(&cmds, "claude --model"), 1);
+    assert_eq!(count(&cmds, " workspace create "), 1);
+    assert_eq!(count(&cmds, " --label ansel "), 1);
+    assert_eq!(count(&cmds, " tab create "), 0);
+    assert_eq!(count(&cmds, "REEVE_HAND=\""), 0);
+    assert_eq!(count(&cmds, " place "), 1);
+    assert_eq!(count(&cmds, "+ write "), 2);
+    // The listing up prints is reeve's, run on the test home; the stand-in's is not.
+    assert_eq!(
+        count(
+            &cmds,
+            &format!("+ {} --home {}", reeve_listing(), h.display())
+        ),
+        1,
+        "{cmds:?}"
+    );
+    assert_eq!(count(&cmds, " listing"), 0, "{cmds:?}");
+}
+
+#[test]
+fn drive_finds_a_dispatched_hand_in_the_reeve_listing() {
+    let h = home("drive-reeve-listing");
+    let cmds = dry("test-drive", &h, &["--listing", "reeve", "scout-1", "deny"]);
+    assert_eq!(
+        count(
+            &cmds,
+            &format!("+ {} --home {}", reeve_listing(), h.display())
+        ),
+        1,
+        "{cmds:?}"
+    );
+    assert_eq!(
+        count(&cmds, " agent send-keys '<pane-of-scout-1>' esc --session "),
+        1,
+        "{cmds:?}"
+    );
+    // With the stand-in's listing a name off the roster is refused.
+    let out = script(
+        "test-drive",
+        &[
+            "--dry-run",
+            "--home",
+            h.to_str().unwrap(),
+            "scout-1",
+            "deny",
+        ],
+    );
+    refused(&out, "scout-1 is not in the roster");
+}
+
+#[test]
+fn the_reeve_listing_takes_one_test_reeve_and_a_plain_command() {
+    let dir = tmp("conf-reeve-listing");
+    let conf = |name: &str, extra: &str| {
+        let conf = dir.join(name);
+        std::fs::write(
+            &conf,
+            format!(
+                "HALL_DEV_HOME=\"{}\"\nHALL_DEV_SESSION=hall-dev\nHALL_DEV_LISTING=reeve\nHALL_DEV_ROSTER=(\"reeve ansel\")\nHALL_DEV_REEVE_LISTING=/opt/reeve/bin/reeve-listing\n{extra}",
+                dir.join(".reeve-hall-dev").display()
+            ),
+        )
+        .unwrap();
+        script(
+            "test-setup",
+            &["--dry-run", "--config", conf.to_str().unwrap(), "up"],
+        )
+    };
+    refused(
+        &conf(
+            "two.conf",
+            "HALL_DEV_REEVE_ROSTER=(\"reeve ansel\" \"reeve bertil\")\n",
+        ),
+        "one 'reeve <name>' line",
+    );
+    refused(
+        &conf(
+            "hand.conf",
+            "HALL_DEV_REEVE_ROSTER=(\"errand ansel-fix ansel artificer\")\n",
+        ),
+        "places no test hand",
+    );
+    refused(
+        &conf(
+            "odd.conf",
+            "HALL_DEV_REEVE_ROSTER=(\"reeve ansel\")\nHALL_DEV_REEVE_LISTING='reeve-listing; rm'\n",
+        ),
+        "refusing reeve listing command",
+    );
+    let out = conf("ok.conf", "HALL_DEV_REEVE_ROSTER=(\"reeve ansel\")\n");
+    assert!(out.status.success(), "{out:?}");
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("+ /opt/reeve/bin/reeve-listing --home ")
+    );
+
+    let out = script("test-setup", &["--dry-run", "--listing", "other", "up"]);
+    assert_eq!(out.status.code(), Some(2), "{out:?}");
+    assert!(String::from_utf8_lossy(&out.stderr).contains("unknown listing other"));
 }
