@@ -8,6 +8,9 @@ use tracing_subscriber::EnvFilter;
 
 const DEFAULT_MAX_LOG_BYTES: u64 = 5 * 1024 * 1024;
 const DEFAULT_RETAINED_LOG_FILES: usize = 0;
+/// The filter when `HERDR_LOG` is unset: herdr's own target at info, and hall's at warn, so a
+/// warn such as a dropped reeve listing entry is written without hall's info lines.
+const DEFAULT_LOG_FILTER: &str = "herdr=info,hall=warn";
 
 pub(crate) fn init_file_logging(file_name: &str) {
     let Ok(make_writer) = RotatingFileMakeWriter::new(
@@ -20,7 +23,7 @@ pub(crate) fn init_file_logging(file_name: &str) {
     };
 
     let filter =
-        EnvFilter::try_from_env("HERDR_LOG").unwrap_or_else(|_| EnvFilter::new("herdr=info"));
+        EnvFilter::try_from_env("HERDR_LOG").unwrap_or_else(|_| EnvFilter::new(DEFAULT_LOG_FILTER));
 
     let _ = tracing_subscriber::fmt()
         .with_env_filter(filter)
@@ -571,6 +574,39 @@ mod tests {
                 .as_nanos()
         );
         std::env::temp_dir().join(unique).join("herdr.log")
+    }
+
+    #[test]
+    fn default_filter_writes_hall_warn_and_no_hall_info() {
+        #[derive(Clone, Default)]
+        struct Buffer(Arc<Mutex<Vec<u8>>>);
+        impl Write for Buffer {
+            fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(buf);
+                Ok(buf.len())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+
+        let buffer = Buffer::default();
+        let writer = buffer.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_env_filter(EnvFilter::new(DEFAULT_LOG_FILTER))
+            .with_writer(move || writer.clone())
+            .with_ansi(false)
+            .finish();
+        tracing::subscriber::with_default(subscriber, || {
+            tracing::warn!(target: "hall::client::reeve_listing", "hall warn line");
+            tracing::info!(target: "hall::client::reeve_listing", "hall info line");
+            tracing::info!(target: "herdr::app", "herdr info line");
+        });
+
+        let written = String::from_utf8(buffer.0.lock().unwrap().clone()).unwrap();
+        assert!(written.contains("hall warn line"), "{written}");
+        assert!(!written.contains("hall info line"), "{written}");
+        assert!(written.contains("herdr info line"), "{written}");
     }
 
     #[test]

@@ -136,7 +136,8 @@ fn parse_listing_logged(output: &[u8], logged: &Mutex<BTreeSet<String>>) -> Reev
 /// The entries whose session is in hall, by the raw `session.backend`, each read on its own and
 /// dropped when it does not read. One with no `session.backend` to tell is not taken for another
 /// backend's: it does not read either. Each dropped entry's reason is logged at warn the first
-/// time this client meets it (`event="reeve.listing"`), so a drift in reeve's listing that drops
+/// time this client meets it (`event="reeve.listing"`), which the default log filter
+/// (`herdr=info,hall=warn`) writes, so a drift in reeve's listing that drops
 /// every entry the same way leaves its cause in the client log, where the tree shows only that
 /// no reeve is listed.
 fn hall_entries<T: serde::de::DeserializeOwned>(
