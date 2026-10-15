@@ -187,9 +187,9 @@ Hall is a modified version of herdr v0.9.0 (commit b99002ac99b09e00b4ca692436cb1
 
 | File | Change |
 |---|---|
-| `src/ui/sidebar/tokens.rs` | In an agent row, a value that repeats an earlier one in the row (ignoring case and surrounding space) is dropped, so a reeve's workspace and tab of the same name read `Bran`, not `Bran · Bran`; `terminal_title_stripped` shows the agent's name while the pane has no title; tests. |
-| `src/config/sidebar.rs` | The default agent rows' second line is `terminal_title_stripped` instead of `agent`, as the liege's herdr config has it; test to match. |
+| `src/ui/sidebar/tokens.rs` | In an agent row, a built-in value that repeats in the row (ignoring case and surrounding space) shows once, so a reeve's workspace and tab of the same name read `Bran`, not `Bran · Bran`: the first repeat with an inline style stays, and a styled token or a custom `$name` token is never dropped. A workspace's lone, unnamed tab shows the workspace's name when the rows show no `workspace`. `terminal_title_stripped` is left out while the pane has no title, as in herdr; tests. |
+| `src/config/sidebar.rs` | The default agent rows are the liege's herdr config, `[["state_icon", { token = "tab", bold = true, dim = false }], ["terminal_title_stripped"]]`, instead of herdr's `[["state_icon", "machine", "workspace", "tab"], ["agent"]]`; test to match. |
 | `src/main.rs` | The default config text's agent rows. |
-| `src/client/shell/tests/agents_worktrees_notifications.rs` | A reeve's agent row renders as `○ Bran` over its title, and over `claude` with no title. |
+| `src/client/shell/tests/agents_worktrees_notifications.rs` | A reeve's agent row renders as `○ Bran` over its title and alone with no title, a lone unnamed tab as its workspace, and a hand's row as `○ artificer-agent-row` over its title, the name bold and not dimmed. |
 | `src/server/headless/tests/mod.rs` | The test of a title change that needs no sidebar render sets agent rows that show no title, now that the default rows do. |
-| `docs/next/website/src/content/docs/configuration.mdx`, `docs/next/website/src/content/docs/agents.mdx` | The new default rows, the title's fallback and the repeated value. |
+| `docs/next/website/src/content/docs/configuration.mdx`, `docs/next/website/src/content/docs/agents.mdx` | The new default rows, the unnamed tab's fallback, the missing title and the repeated value. |

@@ -356,7 +356,7 @@ The expanded desktop sidebar renders each inner array in `rows` as one line. The
 [ui.sidebar.agents]
 row_gap = 0
 rows = [
-  ["state_icon", "machine", "workspace", "tab"],
+  ["state_icon", { token = "tab", bold = true, dim = false }],
   ["terminal_title_stripped"],
 ]
 
@@ -374,11 +374,11 @@ Agent rows accept these built-in tokens:
 - `state_text` — `idle`, `working`, `blocked`, `done`, or `unknown`, including a reported display label when present.
 - `machine` — machine label when the client has multiple machines; omitted for a single local machine.
 - `workspace` — workspace name.
-- `tab` — tab name when available.
+- `tab` — tab name when available; the workspace name for a workspace's lone, unnamed tab when no row shows `workspace`.
 - `pane` — pane name when available.
 - `agent` — detected or reported agent display name.
 - `terminal_title` — latest OSC 0/2 terminal title after safety normalization.
-- `terminal_title_stripped` — the terminal title with one recognized leading activity or spinner glyph and its following whitespace removed; the agent's name while the pane has no title.
+- `terminal_title_stripped` — the terminal title with one recognized leading activity or spinner glyph and its following whitespace removed.
 - `$name` — custom pane metadata named `name`.
 
 Space rows accept these built-in tokens:
@@ -390,7 +390,7 @@ Space rows accept these built-in tokens:
 - `git_status` — Git ahead and behind counts when nonzero.
 - `$name` — custom workspace metadata named `name`.
 
-Tokens render in their configured order. Herdr normally separates adjacent values with ` · ` and uses a single space after `state_icon`. Missing values and their separators disappear, and in an agent row a value that repeats an earlier one in the same row (ignoring case and surrounding space) shows once, so a workspace and tab of the same name read as one; a row disappears when none of its tokens have a value. Existing custom rows remain unchanged, so add `machine` explicitly if you want machine identity in a custom multi-machine layout. Each layout may contain at most 16 rows, with at most 16 tokens in each row.
+Tokens render in their configured order. Herdr normally separates adjacent values with ` · ` and uses a single space after `state_icon`. Missing values and their separators disappear, so the default title line is left out while the pane has no title, and in an agent row a built-in value that repeats in the same row (ignoring case and surrounding space) shows once, so a workspace and tab of the same name read as one: the first repeat with an inline style stays, a styled token is never dropped, and custom `$name` tokens always show. A row disappears when none of its tokens have a value. The default rows show neither `machine` nor `workspace`; add them explicitly if you want machine identity in a multi-machine layout or the workspace beside the tab. Each layout may contain at most 16 rows, with at most 16 tokens in each row.
 
 A token entry can also be an inline style table:
 

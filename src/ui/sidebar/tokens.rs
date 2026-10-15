@@ -69,9 +69,17 @@ pub(crate) fn agent_rows(
     context: AgentTokenContext<'_>,
     state_text: &str,
 ) -> Vec<Vec<ResolvedToken>> {
-    config
-        .rows_for_agent(context.canonical_agent)
-        .iter()
+    let rows = config.rows_for_agent(context.canonical_agent);
+    // A tab with no label of its own (a workspace's lone, unnamed tab) shows
+    // the workspace's name, unless the rows show the workspace already.
+    let tab = context.tab.or_else(|| {
+        (!rows
+            .iter()
+            .flatten()
+            .any(|token| matches!(token.parts().0, AgentSidebarToken::Workspace)))
+        .then_some(context.workspace)
+    });
+    rows.iter()
         .filter_map(|row| {
             let resolved = row
                 .iter()
@@ -88,9 +96,9 @@ pub(crate) fn agent_rows(
                         AgentSidebarToken::Workspace => {
                             Some(ResolvedTokenKind::Workspace(context.workspace.to_string()))
                         }
-                        AgentSidebarToken::Tab => context
-                            .tab
-                            .map(|value| ResolvedTokenKind::Tab(value.to_string())),
+                        AgentSidebarToken::Tab => {
+                            tab.map(|value| ResolvedTokenKind::Tab(value.to_string()))
+                        }
                         AgentSidebarToken::Pane => context
                             .pane
                             .map(|value| ResolvedTokenKind::Pane(value.to_string())),
@@ -100,15 +108,9 @@ pub(crate) fn agent_rows(
                         AgentSidebarToken::TerminalTitle => context
                             .terminal_title
                             .map(|value| ResolvedTokenKind::TerminalTitle(value.to_string())),
-                        // With no title yet, the agent's name stands in.
                         AgentSidebarToken::TerminalTitleStripped => context
                             .terminal_title_stripped
-                            .map(|value| ResolvedTokenKind::TerminalTitle(value.to_string()))
-                            .or_else(|| {
-                                context
-                                    .agent_label
-                                    .map(|value| ResolvedTokenKind::Agent(value.to_string()))
-                            }),
+                            .map(|value| ResolvedTokenKind::TerminalTitle(value.to_string())),
                         AgentSidebarToken::Custom(name) => context
                             .tokens
                             .get(name)
@@ -128,24 +130,37 @@ pub(crate) fn agent_rows(
         .collect()
 }
 
-/// Drops a token whose text repeats an earlier one in the row, ignoring case
-/// and surrounding space, so a reeve's workspace and tab of the same name read
-/// `Bran`, not `Bran · Bran`.
+/// Shows a built-in value that repeats in the row once, ignoring case and
+/// surrounding space, so a workspace and tab of the same name read `Bran`, not
+/// `Bran · Bran`. Of the repeats, the first with a configured style stays, else
+/// the first. A styled token and a custom `$name` token are never dropped.
 fn without_repeated_values(resolved: Vec<ResolvedToken>) -> Vec<ResolvedToken> {
-    let mut seen = Vec::<String>::new();
+    let keys = resolved
+        .iter()
+        .map(|token| match &token.kind {
+            ResolvedTokenKind::Custom(_) => None,
+            kind => kind.text_value().map(|value| value.trim().to_lowercase()),
+        })
+        .collect::<Vec<_>>();
+    let styled = |index: usize| resolved[index].style != SidebarTokenStyle::default();
+    let kept = |key: &String| {
+        let repeats = (0..resolved.len()).filter(|index| keys[*index].as_ref() == Some(key));
+        repeats
+            .clone()
+            .find(|index| styled(*index))
+            .or_else(|| repeats.clone().next())
+    };
+    let keep = (0..resolved.len())
+        .map(|index| {
+            keys[index]
+                .as_ref()
+                .is_none_or(|key| styled(index) || kept(key) == Some(index))
+        })
+        .collect::<Vec<_>>();
     resolved
         .into_iter()
-        .filter(|token| {
-            let Some(value) = token.kind.text_value() else {
-                return true;
-            };
-            let value = value.trim().to_lowercase();
-            if seen.contains(&value) {
-                return false;
-            }
-            seen.push(value);
-            true
-        })
+        .zip(keep)
+        .filter_map(|(token, keep)| keep.then_some(token))
         .collect()
 }
 
@@ -475,36 +490,20 @@ rows = [[{ token = "$load", rules = [{ lt = 50, dim = true }] }]]
         );
     }
 
-    #[test]
-    fn stripped_title_falls_back_to_the_agent_name() {
-        let config = AgentsSidebarConfig {
-            rows: vec![vec![AgentSidebarToken::TerminalTitleStripped]],
+    fn bold_undimmed() -> SidebarTokenStyle {
+        SidebarTokenStyle {
+            bold: Some(true),
+            dim: Some(false),
             ..Default::default()
-        };
-        let mut entry = entry();
-
-        assert_eq!(
-            agent_rows(&config, context(&entry), "working"),
-            vec![vec![ResolvedToken::unstyled(ResolvedTokenKind::Agent(
-                "pi".into()
-            ))]]
-        );
-
-        entry.terminal_title_stripped = Some("Pending items".into());
-        assert_eq!(
-            agent_rows(&config, context(&entry), "working"),
-            vec![vec![ResolvedToken::unstyled(
-                ResolvedTokenKind::TerminalTitle("Pending items".into())
-            )]]
-        );
+        }
     }
 
     #[test]
-    fn a_value_repeated_in_a_row_shows_once() {
+    fn default_rows_show_the_tab_over_the_title_and_leave_out_a_missing_title() {
         let config = AgentsSidebarConfig::default();
         let mut entry = entry();
         entry.workspace = "Bran".into();
-        entry.tab = Some(" bran ".into());
+        entry.tab = Some("artificer-agent-row".into());
         entry.terminal_title_stripped = Some("Pending items".into());
 
         assert_eq!(
@@ -512,7 +511,10 @@ rows = [[{ token = "$load", rules = [{ lt = 50, dim = true }] }]]
             vec![
                 vec![
                     ResolvedToken::unstyled(ResolvedTokenKind::StateIcon),
-                    ResolvedToken::unstyled(ResolvedTokenKind::Workspace("Bran".into())),
+                    ResolvedToken::new(
+                        ResolvedTokenKind::Tab("artificer-agent-row".into()),
+                        bold_undimmed()
+                    ),
                 ],
                 vec![ResolvedToken::unstyled(ResolvedTokenKind::TerminalTitle(
                     "Pending items".into()
@@ -520,14 +522,140 @@ rows = [[{ token = "$load", rules = [{ lt = 50, dim = true }] }]]
             ]
         );
 
+        entry.terminal_title_stripped = None;
+        assert_eq!(
+            agent_rows(&config, context(&entry), "working"),
+            vec![vec![
+                ResolvedToken::unstyled(ResolvedTokenKind::StateIcon),
+                ResolvedToken::new(
+                    ResolvedTokenKind::Tab("artificer-agent-row".into()),
+                    bold_undimmed()
+                ),
+            ]]
+        );
+    }
+
+    #[test]
+    fn a_tab_with_no_label_shows_the_workspace_unless_the_rows_show_it() {
+        let mut entry = entry();
+        entry.workspace = "Bran".into();
+        let config = AgentsSidebarConfig::default();
+        assert_eq!(
+            agent_rows(&config, context(&entry), "working"),
+            vec![vec![
+                ResolvedToken::unstyled(ResolvedTokenKind::StateIcon),
+                ResolvedToken::new(ResolvedTokenKind::Tab("Bran".into()), bold_undimmed()),
+            ]]
+        );
+
+        let config = AgentsSidebarConfig {
+            rows: vec![
+                vec![AgentSidebarToken::StateIcon, AgentSidebarToken::Tab],
+                vec![AgentSidebarToken::Workspace],
+            ],
+            ..Default::default()
+        };
+        assert_eq!(
+            agent_rows(&config, context(&entry), "working"),
+            vec![
+                vec![ResolvedToken::unstyled(ResolvedTokenKind::StateIcon)],
+                vec![ResolvedToken::unstyled(ResolvedTokenKind::Workspace(
+                    "Bran".into()
+                ))],
+            ]
+        );
+    }
+
+    #[test]
+    fn a_value_repeated_in_a_row_shows_once() {
+        let config = AgentsSidebarConfig {
+            rows: vec![vec![
+                AgentSidebarToken::StateIcon,
+                AgentSidebarToken::Workspace,
+                AgentSidebarToken::Tab,
+            ]],
+            ..Default::default()
+        };
+        let mut entry = entry();
+        entry.workspace = "Bran".into();
+        entry.tab = Some(" bran ".into());
+
+        assert_eq!(
+            agent_rows(&config, context(&entry), "working"),
+            vec![vec![
+                ResolvedToken::unstyled(ResolvedTokenKind::StateIcon),
+                ResolvedToken::unstyled(ResolvedTokenKind::Workspace("Bran".into())),
+            ]]
+        );
+
         entry.tab = Some("Artificer of Bran".into());
         assert_eq!(
-            agent_rows(&config, context(&entry), "working")[0],
-            vec![
+            agent_rows(&config, context(&entry), "working"),
+            vec![vec![
                 ResolvedToken::unstyled(ResolvedTokenKind::StateIcon),
                 ResolvedToken::unstyled(ResolvedTokenKind::Workspace("Bran".into())),
                 ResolvedToken::unstyled(ResolvedTokenKind::Tab("Artificer of Bran".into())),
+            ]]
+        );
+    }
+
+    #[test]
+    fn a_repeat_keeps_the_styled_token() {
+        let config: AgentsSidebarConfig = toml::from_str(
+            r#"
+rows = [["state_icon", "workspace", { token = "tab", bold = true, dim = false }], [{ token = "workspace", bold = true }, { token = "tab", dim = true }]]
+"#,
+        )
+        .unwrap();
+        let mut entry = entry();
+        entry.workspace = "Bran".into();
+        entry.tab = Some("Bran".into());
+
+        assert_eq!(
+            agent_rows(&config, context(&entry), "working"),
+            vec![
+                vec![
+                    ResolvedToken::unstyled(ResolvedTokenKind::StateIcon),
+                    ResolvedToken::new(ResolvedTokenKind::Tab("Bran".into()), bold_undimmed()),
+                ],
+                vec![
+                    ResolvedToken::new(
+                        ResolvedTokenKind::Workspace("Bran".into()),
+                        SidebarTokenStyle {
+                            bold: Some(true),
+                            ..Default::default()
+                        }
+                    ),
+                    ResolvedToken::new(
+                        ResolvedTokenKind::Tab("Bran".into()),
+                        SidebarTokenStyle {
+                            dim: Some(true),
+                            ..Default::default()
+                        }
+                    ),
+                ],
             ]
+        );
+    }
+
+    #[test]
+    fn a_custom_token_is_never_dropped_as_a_repeat() {
+        let mut entry = entry();
+        entry.tokens.insert("phase".into(), "idle".into());
+        let config = AgentsSidebarConfig {
+            rows: vec![vec![
+                AgentSidebarToken::StateText,
+                AgentSidebarToken::Custom("phase".into()),
+            ]],
+            ..Default::default()
+        };
+
+        assert_eq!(
+            agent_rows(&config, context(&entry), "idle"),
+            vec![vec![
+                ResolvedToken::unstyled(ResolvedTokenKind::StateText("idle".into())),
+                ResolvedToken::unstyled(ResolvedTokenKind::Custom("idle".into())),
+            ]]
         );
     }
 

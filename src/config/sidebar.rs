@@ -437,16 +437,25 @@ impl AgentsSidebarConfig {
     }
 }
 
+/// The default agent row's tab: bold and not dimmed, as the liege's herdr
+/// config has it.
+fn bold_undimmed_tab() -> AgentSidebarToken {
+    AgentSidebarToken::Styled {
+        token: Box::new(AgentSidebarToken::Tab),
+        style: SidebarTokenStyle {
+            fg: None,
+            bold: Some(true),
+            dim: Some(false),
+        },
+        rules: Vec::new(),
+    }
+}
+
 impl Default for AgentsSidebarConfig {
     fn default() -> Self {
         Self {
             rows: vec![
-                vec![
-                    AgentSidebarToken::StateIcon,
-                    AgentSidebarToken::Machine,
-                    AgentSidebarToken::Workspace,
-                    AgentSidebarToken::Tab,
-                ],
+                vec![AgentSidebarToken::StateIcon, bold_undimmed_tab()],
                 vec![AgentSidebarToken::TerminalTitleStripped],
             ],
             rows_by_agent: BTreeMap::new(),
@@ -491,15 +500,11 @@ mod tests {
         let config = SidebarConfig::default();
         assert_eq!(
             config.agents.rows,
-            vec![
-                vec![
-                    AgentSidebarToken::StateIcon,
-                    AgentSidebarToken::Machine,
-                    AgentSidebarToken::Workspace,
-                    AgentSidebarToken::Tab,
-                ],
-                vec![AgentSidebarToken::TerminalTitleStripped],
-            ]
+            toml::from_str::<AgentsSidebarConfig>(
+                r#"rows = [["state_icon", { token = "tab", bold = true, dim = false }], ["terminal_title_stripped"]]"#
+            )
+            .unwrap()
+            .rows
         );
         assert!(config.agents.rows_by_agent.is_empty());
         assert_eq!(config.agents.row_gap, 0);

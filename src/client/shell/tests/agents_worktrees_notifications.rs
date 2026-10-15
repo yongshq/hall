@@ -430,16 +430,21 @@ fn pane_cycle_last_and_agent_actions_resolve_to_stable_pane_ids() {
 }
 
 #[test]
-fn reeve_agent_row_shows_its_name_once_and_its_title() {
+fn agent_rows_show_the_tab_over_the_title_like_the_lieges_herdr() {
     let mut projected = snapshot();
     projected.workspaces[0].label = "Bran".into();
     projected.workspaces[0].custom_label = true;
     projected.tabs[0].label = "Bran".into();
     projected.tabs[0].custom_label = true;
-    let agent = |terminal_title_stripped: Option<&str>| ClientShellAgent {
+    let mut hand_tab = projected.tabs[0].clone();
+    hand_tab.tab_id = "tab_2".into();
+    hand_tab.number = 2;
+    hand_tab.label = "artificer-agent-row".into();
+    hand_tab.focused = false;
+    let agent = |tab_id: &str, terminal_title_stripped: Option<&str>| ClientShellAgent {
         pane_id: "pane_1".into(),
         workspace_id: "ws_1".into(),
-        tab_id: "tab_1".into(),
+        tab_id: tab_id.into(),
         name: None,
         display_agent: None,
         agent: Some("claude".into()),
@@ -452,13 +457,13 @@ fn reeve_agent_row_shows_its_name_once_and_its_title() {
         tokens: Vec::new(),
         focused: true,
     };
-    let row_text = |projected: ClientShellSnapshot| {
+    let row = |projected: ClientShellSnapshot| {
         let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
         state.set_snapshot(Box::new(projected));
         state.set_pane_surface(surface());
         let frame = state.compose(106, 30).expect("agent sidebar frame");
         let rect = state.hits.agents[0].0;
-        (rect.y..rect.bottom())
+        let text = (rect.y..rect.bottom())
             .map(|y| {
                 (rect.x..rect.right())
                     .map(|x| frame.cells[(y * frame.width + x) as usize].symbol.as_str())
@@ -466,14 +471,31 @@ fn reeve_agent_row_shows_its_name_once_and_its_title() {
                     .trim_end()
                     .to_string()
             })
-            .collect::<Vec<_>>()
+            .collect::<Vec<_>>();
+        let buffer = frame.to_ratatui_buffer().expect("agent sidebar buffer");
+        let name = buffer[(rect.x + 3, rect.y)].modifier;
+        use ratatui::style::Modifier;
+        assert!(name.contains(Modifier::BOLD) && !name.contains(Modifier::DIM));
+        text
     };
 
-    projected.agents = vec![agent(Some("Pending items"))];
-    assert_eq!(row_text(projected.clone()), [" ○ Bran", "   Pending items"]);
+    projected.agents = vec![agent("tab_1", Some("Pending items"))];
+    assert_eq!(row(projected.clone()), [" ○ Bran", "   Pending items"]);
 
-    projected.agents = vec![agent(None)];
-    assert_eq!(row_text(projected), [" ○ Bran", "   claude"]);
+    projected.agents = vec![agent("tab_1", None)];
+    assert_eq!(row(projected.clone()), [" ○ Bran"]);
+
+    projected.tabs[0].label = "1".into();
+    projected.tabs[0].custom_label = false;
+    assert_eq!(row(projected.clone()), [" ○ Bran"]);
+    projected.tabs[0].custom_label = true;
+
+    projected.tabs.push(hand_tab);
+    projected.agents = vec![agent("tab_2", Some("Pending items"))];
+    assert_eq!(
+        row(projected),
+        [" ○ artificer-agent-row", "   Pending items"]
+    );
 }
 
 #[test]
