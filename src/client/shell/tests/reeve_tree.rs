@@ -146,7 +146,7 @@ pub(super) fn tree_rows(frame: &FrameData) -> Vec<String> {
                 .trim_end()
                 .to_owned()
         })
-        .take(10)
+        .take(11)
         .collect()
 }
 
@@ -161,7 +161,7 @@ fn narrow_tree_rows(frame: &FrameData) -> Vec<String> {
                 .trim_end()
                 .to_owned()
         })
-        .take(10)
+        .take(11)
         .collect()
 }
 
@@ -176,7 +176,8 @@ fn reeves_sit_at_the_top_with_their_hands_beneath_and_plain_workspaces_apart() {
     assert_eq!(
         tree_rows(&frame),
         [
-            " reeves",
+            " The Great Hall",
+            " reeves in attendance",
             " · ansel",
             "  ├ ● ansel-fix",
             "  └ ● ansel-review",
@@ -187,6 +188,18 @@ fn reeves_sit_at_the_top_with_their_hands_beneath_and_plain_workspaces_apart() {
             " ○ scratch",
             "",
         ]
+    );
+    // The heading is bold; the line beneath it is the panel's plain secondary text.
+    let overlay = crate::protocol::color_to_u32(state.config.palette.overlay0);
+    let heading = &frame.cells[1];
+    assert_eq!(
+        (heading.fg, heading.modifier),
+        (overlay, Modifier::BOLD.bits())
+    );
+    let line = &frame.cells[frame.width as usize + 1];
+    assert_eq!(
+        (line.fg, line.modifier),
+        (overlay, Modifier::empty().bits())
     );
     // The reeve in another hall session is not this session's to show.
     assert!(!rows(&frame).iter().any(|row| row.contains("elsewhere")));
@@ -227,20 +240,20 @@ fn a_hand_state_sets_its_mark_and_what_waits_sets_the_reeve_badge() {
     let frame = compose(&mut state);
     let tree = tree_rows(&frame);
     // The first read raises the highlight of a hand with a flag up, and its reeve's.
-    assert_eq!(tree[1], "▌· ansel               2");
-    assert_eq!(tree[2], "  ├ ! ansel-fix   blocked");
+    assert_eq!(tree[2], "▌· ansel               2");
+    assert_eq!(tree[3], "  ├ ! ansel-fix   blocked");
     // The id first; of the notes, the ones that fit after it.
-    assert_eq!(tree[3], "▌ └ ● ansel-review   asks");
-    assert_eq!(tree[4], " · bertil");
-    assert_eq!(tree[5], "  └ ✓ bertil-probe   done");
+    assert_eq!(tree[4], "▌ └ ● ansel-review   asks");
+    assert_eq!(tree[5], " · bertil");
+    assert_eq!(tree[6], "  └ ✓ bertil-probe   done");
 
     // Back to working: the mark and the badge follow the next read.
     errand_mut(&mut listing, "ansel-fix").hand_state =
         crate::client::reeve_listing::HandState::Working;
     state.set_reeve_listing(Ok(listing));
     let tree = tree_rows(&compose(&mut state));
-    assert_eq!(tree[1], "▌· ansel               1");
-    assert_eq!(tree[2], "  ├ ● ansel-fix");
+    assert_eq!(tree[2], "▌· ansel               1");
+    assert_eq!(tree[3], "  ├ ● ansel-fix");
 }
 
 #[test]
@@ -256,10 +269,10 @@ fn each_flag_and_state_has_its_own_word_and_counts_once() {
     let mut state = reeve_state(listing);
     let tree = tree_rows(&compose(&mut state));
     // The first read raises the highlight of a hand with a flag up, and its reeve's.
-    assert_eq!(tree[4], "▌· bertil              1");
+    assert_eq!(tree[5], "▌· bertil              1");
     // At the default sidebar width the id stays whole and the notes that do not fit go: the
     // ones the mark already says (`decide`, and `asks` beside `?`) first, so `wedged` stays.
-    assert_eq!(tree[5], "▌ └ ? bertil-probe wedged");
+    assert_eq!(tree[6], "▌ └ ? bertil-probe wedged");
     let tree_model = state.current_reeve_tree().expect("tree");
     let probe = &tree_model.items[tree_model
         .position(&ReeveTreeKey::Hand("bertil-probe".into()))
@@ -272,7 +285,7 @@ fn each_flag_and_state_has_its_own_word_and_counts_once() {
     // With room for them all, every note shows, in decision 52's order.
     state.config.sidebar_max_width = 50;
     state.sidebar_width = 50;
-    let row = rows(&compose(&mut state))[5]
+    let row = rows(&compose(&mut state))[6]
         .chars()
         .take(49)
         .collect::<String>();
@@ -297,8 +310,8 @@ fn a_narrow_row_keeps_the_notes_the_mark_does_not_say() {
     let mut state = reeve_state(listing);
     let tree = tree_rows(&compose(&mut state));
     // The first read raises the highlight of a hand with a flag up.
-    assert_eq!(tree[2], "▌ ├ ! ansel-fix      idle");
-    assert_eq!(tree[5], "▌ └ ● bertil-probe   asks");
+    assert_eq!(tree[3], "▌ ├ ! ansel-fix      idle");
+    assert_eq!(tree[6], "▌ └ ● bertil-probe   asks");
 }
 
 #[test]
@@ -312,16 +325,16 @@ fn a_finished_and_cleaned_up_errand_drops_from_the_tree() {
     state.set_reeve_listing(Ok(listing));
     // Finished: the hand is gone; its tab, still open, shows as a tab of its reeve.
     let tree = tree_rows(&compose(&mut state));
-    assert_eq!(tree[2], "  ├ ● ansel-fix");
-    assert_eq!(tree[3], "  └ tab ansel-review");
+    assert_eq!(tree[3], "  ├ ● ansel-fix");
+    assert_eq!(tree[4], "  └ tab ansel-review");
     // Cleaned up: the tab closes and nothing of the errand is left.
     let mut snapshot = hall_dev_snapshot();
     snapshot.tabs.retain(|tab| tab.tab_id != "ws_a_t2");
     snapshot.panes.retain(|pane| pane.tab_id != "ws_a_t2");
     state.set_snapshot(Box::new(snapshot));
     let tree = tree_rows(&compose(&mut state));
-    assert_eq!(tree[2], "  └ ● ansel-fix");
-    assert_eq!(tree[3], " · bertil");
+    assert_eq!(tree[3], "  └ ● ansel-fix");
+    assert_eq!(tree[4], " · bertil");
     assert!(!tree.iter().any(|row| row.contains("ansel-review")));
 }
 
@@ -332,10 +345,10 @@ fn a_hand_without_a_pane_and_a_gone_reeve_show_dimmed_notes() {
     listing.reeves[1].live = false;
     let mut state = reeve_state(listing);
     let tree = tree_rows(&compose(&mut state));
-    assert_eq!(tree[2], "  ├ ● ansel-fix   no pane");
+    assert_eq!(tree[3], "  ├ ● ansel-fix   no pane");
     // Hall cannot tie the hand to its tab, so the tab shows as one of the reeve's.
-    assert_eq!(tree[4], "  └ tab ansel-fix");
-    assert_eq!(tree[5], " · bertil            gone");
+    assert_eq!(tree[5], "  └ tab ansel-fix");
+    assert_eq!(tree[6], " · bertil            gone");
 }
 
 fn no_listing_state() -> ClientShellState {
@@ -348,9 +361,9 @@ fn no_listing_state() -> ClientShellState {
 fn before_the_first_read_the_tree_says_it_is_reading() {
     let mut state = no_listing_state();
     let tree = tree_rows(&compose(&mut state));
-    assert_eq!(tree[1], " reading listing");
-    assert_eq!(tree[3], " other");
-    assert_eq!(tree[4], " ○ ansel");
+    assert_eq!(tree[2], " reading listing");
+    assert_eq!(tree[4], " other");
+    assert_eq!(tree[5], " ○ ansel");
 }
 
 #[test]
@@ -359,11 +372,11 @@ fn a_listing_error_with_no_good_read_shows_and_every_workspace_stays_reachable()
     state.set_reeve_listing(Err("refusing home".into()));
     let frame = compose(&mut state);
     let tree = tree_rows(&frame);
-    assert_eq!(tree[1], " listing: refusing home");
-    assert_eq!(tree[3], " other");
-    assert_eq!(tree[4], " ○ ansel");
-    assert_eq!(tree[6], " ○ scratch");
-    let cell = frame.width as usize + 2;
+    assert_eq!(tree[2], " listing: refusing home");
+    assert_eq!(tree[4], " other");
+    assert_eq!(tree[5], " ○ ansel");
+    assert_eq!(tree[7], " ○ scratch");
+    let cell = 2 * frame.width as usize + 2;
     assert_eq!(
         frame.cells[cell].fg,
         crate::protocol::color_to_u32(state.config.palette.yellow),
@@ -376,14 +389,14 @@ fn a_failed_read_after_a_good_one_keeps_the_tree_marked_stale() {
     let mut state = reeve_state(listing());
     state.set_reeve_listing(Err("timed out after 5s".into()));
     let tree = tree_rows(&compose(&mut state));
-    assert_eq!(tree[1], " stale: timed out after");
-    assert_eq!(tree[2], " 5s");
-    assert_eq!(tree[3], " · ansel");
-    assert_eq!(tree[4], "  ├ ● ansel-fix");
+    assert_eq!(tree[2], " stale: timed out after");
+    assert_eq!(tree[3], " 5s");
+    assert_eq!(tree[4], " · ansel");
+    assert_eq!(tree[5], "  ├ ● ansel-fix");
     // The next good read clears the mark.
     state.set_reeve_listing(Ok(listing()));
     let tree = tree_rows(&compose(&mut state));
-    assert_eq!(tree[1], " · ansel");
+    assert_eq!(tree[2], " · ansel");
 }
 
 #[test]
@@ -393,10 +406,10 @@ fn at_width_25_a_long_reason_wraps_onto_rows_of_its_own() {
     state.set_reeve_listing(Err("not found: /nonexistent/hall-listing".into()));
     let tree = narrow_tree_rows(&compose(&mut state));
     assert_eq!(state.layout(100, 30).sidebar.width, 25);
-    assert_eq!(tree[1], " listing: not found:");
-    assert_eq!(tree[2], " /nonexistent/hall-listi");
-    assert_eq!(tree[3], " ng");
-    assert_eq!(tree[5], " other");
+    assert_eq!(tree[2], " listing: not found:");
+    assert_eq!(tree[3], " /nonexistent/hall-listi");
+    assert_eq!(tree[4], " ng");
+    assert_eq!(tree[6], " other");
 }
 
 #[test]
@@ -416,11 +429,14 @@ fn at_width_25_a_hand_keeps_its_id_before_its_notes() {
     state.sidebar_width = 25;
     let tree = narrow_tree_rows(&compose(&mut state));
     assert_eq!(state.layout(100, 30).sidebar.width, 25);
+    // The heading and its line fit whole.
+    assert_eq!(tree[0], " The Great Hall");
+    assert_eq!(tree[1], " reeves in attendance");
     // Too long for the row: the id is cut, no note.
-    assert_eq!(tree[2], "  ├ ! ansel-fix-the-lon…");
+    assert_eq!(tree[3], "  ├ ! ansel-fix-the-lon…");
     // `decide wedged` does not fit beside the whole id: the id stays, the mark says decide.
     // The bar is the highlight the first read raises for a hand with a flag up.
-    assert_eq!(tree[5], "▌ └ ? bertil-probe");
+    assert_eq!(tree[6], "▌ └ ? bertil-probe");
 }
 
 #[test]
@@ -631,12 +647,12 @@ fn a_tab_of_a_reeve_that_holds_no_hand_shows_dimmed_under_its_reeve() {
     state.set_snapshot(Box::new(snapshot));
     let frame = compose(&mut state);
     let tree = tree_rows(&frame);
-    assert_eq!(tree[1], " · ansel");
-    assert_eq!(tree[2], "  ├ ● ansel-fix");
-    assert_eq!(tree[3], "  ├ ● ansel-review");
-    assert_eq!(tree[4], "  └ tab notes");
-    assert_eq!(tree[5], " · bertil");
-    let cell = 4 * frame.width as usize + 4;
+    assert_eq!(tree[2], " · ansel");
+    assert_eq!(tree[3], "  ├ ● ansel-fix");
+    assert_eq!(tree[4], "  ├ ● ansel-review");
+    assert_eq!(tree[5], "  └ tab notes");
+    assert_eq!(tree[6], " · bertil");
+    let cell = 5 * frame.width as usize + 4;
     assert_eq!(
         frame.cells[cell].fg,
         crate::protocol::color_to_u32(state.config.palette.overlay0),
@@ -707,7 +723,7 @@ fn digits_in_the_walk_follow_the_trees_order() {
     listing.reeves.swap(0, 1);
     let mut state = reeve_state(listing);
     let tree = tree_rows(&compose(&mut state));
-    assert_eq!(tree[1], " · bertil");
+    assert_eq!(tree[2], " · bertil");
 
     state.handle_input_bytes(b"\x02w");
     let pick = state.handle_input_bytes(b"1");
@@ -789,7 +805,7 @@ fn a_hand_that_finishes_while_selected_offers_no_workspace_action() {
     // follows it there.
     listing.errands.retain(|errand| errand.id != "ansel-review");
     state.set_reeve_listing(Ok(listing));
-    assert_eq!(tree_rows(&compose(&mut state))[3], "  └ tab ansel-review");
+    assert_eq!(tree_rows(&compose(&mut state))[4], "  └ tab ansel-review");
     assert_eq!(
         state.navigate_reeve_key,
         Some(ReeveTreeKey::Tab("ws_a_t2".into()))
@@ -813,7 +829,7 @@ fn enter_on_a_hand_that_finished_while_selected_shows_its_tab() {
     state.set_reeve_listing(Ok(listing));
     let frame = compose(&mut state);
     // The selection is drawn on the row that took the hand's place.
-    assert_eq!(tree_rows(&frame)[3], "  └ tab ansel-review");
+    assert_eq!(tree_rows(&frame)[4], "  └ tab ansel-review");
     let (rect, _) = state.hits.reeve_tabs[0].clone();
     let cell = usize::from(rect.y) * usize::from(frame.width) + 2;
     assert_eq!(
@@ -844,7 +860,7 @@ fn a_selected_tab_that_the_listing_names_a_hand_keeps_the_selection() {
     // The next read lists it: the row becomes the hand's, and the selection follows.
     state.set_reeve_listing(Ok(full));
     let frame = compose(&mut state);
-    assert_eq!(tree_rows(&frame)[3], "  └ ● ansel-review");
+    assert_eq!(tree_rows(&frame)[4], "  └ ● ansel-review");
     assert_eq!(
         state.navigate_reeve_key,
         Some(ReeveTreeKey::Hand("ansel-review".into()))
@@ -936,7 +952,7 @@ fn a_config_reload_applies_the_reeve_section_live() {
     assert_eq!(state.reeve_listing, Some(listing()));
     // The reload takes the session from `HALL_SESSION`; this test's tree is hall-dev's.
     state.config.reeve_tree_session = Some("hall-dev".into());
-    assert_eq!(tree_rows(&compose(&mut state))[1], " · ansel");
+    assert_eq!(tree_rows(&compose(&mut state))[2], " · ansel");
 
     std::fs::write(
         &path,
@@ -949,7 +965,7 @@ fn a_config_reload_applies_the_reeve_section_live() {
     assert_eq!(spec.timeout, std::time::Duration::from_secs(2));
     // A read of the old command is not the new one's.
     assert_eq!(state.reeve_listing, None);
-    assert_eq!(tree_rows(&compose(&mut state))[1], " reading listing");
+    assert_eq!(tree_rows(&compose(&mut state))[2], " reading listing");
 
     std::fs::write(&path, "[reeve]\n").expect("write config");
     state.reload_client_config();

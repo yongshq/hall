@@ -380,8 +380,9 @@ enum TreeLine<'a> {
     Item(&'a ReeveTreeItem),
 }
 
-/// Draws the reeve tree where herdr draws its spaces: a `reeves` header, the tree, then the
-/// workspaces that hold no reeve under `other`. The section's last row stays herdr's footer.
+/// Draws the reeve tree where herdr draws its spaces: a `The Great Hall` header over a dim
+/// `reeves in attendance` line, the tree, then the workspaces that hold no reeve under `other`.
+/// The section's last row stays herdr's footer.
 pub(super) fn render_reeve_section(
     buffer: &mut Buffer,
     area: Rect,
@@ -397,11 +398,22 @@ pub(super) fn render_reeve_section(
         area.x,
         area.y,
         area.width,
-        " reeves",
+        " The Great Hall",
         Style::default()
             .fg(palette.overlay0)
             .add_modifier(Modifier::BOLD),
     );
+    // The heading's second row, kept off the footer when the section is too short for both.
+    if area.height > 2 {
+        render::put_text(
+            buffer,
+            area.x,
+            area.y.saturating_add(1),
+            area.width,
+            " reeves in attendance",
+            Style::default().fg(palette.overlay0),
+        );
+    }
     let mut lines = Vec::new();
     if let Some(note) = &tree.note {
         let (text, style) = match note {
@@ -429,9 +441,9 @@ pub(super) fn render_reeve_section(
 
     let body = Rect::new(
         area.x,
-        area.y.saturating_add(1),
+        area.y.saturating_add(2),
         area.width,
-        area.height.saturating_sub(2),
+        area.height.saturating_sub(3),
     );
     hits.workspace_body = body;
     let height = usize::from(body.height);

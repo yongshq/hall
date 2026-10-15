@@ -114,7 +114,7 @@ fn a_reeve_reply_rings_done_and_highlights_its_row_until_its_next_turn() {
     );
     assert_eq!(sounds(&effects), [crate::sound::Sound::Done]);
     let frame = compose(&mut state);
-    assert_eq!(tree_rows(&frame)[4], "▌● bertil");
+    assert_eq!(tree_rows(&frame)[5], "▌● bertil");
     assert_eq!(alerting(&mut state), ["bertil"]);
     // The reeve starts its next turn: what raised the highlight no longer holds.
     set_statuses(&mut state, &[("p_b0", AgentStatus::Working)]);
@@ -147,7 +147,7 @@ fn a_hand_at_a_dialog_rings_and_highlights_the_hand_and_its_reeve() {
     );
     assert_eq!(sounds(&effects), [crate::sound::Sound::Request]);
     assert_eq!(alerting(&mut state), ["bertil", "bertil-probe"]);
-    assert_eq!(tree_rows(&compose(&mut state))[5], "▌ └ ● bertil-probe");
+    assert_eq!(tree_rows(&compose(&mut state))[6], "▌ └ ● bertil-probe");
 }
 
 #[test]
