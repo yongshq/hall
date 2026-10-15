@@ -372,7 +372,7 @@ Agent rows accept these built-in tokens:
 
 - `state_icon` — colored icon for the agent's semantic state.
 - `state_text` — `idle`, `working`, `blocked`, `done`, or `unknown`, including a reported display label when present.
-- `machine` — machine label while more than one machine is connected; omitted otherwise, including while a second saved machine is disabled or offline.
+- `machine` — machine label while agents from more than one machine are shown; omitted otherwise, including while a second saved machine is disabled or has not connected.
 - `workspace` — workspace name.
 - `tab` — tab name when available. When no row shows `workspace`, an unnamed tab shows the workspace name: a workspace's lone tab as `hall`, one of several tabs, labelled by its number, as `hall 1`.
 - `pane` — pane name when available.
@@ -390,7 +390,7 @@ Space rows accept these built-in tokens:
 - `git_status` — Git ahead and behind counts when nonzero.
 - `$name` — custom workspace metadata named `name`.
 
-Tokens render in their configured order. Herdr normally separates adjacent values with ` · ` and uses a single space after `state_icon`. Missing values and their separators disappear, so the default title line is left out while the pane has no title, and in an agent row a built-in value that repeats in the same row (ignoring case and surrounding space) shows once, so a workspace and tab of the same name read as one: the first repeat with an inline style stays, a styled token is never dropped, and custom `$name` tokens always show. A row disappears when none of its tokens have a value. The default rows show `machine` before the tab, so with several machines connected a row reads `○ Build · hall`, and with one machine it reads `○ hall`. They do not show `workspace`; add it explicitly if you want the workspace beside the tab. Each layout may contain at most 16 rows, with at most 16 tokens in each row.
+Tokens render in their configured order. Herdr normally separates adjacent values with ` · ` and uses a single space after `state_icon`. Missing values and their separators disappear, so the default title line is left out while the pane has no title, and in an agent row a built-in value that repeats in the same row (ignoring case and surrounding space) shows once, so a workspace and tab of the same name read as one: the first repeat with an inline style stays, a styled token is never dropped, and custom `$name` tokens and `machine` always show. A row disappears when none of its tokens have a value. The default rows show `machine` before the tab, so with agents from several machines shown a row reads `○ Build · hall`, and with one machine it reads `○ hall`. They do not show `workspace`; add it explicitly if you want the workspace beside the tab. Each layout may contain at most 16 rows, with at most 16 tokens in each row.
 
 A token entry can also be an inline style table:
 

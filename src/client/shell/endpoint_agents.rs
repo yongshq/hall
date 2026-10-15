@@ -99,12 +99,13 @@ fn agent_rows(
     active_endpoint_id: &ClientEndpointId,
     config: &ClientShellConfig,
 ) -> Vec<EndpointAgentRow> {
-    // The rows name the machine only while several machines are connected: a
-    // saved machine that is disabled or offline leaves the local rows as they
-    // read with one machine.
+    // The rows name the machine only while several machines contribute rows: a
+    // saved machine that is disabled or never connected has no snapshot and
+    // leaves the local rows as they read with one machine, while one that is
+    // reconnecting keeps its cached rows and so its name.
     let several_online = endpoints
         .iter()
-        .filter(|endpoint| endpoint.status == ClientEndpointStatus::Online)
+        .filter(|endpoint| endpoint.snapshot.is_some())
         .count()
         > 1;
     let mut rendered_rows = endpoints
