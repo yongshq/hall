@@ -85,7 +85,7 @@ If authentication fails, check ordinary SSH first. For a passphrase-protected ke
 
 The UI uses the client's local theme, sidebar settings, and keybindings by default. Custom commands and plugins advertised by the selected server still run there. Herdr does not copy local command plugins, configuration, executables, or secrets onto SSH hosts. Missing remote commands fail visibly. Use the UI's `reload config` action after editing client settings; see [Configuration](/docs/configuration/#reload-config).
 
-Default agent rows show a `machine` token while more than one machine is connected or reconnecting, not while a second saved machine is disabled or has not connected yet. Existing custom rows are preserved; add `machine` explicitly if you want that label in your layout. [Sidebar row layouts](/docs/configuration/#sidebar-row-layouts) also support conditional colors for machine labels.
+Default agent rows show a `machine` token while more than one machine is connected or still shows cached agents (reconnecting or needing attention), not while a second saved machine is disabled or has not connected yet. Existing custom rows are preserved; add `machine` explicitly if you want that label in your layout. [Sidebar row layouts](/docs/configuration/#sidebar-row-layouts) also support conditional colors for machine labels.
 
 Workspace, tab, pane IDs, and agent names are scoped to one server. Two machines may both contain `w1:p1` or an agent named `reviewer`. Selecting a machine in the UI does not retarget CLI commands running in an existing pane: they still use that pane's inherited session and socket. For remote automation, run commands on the intended host against the intended session and read its IDs there.
 

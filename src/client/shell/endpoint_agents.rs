@@ -99,11 +99,11 @@ fn agent_rows(
     active_endpoint_id: &ClientEndpointId,
     config: &ClientShellConfig,
 ) -> Vec<EndpointAgentRow> {
-    // The rows name the machine only while several machines contribute rows: a
-    // saved machine that is disabled or never connected has no snapshot and
-    // leaves the local rows as they read with one machine, while one that is
-    // reconnecting keeps its cached rows and so its name.
-    let several_online = endpoints
+    // The rows name the machine only while several machines have agent data
+    // (a snapshot): connected, reconnecting on cached rows, or needing
+    // attention. A saved machine that is disabled or never connected has no
+    // snapshot and leaves the local rows as they read with one machine.
+    let several_with_agents = endpoints
         .iter()
         .filter(|endpoint| endpoint.snapshot.is_some())
         .count()
@@ -112,7 +112,7 @@ fn agent_rows(
         .iter()
         .filter_map(|endpoint| {
             endpoint.snapshot.as_deref().map(|snapshot| {
-                let machine = several_online.then_some(endpoint.label.as_str());
+                let machine = several_with_agents.then_some(endpoint.label.as_str());
                 super::agent_sidebar::agent_rows(snapshot, config, machine)
                     .into_iter()
                     .map(|agent| ((endpoint.endpoint_id.clone(), agent.pane_id.clone()), agent))
