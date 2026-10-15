@@ -138,12 +138,13 @@ pub(crate) fn agent_rows(
 /// Shows a built-in value that repeats in the row once, ignoring case and
 /// surrounding space, so a workspace and tab of the same name read `Bran`, not
 /// `Bran · Bran`. Of the repeats, the first with a configured style stays, else
-/// the first. A styled token and a custom `$name` token are never dropped.
+/// the first. A styled token, a custom `$name` token and the machine are never
+/// dropped, so a machine named like its tab still names the machine.
 fn without_repeated_values(resolved: Vec<ResolvedToken>) -> Vec<ResolvedToken> {
     let keys = resolved
         .iter()
         .map(|token| match &token.kind {
-            ResolvedTokenKind::Custom(_) => None,
+            ResolvedTokenKind::Custom(_) | ResolvedTokenKind::Machine(_) => None,
             kind => kind.text_value().map(|value| value.trim().to_lowercase()),
         })
         .collect::<Vec<_>>();
@@ -639,6 +640,17 @@ rows = [[{ token = "$load", rules = [{ lt = 50, dim = true }] }]]
             vec![vec![
                 ResolvedToken::unstyled(ResolvedTokenKind::StateIcon),
                 ResolvedToken::unstyled(ResolvedTokenKind::Machine("Build".into())),
+                tab.clone(),
+            ]]
+        );
+
+        let mut context = self::context(&entry);
+        context.machine = Some("hall");
+        assert_eq!(
+            agent_rows(&config, context, "working"),
+            vec![vec![
+                ResolvedToken::unstyled(ResolvedTokenKind::StateIcon),
+                ResolvedToken::unstyled(ResolvedTokenKind::Machine("hall".into())),
                 tab,
             ]]
         );

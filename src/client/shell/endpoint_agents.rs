@@ -99,11 +99,20 @@ fn agent_rows(
     active_endpoint_id: &ClientEndpointId,
     config: &ClientShellConfig,
 ) -> Vec<EndpointAgentRow> {
+    // The rows name the machine only while several machines are connected: a
+    // saved machine that is disabled or offline leaves the local rows as they
+    // read with one machine.
+    let several_online = endpoints
+        .iter()
+        .filter(|endpoint| endpoint.status == ClientEndpointStatus::Online)
+        .count()
+        > 1;
     let mut rendered_rows = endpoints
         .iter()
         .filter_map(|endpoint| {
             endpoint.snapshot.as_deref().map(|snapshot| {
-                super::agent_sidebar::agent_rows(snapshot, config, Some(&endpoint.label))
+                let machine = several_online.then_some(endpoint.label.as_str());
+                super::agent_sidebar::agent_rows(snapshot, config, machine)
                     .into_iter()
                     .map(|agent| ((endpoint.endpoint_id.clone(), agent.pane_id.clone()), agent))
                     .collect::<Vec<_>>()

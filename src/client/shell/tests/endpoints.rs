@@ -368,12 +368,96 @@ fn aggregate_agents_use_configured_rows_machine_token_and_status_colors() {
         .any(|cell| cell.symbol() == "×" && cell.fg == state.config.palette.red));
 }
 
+fn endpoint_agent_row_texts(state: &mut ClientShellState) -> Vec<String> {
+    let frame = state.compose(100, 28).expect("combined endpoint frame");
+    state
+        .hits
+        .endpoint_agents
+        .iter()
+        .map(|(rect, _, _)| {
+            (rect.x..rect.right())
+                .map(|x| {
+                    frame.cells[(rect.y * frame.width + x) as usize]
+                        .symbol
+                        .as_str()
+                })
+                .collect::<String>()
+                .trim_end()
+                .to_string()
+        })
+        .collect()
+}
+
 #[test]
 fn default_agent_rows_name_the_machine_when_several_are_connected() {
     use crate::api::schema::AgentStatus;
 
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
     let profile = remote_profile();
+    let endpoint_id = ClientEndpointId::Ssh(profile.id.clone());
+    state.set_endpoint_catalog(&[profile]);
+
+    let mut local = snapshot();
+    local.workspaces[0].label = "hall".into();
+    local.agents = vec![agent("claude", AgentStatus::Idle, 1)];
+    state.set_snapshot(Box::new(local));
+    state.set_pane_surface(surface());
+    let mut remote = snapshot();
+    remote.boot_id = "remote-boot".into();
+    remote.workspaces[0].label = "hall".into();
+    remote.agents = vec![agent("claude", AgentStatus::Idle, 1)];
+    state.set_endpoint_snapshot(&endpoint_id, Box::new(remote));
+
+    state.set_endpoint_status(&endpoint_id, ClientEndpointStatus::Online);
+    assert_eq!(
+        endpoint_agent_row_texts(&mut state),
+        [" ○ Local · hall", " ○ Build · hall"]
+    );
+}
+
+#[test]
+fn default_agent_rows_name_no_machine_while_a_saved_one_is_offline() {
+    use crate::api::schema::AgentStatus;
+
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut profile = remote_profile();
+    let endpoint_id = ClientEndpointId::Ssh(profile.id.clone());
+    state.set_endpoint_catalog(std::slice::from_ref(&profile));
+
+    let mut local = snapshot();
+    local.workspaces[0].label = "hall".into();
+    local.agents = vec![agent("claude", AgentStatus::Idle, 1)];
+    state.set_snapshot(Box::new(local));
+    state.set_pane_surface(surface());
+
+    // Saved and connecting, never connected.
+    assert_eq!(endpoint_agent_row_texts(&mut state), [" ○ hall"]);
+
+    // Connected once, now reconnecting: its cached rows show, unnamed.
+    let mut remote = snapshot();
+    remote.boot_id = "remote-boot".into();
+    remote.workspaces[0].label = "build".into();
+    remote.agents = vec![agent("claude", AgentStatus::Idle, 1)];
+    state.set_endpoint_snapshot(&endpoint_id, Box::new(remote));
+    state.set_endpoint_status(&endpoint_id, ClientEndpointStatus::Reconnecting);
+    assert_eq!(
+        endpoint_agent_row_texts(&mut state),
+        [" ○ hall", " ○ build"]
+    );
+
+    // Saved and disabled.
+    profile.enabled = false;
+    state.set_endpoint_catalog(std::slice::from_ref(&profile));
+    assert_eq!(endpoint_agent_row_texts(&mut state), [" ○ hall"]);
+}
+
+#[test]
+fn a_machine_named_like_its_tab_is_still_named() {
+    use crate::api::schema::AgentStatus;
+
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut profile = remote_profile();
+    profile.label = "hall".into();
     let endpoint_id = ClientEndpointId::Ssh(profile.id.clone());
     state.set_endpoint_catalog(&[profile]);
     state.set_endpoint_status(&endpoint_id, ClientEndpointStatus::Online);
@@ -389,24 +473,10 @@ fn default_agent_rows_name_the_machine_when_several_are_connected() {
     remote.agents = vec![agent("claude", AgentStatus::Idle, 1)];
     state.set_endpoint_snapshot(&endpoint_id, Box::new(remote));
 
-    let frame = state.compose(100, 28).expect("combined endpoint frame");
-    let rows = state
-        .hits
-        .endpoint_agents
-        .iter()
-        .map(|(rect, _, _)| {
-            (rect.x..rect.right())
-                .map(|x| {
-                    frame.cells[(rect.y * frame.width + x) as usize]
-                        .symbol
-                        .as_str()
-                })
-                .collect::<String>()
-                .trim_end()
-                .to_string()
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(rows, [" ○ Local · hall", " ○ Build · hall"]);
+    assert_eq!(
+        endpoint_agent_row_texts(&mut state),
+        [" ○ Local · hall", " ○ hall · hall"]
+    );
 }
 
 #[test]
@@ -723,7 +793,9 @@ fn disconnected_active_endpoint_freezes_surface_and_marks_cached_ui_stale() {
         Some(ClientEndpointStatus::Reconnecting)
     );
     assert!(text.contains("◐ reconnecting"), "frame: {text}");
-    assert!(text.contains("Build · remote agent"), "frame: {text}");
+    // With only the local machine online, the cached row names no machine.
+    assert!(text.contains("× remote agent"), "frame: {text}");
+    assert!(!text.contains("Build · remote agent"), "frame: {text}");
     assert!(
         text.contains("LIVE"),
         "frozen surface should remain: {text}"

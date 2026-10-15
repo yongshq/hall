@@ -372,7 +372,7 @@ Agent rows accept these built-in tokens:
 
 - `state_icon` — colored icon for the agent's semantic state.
 - `state_text` — `idle`, `working`, `blocked`, `done`, or `unknown`, including a reported display label when present.
-- `machine` — machine label when the client has multiple machines; omitted for a single local machine.
+- `machine` — machine label while more than one machine is connected; omitted otherwise, including while a second saved machine is disabled or offline.
 - `workspace` — workspace name.
 - `tab` — tab name when available. When no row shows `workspace`, an unnamed tab shows the workspace name: a workspace's lone tab as `hall`, one of several tabs, labelled by its number, as `hall 1`.
 - `pane` — pane name when available.
