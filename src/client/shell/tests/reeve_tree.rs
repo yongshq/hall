@@ -177,7 +177,7 @@ fn reeves_sit_at_the_top_with_their_hands_beneath_and_plain_workspaces_apart() {
         tree_rows(&frame),
         [
             " The Great Hall",
-            " reeves in attendance",
+            " Reeves in attendance",
             " · ansel",
             "  ├ ● ansel-fix",
             "  └ ● ansel-review",
@@ -431,12 +431,97 @@ fn at_width_25_a_hand_keeps_its_id_before_its_notes() {
     assert_eq!(state.layout(100, 30).sidebar.width, 25);
     // The heading and its line fit whole.
     assert_eq!(tree[0], " The Great Hall");
-    assert_eq!(tree[1], " reeves in attendance");
+    assert_eq!(tree[1], " Reeves in attendance");
     // Too long for the row: the id is cut, no note.
     assert_eq!(tree[3], "  ├ ! ansel-fix-the-lon…");
     // `decide wedged` does not fit beside the whole id: the id stays, the mark says decide.
     // The bar is the highlight the first read raises for a hand with a flag up.
     assert_eq!(tree[6], "▌ └ ? bertil-probe");
+}
+
+#[test]
+fn at_the_minimum_width_the_heading_line_ends_in_an_ellipsis() {
+    let mut state = reeve_state(listing());
+    state.sidebar_width = state.config.sidebar_min_width;
+    let frame = compose(&mut state);
+    assert_eq!(state.layout(100, 30).sidebar.width, 18);
+    // The 17 columns left of the divider.
+    let tree = rows(&frame)
+        .iter()
+        .map(|row| {
+            row.chars()
+                .take(17)
+                .collect::<String>()
+                .trim_end()
+                .to_owned()
+        })
+        .take(3)
+        .collect::<Vec<_>>();
+    assert_eq!(tree[0], " The Great Hall");
+    // Cut the way the tree rows are, with an ellipsis in the last column, not mid-word.
+    assert_eq!(tree[1], " Reeves in atten…");
+    assert_eq!(tree[2], " · ansel");
+}
+
+/// The reeve section drawn alone, 24 wide and `height` rows high, and the body it hit-tests.
+fn section_rows(state: &ClientShellState, height: u16) -> (Vec<String>, Rect) {
+    let tree = state.current_reeve_tree().expect("tree");
+    let area = Rect::new(0, 0, 24, height);
+    let mut buffer = Buffer::empty(area);
+    let mut hits = ShellHitMap::default();
+    crate::client::shell::reeve_tree::render_reeve_section(
+        &mut buffer,
+        area,
+        &tree,
+        &state.config,
+        None,
+        &mut 0,
+        &mut hits,
+    );
+    let rows = (0..height)
+        .map(|y| {
+            (0..area.width)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect::<String>()
+                .trim_end()
+                .to_owned()
+        })
+        .collect();
+    (rows, hits.workspace_body)
+}
+
+#[test]
+fn a_short_section_keeps_a_tree_row_before_the_heading_line() {
+    let state = reeve_state(listing());
+    // The last row is the footer's, drawn by the sidebar.
+    assert_eq!(
+        section_rows(&state, 2),
+        (
+            vec![" The Great Hall".into(), String::new()],
+            Rect::new(0, 1, 24, 0)
+        )
+    );
+    // Three rows: the one tree row wins over the heading line.
+    assert_eq!(
+        section_rows(&state, 3),
+        (
+            vec![" The Great Hall".into(), " · ansel".into(), String::new()],
+            Rect::new(0, 1, 24, 1)
+        )
+    );
+    // Four: room for both.
+    assert_eq!(
+        section_rows(&state, 4),
+        (
+            vec![
+                " The Great Hall".into(),
+                " Reeves in attendance".into(),
+                " · ansel".into(),
+                String::new()
+            ],
+            Rect::new(0, 2, 24, 1)
+        )
+    );
 }
 
 #[test]

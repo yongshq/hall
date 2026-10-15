@@ -381,7 +381,7 @@ enum TreeLine<'a> {
 }
 
 /// Draws the reeve tree where herdr draws its spaces: a `The Great Hall` header over a dim
-/// `reeves in attendance` line, the tree, then the workspaces that hold no reeve under `other`.
+/// `Reeves in attendance` line, the tree, then the workspaces that hold no reeve under `other`.
 /// The section's last row stays herdr's footer.
 pub(super) fn render_reeve_section(
     buffer: &mut Buffer,
@@ -403,14 +403,16 @@ pub(super) fn render_reeve_section(
             .fg(palette.overlay0)
             .add_modifier(Modifier::BOLD),
     );
-    // The heading's second row, kept off the footer when the section is too short for both.
-    if area.height > 2 {
+    // The heading's second row, drawn only when a tree row is left for it to sit over: a
+    // section of 3 rows keeps its one tree row instead (the last row is always the footer).
+    let described = area.height > 3;
+    if described {
         render::put_text(
             buffer,
             area.x,
             area.y.saturating_add(1),
             area.width,
-            " reeves in attendance",
+            &crate::ui::truncate_end(" Reeves in attendance", usize::from(area.width)),
             Style::default().fg(palette.overlay0),
         );
     }
@@ -439,11 +441,12 @@ pub(super) fn render_reeve_section(
         lines.push(TreeLine::Item(item));
     }
 
+    let heading_rows = if described { 2 } else { 1 };
     let body = Rect::new(
         area.x,
-        area.y.saturating_add(2),
+        area.y.saturating_add(heading_rows),
         area.width,
-        area.height.saturating_sub(3),
+        area.height.saturating_sub(heading_rows + 1),
     );
     hits.workspace_body = body;
     let height = usize::from(body.height);
