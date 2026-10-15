@@ -491,6 +491,33 @@ fn section_rows(state: &ClientShellState, height: u16) -> (Vec<String>, Rect) {
 }
 
 #[test]
+fn the_heading_is_cut_with_an_ellipsis_in_a_narrow_section() {
+    let state = reeve_state(listing());
+    let tree = state.current_reeve_tree().expect("tree");
+    let first_row = |width: u16| {
+        let area = Rect::new(0, 0, width, 6);
+        let mut buffer = Buffer::empty(area);
+        crate::client::shell::reeve_tree::render_reeve_section(
+            &mut buffer,
+            area,
+            &tree,
+            &state.config,
+            None,
+            &mut 0,
+            &mut ShellHitMap::default(),
+        );
+        (0..width)
+            .map(|x| buffer[(x, 0)].symbol())
+            .collect::<String>()
+            .trim_end()
+            .to_owned()
+    };
+    assert_eq!(first_row(12), " The Great …");
+    assert_eq!(first_row(15), " The Great Hall");
+    assert_eq!(first_row(26), " The Great Hall");
+}
+
+#[test]
 fn a_short_section_keeps_a_tree_row_before_the_heading_line() {
     let state = reeve_state(listing());
     // The last row is the footer's, drawn by the sidebar.

@@ -398,7 +398,7 @@ pub(super) fn render_reeve_section(
         area.x,
         area.y,
         area.width,
-        " The Great Hall",
+        &crate::ui::truncate_end(" The Great Hall", usize::from(area.width)),
         Style::default()
             .fg(palette.overlay0)
             .add_modifier(Modifier::BOLD),
