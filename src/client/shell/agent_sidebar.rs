@@ -289,6 +289,7 @@ pub(super) fn agent_rows(
                     machine,
                     workspace: &workspace.label,
                     tab: tab_label,
+                    tab_auto_named: tab.is_some_and(|tab| !tab.custom_label),
                     pane: agent
                         .title
                         .as_deref()

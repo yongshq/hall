@@ -56,6 +56,8 @@ pub(crate) struct AgentTokenContext<'a> {
     pub(crate) machine: Option<&'a str>,
     pub(crate) workspace: &'a str,
     pub(crate) tab: Option<&'a str>,
+    /// The tab has no name of its own: `tab` is its number.
+    pub(crate) tab_auto_named: bool,
     pub(crate) pane: Option<&'a str>,
     pub(crate) agent_label: Option<&'a str>,
     pub(crate) terminal_title: Option<&'a str>,
@@ -70,15 +72,20 @@ pub(crate) fn agent_rows(
     state_text: &str,
 ) -> Vec<Vec<ResolvedToken>> {
     let rows = config.rows_for_agent(context.canonical_agent);
-    // A tab with no label of its own (a workspace's lone, unnamed tab) shows
-    // the workspace's name, unless the rows show the workspace already.
-    let tab = context.tab.or_else(|| {
-        (!rows
-            .iter()
-            .flatten()
-            .any(|token| matches!(token.parts().0, AgentSidebarToken::Workspace)))
-        .then_some(context.workspace)
-    });
+    // An unnamed tab shows the workspace's name, unless the rows show the
+    // workspace already: a workspace's lone tab as `hall`, one of several,
+    // labelled by its number, as `hall 1`.
+    let shows_workspace = rows
+        .iter()
+        .flatten()
+        .any(|token| matches!(token.parts().0, AgentSidebarToken::Workspace));
+    let tab = match context.tab {
+        Some(number) if context.tab_auto_named && !shows_workspace => {
+            Some(format!("{} {number}", context.workspace))
+        }
+        Some(tab) => Some(tab.to_string()),
+        None => (!shows_workspace).then(|| context.workspace.to_string()),
+    };
     rows.iter()
         .filter_map(|row| {
             let resolved = row
@@ -96,9 +103,7 @@ pub(crate) fn agent_rows(
                         AgentSidebarToken::Workspace => {
                             Some(ResolvedTokenKind::Workspace(context.workspace.to_string()))
                         }
-                        AgentSidebarToken::Tab => {
-                            tab.map(|value| ResolvedTokenKind::Tab(value.to_string()))
-                        }
+                        AgentSidebarToken::Tab => tab.clone().map(ResolvedTokenKind::Tab),
                         AgentSidebarToken::Pane => context
                             .pane
                             .map(|value| ResolvedTokenKind::Pane(value.to_string())),
@@ -238,6 +243,7 @@ mod tests {
     struct Entry {
         workspace: String,
         tab: Option<String>,
+        tab_auto_named: bool,
         pane: Option<String>,
         agent_label: Option<String>,
         terminal_title: Option<String>,
@@ -250,6 +256,7 @@ mod tests {
         Entry {
             workspace: "repo".into(),
             tab: None,
+            tab_auto_named: false,
             pane: None,
             agent_label: Some("pi".into()),
             terminal_title: None,
@@ -264,6 +271,7 @@ mod tests {
             machine: None,
             workspace: &entry.workspace,
             tab: entry.tab.as_deref(),
+            tab_auto_named: entry.tab_auto_named,
             pane: entry.pane.as_deref(),
             agent_label: entry.agent_label.as_deref(),
             terminal_title: entry.terminal_title.as_deref(),
@@ -563,6 +571,76 @@ rows = [[{ token = "$load", rules = [{ lt = 50, dim = true }] }]]
                     "Bran".into()
                 ))],
             ]
+        );
+    }
+
+    #[test]
+    fn a_numbered_tab_shows_the_workspace_and_number_unless_the_rows_show_it() {
+        let mut entry = entry();
+        entry.workspace = "hall".into();
+        entry.tab = Some("1".into());
+        entry.tab_auto_named = true;
+        let config = AgentsSidebarConfig::default();
+        assert_eq!(
+            agent_rows(&config, context(&entry), "working"),
+            vec![vec![
+                ResolvedToken::unstyled(ResolvedTokenKind::StateIcon),
+                ResolvedToken::new(ResolvedTokenKind::Tab("hall 1".into()), bold_undimmed()),
+            ]]
+        );
+
+        let config = AgentsSidebarConfig {
+            rows: vec![vec![
+                AgentSidebarToken::StateIcon,
+                AgentSidebarToken::Workspace,
+                AgentSidebarToken::Tab,
+            ]],
+            ..Default::default()
+        };
+        assert_eq!(
+            agent_rows(&config, context(&entry), "working"),
+            vec![vec![
+                ResolvedToken::unstyled(ResolvedTokenKind::StateIcon),
+                ResolvedToken::unstyled(ResolvedTokenKind::Workspace("hall".into())),
+                ResolvedToken::unstyled(ResolvedTokenKind::Tab("1".into())),
+            ]]
+        );
+
+        entry.tab = Some("review".into());
+        entry.tab_auto_named = false;
+        assert_eq!(
+            agent_rows(&AgentsSidebarConfig::default(), context(&entry), "working"),
+            vec![vec![
+                ResolvedToken::unstyled(ResolvedTokenKind::StateIcon),
+                ResolvedToken::new(ResolvedTokenKind::Tab("review".into()), bold_undimmed()),
+            ]]
+        );
+    }
+
+    #[test]
+    fn default_rows_show_the_machine_only_when_there_is_one() {
+        let config = AgentsSidebarConfig::default();
+        let mut entry = entry();
+        entry.tab = Some("hall".into());
+        let tab = ResolvedToken::new(ResolvedTokenKind::Tab("hall".into()), bold_undimmed());
+
+        assert_eq!(
+            agent_rows(&config, context(&entry), "working"),
+            vec![vec![
+                ResolvedToken::unstyled(ResolvedTokenKind::StateIcon),
+                tab.clone()
+            ]]
+        );
+
+        let mut context = context(&entry);
+        context.machine = Some("Build");
+        assert_eq!(
+            agent_rows(&config, context, "working"),
+            vec![vec![
+                ResolvedToken::unstyled(ResolvedTokenKind::StateIcon),
+                ResolvedToken::unstyled(ResolvedTokenKind::Machine("Build".into())),
+                tab,
+            ]]
         );
     }
 

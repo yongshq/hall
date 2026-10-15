@@ -369,6 +369,47 @@ fn aggregate_agents_use_configured_rows_machine_token_and_status_colors() {
 }
 
 #[test]
+fn default_agent_rows_name_the_machine_when_several_are_connected() {
+    use crate::api::schema::AgentStatus;
+
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let profile = remote_profile();
+    let endpoint_id = ClientEndpointId::Ssh(profile.id.clone());
+    state.set_endpoint_catalog(&[profile]);
+    state.set_endpoint_status(&endpoint_id, ClientEndpointStatus::Online);
+
+    let mut local = snapshot();
+    local.workspaces[0].label = "hall".into();
+    local.agents = vec![agent("claude", AgentStatus::Idle, 1)];
+    state.set_snapshot(Box::new(local));
+    state.set_pane_surface(surface());
+    let mut remote = snapshot();
+    remote.boot_id = "remote-boot".into();
+    remote.workspaces[0].label = "hall".into();
+    remote.agents = vec![agent("claude", AgentStatus::Idle, 1)];
+    state.set_endpoint_snapshot(&endpoint_id, Box::new(remote));
+
+    let frame = state.compose(100, 28).expect("combined endpoint frame");
+    let rows = state
+        .hits
+        .endpoint_agents
+        .iter()
+        .map(|(rect, _, _)| {
+            (rect.x..rect.right())
+                .map(|x| {
+                    frame.cells[(rect.y * frame.width + x) as usize]
+                        .symbol
+                        .as_str()
+                })
+                .collect::<String>()
+                .trim_end()
+                .to_string()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(rows, [" ○ Local · hall", " ○ Build · hall"]);
+}
+
+#[test]
 fn aggregate_priority_uses_client_observed_recency_across_machines() {
     use crate::api::schema::AgentStatus;
     use crate::config::AgentSidebarToken;

@@ -455,7 +455,11 @@ impl Default for AgentsSidebarConfig {
     fn default() -> Self {
         Self {
             rows: vec![
-                vec![AgentSidebarToken::StateIcon, bold_undimmed_tab()],
+                vec![
+                    AgentSidebarToken::StateIcon,
+                    AgentSidebarToken::Machine,
+                    bold_undimmed_tab(),
+                ],
                 vec![AgentSidebarToken::TerminalTitleStripped],
             ],
             rows_by_agent: BTreeMap::new(),
@@ -501,7 +505,7 @@ mod tests {
         assert_eq!(
             config.agents.rows,
             toml::from_str::<AgentsSidebarConfig>(
-                r#"rows = [["state_icon", { token = "tab", bold = true, dim = false }], ["terminal_title_stripped"]]"#
+                r#"rows = [["state_icon", "machine", { token = "tab", bold = true, dim = false }], ["terminal_title_stripped"]]"#
             )
             .unwrap()
             .rows

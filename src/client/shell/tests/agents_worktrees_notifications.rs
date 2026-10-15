@@ -488,6 +488,13 @@ fn agent_rows_show_the_tab_over_the_title_like_the_lieges_herdr() {
     projected.tabs[0].label = "1".into();
     projected.tabs[0].custom_label = false;
     assert_eq!(row(projected.clone()), [" ○ Bran"]);
+
+    let mut numbered_tab = hand_tab.clone();
+    numbered_tab.label = "2".into();
+    numbered_tab.custom_label = false;
+    let mut numbered = projected.clone();
+    numbered.tabs.push(numbered_tab);
+    assert_eq!(row(numbered), [" ○ Bran 1"]);
     projected.tabs[0].custom_label = true;
 
     projected.tabs.push(hand_tab);
