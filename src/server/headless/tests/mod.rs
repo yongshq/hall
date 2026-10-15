@@ -427,6 +427,7 @@ fn configured_window_title_reaches_the_foreground_client_once_per_change() {
 async fn focused_terminal_title_syncs_without_requesting_a_sidebar_render() {
     let (mut server, control_rx) = window_title_test_server();
     server.app.configure_window_title("{terminal_title}");
+    server.app.state.sidebar_agents.rows = vec![vec![crate::config::AgentSidebarToken::Agent]];
     server.app.state.ensure_test_terminals();
     let pane_id = server.app.state.workspaces[0].tabs[0].root_pane;
     let terminal_id = server.app.state.workspaces[0]

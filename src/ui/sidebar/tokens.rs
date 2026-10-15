@@ -100,9 +100,15 @@ pub(crate) fn agent_rows(
                         AgentSidebarToken::TerminalTitle => context
                             .terminal_title
                             .map(|value| ResolvedTokenKind::TerminalTitle(value.to_string())),
+                        // With no title yet, the agent's name stands in.
                         AgentSidebarToken::TerminalTitleStripped => context
                             .terminal_title_stripped
-                            .map(|value| ResolvedTokenKind::TerminalTitle(value.to_string())),
+                            .map(|value| ResolvedTokenKind::TerminalTitle(value.to_string()))
+                            .or_else(|| {
+                                context
+                                    .agent_label
+                                    .map(|value| ResolvedTokenKind::Agent(value.to_string()))
+                            }),
                         AgentSidebarToken::Custom(name) => context
                             .tokens
                             .get(name)
@@ -116,7 +122,29 @@ pub(crate) fn agent_rows(
                     Some(ResolvedToken::new(kind, style))
                 })
                 .collect::<Vec<_>>();
+            let resolved = without_repeated_values(resolved);
             (!resolved.is_empty()).then_some(resolved)
+        })
+        .collect()
+}
+
+/// Drops a token whose text repeats an earlier one in the row, ignoring case
+/// and surrounding space, so a reeve's workspace and tab of the same name read
+/// `Bran`, not `Bran · Bran`.
+fn without_repeated_values(resolved: Vec<ResolvedToken>) -> Vec<ResolvedToken> {
+    let mut seen = Vec::<String>::new();
+    resolved
+        .into_iter()
+        .filter(|token| {
+            let Some(value) = token.kind.text_value() else {
+                return true;
+            };
+            let value = value.trim().to_lowercase();
+            if seen.contains(&value) {
+                return false;
+            }
+            seen.push(value);
+            true
         })
         .collect()
 }
@@ -444,6 +472,62 @@ rows = [[{ token = "$load", rules = [{ lt = 50, dim = true }] }]]
                 ResolvedToken::unstyled(ResolvedTokenKind::TerminalTitle("raw title".into())),
                 ResolvedToken::unstyled(ResolvedTokenKind::Custom("custom title".into())),
             ]]
+        );
+    }
+
+    #[test]
+    fn stripped_title_falls_back_to_the_agent_name() {
+        let config = AgentsSidebarConfig {
+            rows: vec![vec![AgentSidebarToken::TerminalTitleStripped]],
+            ..Default::default()
+        };
+        let mut entry = entry();
+
+        assert_eq!(
+            agent_rows(&config, context(&entry), "working"),
+            vec![vec![ResolvedToken::unstyled(ResolvedTokenKind::Agent(
+                "pi".into()
+            ))]]
+        );
+
+        entry.terminal_title_stripped = Some("Pending items".into());
+        assert_eq!(
+            agent_rows(&config, context(&entry), "working"),
+            vec![vec![ResolvedToken::unstyled(
+                ResolvedTokenKind::TerminalTitle("Pending items".into())
+            )]]
+        );
+    }
+
+    #[test]
+    fn a_value_repeated_in_a_row_shows_once() {
+        let config = AgentsSidebarConfig::default();
+        let mut entry = entry();
+        entry.workspace = "Bran".into();
+        entry.tab = Some(" bran ".into());
+        entry.terminal_title_stripped = Some("Pending items".into());
+
+        assert_eq!(
+            agent_rows(&config, context(&entry), "working"),
+            vec![
+                vec![
+                    ResolvedToken::unstyled(ResolvedTokenKind::StateIcon),
+                    ResolvedToken::unstyled(ResolvedTokenKind::Workspace("Bran".into())),
+                ],
+                vec![ResolvedToken::unstyled(ResolvedTokenKind::TerminalTitle(
+                    "Pending items".into()
+                ))],
+            ]
+        );
+
+        entry.tab = Some("Artificer of Bran".into());
+        assert_eq!(
+            agent_rows(&config, context(&entry), "working")[0],
+            vec![
+                ResolvedToken::unstyled(ResolvedTokenKind::StateIcon),
+                ResolvedToken::unstyled(ResolvedTokenKind::Workspace("Bran".into())),
+                ResolvedToken::unstyled(ResolvedTokenKind::Tab("Artificer of Bran".into())),
+            ]
         );
     }
 

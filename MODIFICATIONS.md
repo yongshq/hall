@@ -182,3 +182,14 @@ Hall is a modified version of herdr v0.9.0 (commit b99002ac99b09e00b4ca692436cb1
 | `docs/next/api/herdr-api.schema.json` | Regenerated with the new fields. |
 | `docs/next/website/src/content/docs/cli-reference.mdx` | The flag on the three commands, and what a restore does with a marked pane. |
 | `tests/fixtures/endpoint-method-shapes-v1.json` | New digests for `tab.create`, `workspace.create` and `worktree.open`: the added `no_agent_resume` is optional, defaults to false and is left off the wire when false (the client never sets it), so an older client or server reads the same requests. |
+
+## Agent row like the liege's herdr (2026-10-15)
+
+| File | Change |
+|---|---|
+| `src/ui/sidebar/tokens.rs` | In an agent row, a value that repeats an earlier one in the row (ignoring case and surrounding space) is dropped, so a reeve's workspace and tab of the same name read `Bran`, not `Bran · Bran`; `terminal_title_stripped` shows the agent's name while the pane has no title; tests. |
+| `src/config/sidebar.rs` | The default agent rows' second line is `terminal_title_stripped` instead of `agent`, as the liege's herdr config has it; test to match. |
+| `src/main.rs` | The default config text's agent rows. |
+| `src/client/shell/tests/agents_worktrees_notifications.rs` | A reeve's agent row renders as `○ Bran` over its title, and over `claude` with no title. |
+| `src/server/headless/tests/mod.rs` | The test of a title change that needs no sidebar render sets agent rows that show no title, now that the default rows do. |
+| `docs/next/website/src/content/docs/configuration.mdx`, `docs/next/website/src/content/docs/agents.mdx` | The new default rows, the title's fallback and the repeated value. |

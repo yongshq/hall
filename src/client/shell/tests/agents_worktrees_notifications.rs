@@ -430,6 +430,53 @@ fn pane_cycle_last_and_agent_actions_resolve_to_stable_pane_ids() {
 }
 
 #[test]
+fn reeve_agent_row_shows_its_name_once_and_its_title() {
+    let mut projected = snapshot();
+    projected.workspaces[0].label = "Bran".into();
+    projected.workspaces[0].custom_label = true;
+    projected.tabs[0].label = "Bran".into();
+    projected.tabs[0].custom_label = true;
+    let agent = |terminal_title_stripped: Option<&str>| ClientShellAgent {
+        pane_id: "pane_1".into(),
+        workspace_id: "ws_1".into(),
+        tab_id: "tab_1".into(),
+        name: None,
+        display_agent: None,
+        agent: Some("claude".into()),
+        title: None,
+        terminal_title: terminal_title_stripped.map(|title| format!("✳ {title}")),
+        terminal_title_stripped: terminal_title_stripped.map(Into::into),
+        agent_status: AgentStatus::Idle,
+        state_change_seq: 1,
+        state_labels: Vec::new(),
+        tokens: Vec::new(),
+        focused: true,
+    };
+    let row_text = |projected: ClientShellSnapshot| {
+        let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+        state.set_snapshot(Box::new(projected));
+        state.set_pane_surface(surface());
+        let frame = state.compose(106, 30).expect("agent sidebar frame");
+        let rect = state.hits.agents[0].0;
+        (rect.y..rect.bottom())
+            .map(|y| {
+                (rect.x..rect.right())
+                    .map(|x| frame.cells[(y * frame.width + x) as usize].symbol.as_str())
+                    .collect::<String>()
+                    .trim_end()
+                    .to_string()
+            })
+            .collect::<Vec<_>>()
+    };
+
+    projected.agents = vec![agent(Some("Pending items"))];
+    assert_eq!(row_text(projected.clone()), [" ○ Bran", "   Pending items"]);
+
+    projected.agents = vec![agent(None)];
+    assert_eq!(row_text(projected), [" ○ Bran", "   claude"]);
+}
+
+#[test]
 fn agent_sidebar_honors_priority_symbols_tokens_and_stable_hits() {
     let mut projected = snapshot();
     let mut second_pane = projected.panes[0].clone();
