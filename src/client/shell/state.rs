@@ -1532,10 +1532,14 @@ impl ClientShellState {
             }
         }
         // hall: the tab the walk's selected row stands for, read on the tree before this
-        // snapshot, to pass the selection on if the snapshot takes that row away.
-        let selected_tab = self.selected_row_tab();
+        // snapshot, to pass the selection on if the snapshot takes that row away. Only during
+        // the walk: a key left from a walk ended by esc is overwritten when the next one starts.
+        let walking = self.mode == ClientShellMode::Navigate;
+        let selected_tab = walking.then(|| self.selected_row_tab()).flatten();
         self.snapshot = Some(snapshot);
-        self.rehome_reeve_selection(selected_tab);
+        if walking {
+            self.rehome_reeve_selection(selected_tab);
+        }
         let pending_surface = self.pending_pane_surface.take();
         if let Some(surface) = pending_surface {
             let matching = self.snapshot.as_ref().is_some_and(|snapshot| {

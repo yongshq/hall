@@ -1395,6 +1395,23 @@ fn showing_a_reeve_clears_its_finished_hands_alerts_until_the_next_rise() {
 }
 
 #[test]
+fn showing_a_reeve_keeps_another_reeves_finished_hands_alerts() {
+    // Showing a reeve clears only its own done and failed hands' alerts (decision 76).
+    let mut listing = listing();
+    errand_mut(&mut listing, "ansel-review").hand_state = HandState::Done;
+    errand_mut(&mut listing, "bertil-probe").hand_state = HandState::Failed;
+    let mut state = alert_state(listing.clone(), &[]);
+    errand_mut(&mut listing, "ansel-review").idle = true;
+    errand_mut(&mut listing, "bertil-probe").idle = true;
+    assert!(!sounds(&state.set_reeve_listing(Ok(listing))).is_empty());
+    assert_eq!(alerting(&mut state), ["ansel", "bertil"]);
+    state.show_reeve_alerts("p_b0");
+    assert_eq!(alerting(&mut state), ["ansel"]);
+    state.show_reeve_alerts("p_a0");
+    assert!(alerting(&mut state).is_empty());
+}
+
+#[test]
 fn showing_a_reeve_keeps_the_alert_of_a_hand_still_working() {
     // A working hand with no pane (decision 74) keeps its mark on its reeve's row when the
     // reeve is shown, as does a working hand with a pane: only done and failed hands clear.

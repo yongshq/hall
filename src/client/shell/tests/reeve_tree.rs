@@ -1173,6 +1173,31 @@ fn a_selected_working_hand_whose_pane_closes_passes_the_selection_to_its_reeve()
 }
 
 #[test]
+fn a_snapshot_after_esc_leaves_the_ended_walks_selection_alone() {
+    let mut state = reeve_state(listing());
+    compose(&mut state);
+    state.handle_input_bytes(b"\x02w\x1b[B\x1b[B");
+    state.handle_input_bytes(b"\x1b");
+    assert_eq!(state.mode, ClientShellMode::Terminal);
+    // The walk is over, so a snapshot that closes the hand's pane passes nothing on: the key
+    // left behind is only overwritten when the next walk starts.
+    let mut snapshot = hall_dev_snapshot();
+    snapshot.tabs.retain(|tab| tab.tab_id != "ws_a_t2");
+    snapshot.panes.retain(|pane| pane.tab_id != "ws_a_t2");
+    state.set_snapshot(Box::new(snapshot));
+    assert_eq!(
+        state.navigate_reeve_key,
+        Some(ReeveTreeKey::Hand("ansel-review".into()))
+    );
+    state.handle_input_bytes(b"\x02w");
+    assert_eq!(state.mode, ClientShellMode::Navigate);
+    assert_ne!(
+        state.navigate_reeve_key,
+        Some(ReeveTreeKey::Hand("ansel-review".into()))
+    );
+}
+
+#[test]
 fn a_selected_tab_that_the_listing_names_a_hand_keeps_the_selection() {
     let full = listing();
     let mut listing = full.clone();

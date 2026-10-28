@@ -7,11 +7,11 @@
 //! also raises a highlight on the reeve's row, and on the hand's row for a hand, apart from the
 //! sound, so it shows with the sound muted too. A highlight clears when the liege shows that
 //! reeve's or hand's pane, or when what raised it no longer holds; showing a reeve also clears
-//! its done and failed hands' highlights, which no row of theirs could clear. A hand's `waiting`, `idle`
-//! or `wedged` that rises again on a spell already rung (the reeve's watch exited and came
-//! back), or is up at a client's first read, raises its highlight again without a sound,
-//! unless the liege has shown the hand since that spell rang, or is looking at its pane at
-//! that first read.
+//! its done and failed hands' highlights, which no row of theirs could clear. A hand's
+//! `waiting`, `idle` or `wedged` that rises again on a spell already rung (the reeve's watch
+//! exited and came back), or is up at a client's first read, raises its highlight again
+//! without a sound, unless the liege has shown the hand since that spell rang, or is looking
+//! at its pane at that first read.
 
 use super::*;
 use crate::client::reeve_listing::{FlagsSince, HandState, ListedErrand, ReeveListing};

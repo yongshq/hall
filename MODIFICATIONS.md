@@ -203,4 +203,4 @@ Hall is a modified version of herdr v0.9.0 (commit b99002ac99b09e00b4ca692436cb1
 
 | File | Change |
 |---|---|
-| `src/client/shell/state.rs` | Taking a snapshot passes the reeve tree walk's selection on when the snapshot takes its row away, as a listing read does: a working hand whose pane closes changes no read, so the selection moves to its reeve's row here. |
+| `src/client/shell/state.rs` | Taking a snapshot passes the reeve tree walk's selection on when the snapshot takes its row away, as a listing read does: a working hand whose pane closes changes no read, so the selection moves to its reeve's row here. Only while the walk is on, so a selection left from a walk ended by esc costs a snapshot no tree builds. |

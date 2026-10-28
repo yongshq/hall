@@ -816,12 +816,12 @@ impl ClientShellState {
     /// Takes a read: a good one replaces the tree, a failed one leaves the last good tree,
     /// marked stale with the reason (decision 56). A hand's row the read, or a snapshot, takes
     /// away while the listing still names the hand (reported done or failed, decision 73, or
-    /// its pane closed) passes the selection to its reeve's row. Otherwise a row selected in the walk that the
-    /// read turns into another kind of row for the same tab keeps the selection: a hand the
-    /// read drops leaves its tab behind as a tab row (decision 55), and a tab row the read lists
-    /// as a hand becomes that hand's row (decision 61). A good read also raises the alerts of
-    /// the hands it shows newly stuck or asking, and gives the sound to play for them (decision
-    /// 62).
+    /// its pane closed) passes the selection to its reeve's row. Otherwise a row selected in
+    /// the walk that the read turns into another kind of row for the same tab keeps the
+    /// selection: a hand the read drops leaves its tab behind as a tab row (decision 55), and
+    /// a tab row the read lists as a hand becomes that hand's row (decision 61). A good read
+    /// also raises the alerts of the hands it shows newly stuck or asking, and gives the sound
+    /// to play for them (decision 62).
     pub(in crate::client) fn set_reeve_listing(
         &mut self,
         read: ReeveListingRead,
