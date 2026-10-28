@@ -246,7 +246,8 @@ fn a_hand_state_sets_its_mark_and_what_waits_sets_the_reeve_badge() {
     // The id first; of the notes, the ones that fit after it.
     assert_eq!(tree[4], "▌ └ ● ansel-review   asks");
     assert_eq!(tree[5], " · bertil");
-    assert_eq!(tree[6], "  └ ✓ bertil-probe   done");
+    // A done hand shows no row (decision 73).
+    assert_eq!(tree[6], "");
 
     // Back to working: the mark and the badge follow the next read.
     errand_mut(&mut listing, "ansel-fix").hand_state =
@@ -380,11 +381,13 @@ fn a_finished_hand_whose_pane_closed_drops_before_its_teardown() {
     errand.question = Some("Land it?".into());
     let mut state = reeve_state(listing);
     let tree = tree_rows(&compose(&mut state));
+    // Done: no row while its pane is open, and its tab is no `tab` row of the reeve's; its
+    // question still counts toward the reeve's badge (decisions 70, 73).
     assert_eq!(tree[2], " · ansel               1");
-    // The mark says done, so the narrow row keeps `asks` (decision 59).
-    assert_eq!(tree[4], "  └ ✓ ansel-review   asks");
-    // Its pane closes while the listing still names the errand: the row goes, and its
-    // question still counts toward the reeve's badge.
+    assert_eq!(tree[3], "  └ ● ansel-fix");
+    assert_eq!(tree[4], " · bertil");
+    // Its pane closes while the listing still names the errand: still no row, and its
+    // question still counts.
     let mut snapshot = hall_dev_snapshot();
     snapshot.tabs.retain(|tab| tab.tab_id != "ws_a_t2");
     snapshot.panes.retain(|pane| pane.tab_id != "ws_a_t2");
@@ -394,6 +397,53 @@ fn a_finished_hand_whose_pane_closed_drops_before_its_teardown() {
     assert_eq!(tree[3], "  └ ● ansel-fix");
     assert_eq!(tree[4], " · bertil");
     assert!(!tree.iter().any(|row| row.contains("ansel-review")));
+}
+
+#[test]
+fn done_and_failed_hands_show_no_row_while_their_panes_are_open() {
+    let mut listing = listing();
+    {
+        let errand = errand_mut(&mut listing, "ansel-review");
+        errand.hand_state = crate::client::reeve_listing::HandState::Done;
+        errand.waiting = true;
+    }
+    errand_mut(&mut listing, "bertil-probe").hand_state =
+        crate::client::reeve_listing::HandState::Failed;
+    let mut state = reeve_state(listing);
+    let tree = tree_rows(&compose(&mut state));
+    // Only the hand still working has a row. The done hand waiting on the liege still counts
+    // toward its reeve's badge; the failed one, waiting on nothing, counts toward none.
+    assert_eq!(tree[2], "▌· ansel               1");
+    assert_eq!(tree[3], "  └ ● ansel-fix");
+    assert_eq!(tree[4], " · bertil");
+    assert_eq!(tree[5], "");
+    assert_eq!(tree[6], " other");
+    // Their tabs, still open, stay tied to them: no `tab` row stands for either.
+    assert!(!tree.iter().any(|row| row.contains("tab ")));
+    assert!(!tree
+        .iter()
+        .any(|row| row.contains("ansel-review") || row.contains("bertil-probe")));
+    let model = state.current_reeve_tree().expect("tree");
+    let beneath = model
+        .items
+        .iter()
+        .filter(|item| matches!(item.key, ReeveTreeKey::Tab(_) | ReeveTreeKey::Hand(_)))
+        .map(|item| item.key.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(beneath, [ReeveTreeKey::Hand("ansel-fix".into())]);
+    // With the done hand's tab focused, the focus shows on its reeve's row.
+    let mut snapshot = hall_dev_snapshot();
+    snapshot.focused_tab_id = Some("ws_a_t2".into());
+    snapshot.focused_pane_id = Some("p_a2".into());
+    state.set_snapshot(Box::new(snapshot));
+    let model = state.current_reeve_tree().expect("tree");
+    let focused = model
+        .items
+        .iter()
+        .filter(|item| item.focused)
+        .map(|item| item.key.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(focused, [ReeveTreeKey::Reeve("ansel".into())]);
 }
 
 fn no_listing_state() -> ClientShellState {

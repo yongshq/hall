@@ -1,8 +1,8 @@
-//! hall: the reeve tree in the sidebar (plan step 3, decisions 12, 16, 17, 34, 49 to 56, 70;
-//! the alert highlight of plan step 4, decisions 62 and 63).
+//! hall: the reeve tree in the sidebar (plan step 3, decisions 12, 16, 17, 34, 49 to 56, 70,
+//! 73; the alert highlight of plan step 4, decisions 62 and 63).
 //!
-//! Every reeve the listing places in this hall session sits at the top level, its active hands
-//! beneath it (reeve = workspace, hand = tab), a mark per hand and a badge per reeve,
+//! Every reeve the listing places in this hall session sits at the top level, its hands still
+//! working beneath it (reeve = workspace, hand = tab), a mark per hand and a badge per reeve,
 //! then the reeve's other tabs, dimmed. Workspaces that hold no reeve follow in a section of
 //! their own. The tree is built from the server's snapshot and reeve's listing on every frame;
 //! nothing of it is kept but the selection.
@@ -86,11 +86,10 @@ impl ReeveTree {
 fn hand_notes(errand: &ListedErrand) -> Vec<&'static str> {
     let mut notes = Vec::new();
     match errand.hand_state {
-        HandState::Working | HandState::Unknown => {}
+        // A done or failed hand gets no row, so no notes (decision 73).
+        HandState::Working | HandState::Unknown | HandState::Done | HandState::Failed => {}
         HandState::NeedsDecision => notes.push("decide"),
         HandState::Blocked => notes.push("blocked"),
-        HandState::Done => notes.push("done"),
-        HandState::Failed => notes.push("failed"),
     }
     if errand
         .question
@@ -124,8 +123,8 @@ fn hand_label(errand: &ListedErrand) -> String {
 }
 
 /// The hand's pane in `snapshot`, when hall has it. Only a hand with one is active and gets a
-/// row; one without (a finished hand whose pane closed before its teardown, say) gets none,
-/// though what it waits on still counts on its reeve's row (decision 70).
+/// row; one without (a hand whose pane closed before its teardown, say) gets none, though what
+/// it waits on still counts on its reeve's row (decision 70).
 fn hand_pane<'a>(
     snapshot: &'a ClientShellSnapshot,
     errand: &ListedErrand,
@@ -171,11 +170,24 @@ pub(super) fn reeve_tree(
             .flat_map(|listing| &listing.errands)
             .filter(|errand| errand.owner_reeve == reeve.name && errand.session.in_session(session))
             .collect::<Vec<_>>();
-        let hands = listed
+        let listed_panes = listed
             .iter()
             .filter_map(|errand| Some((*errand, hand_pane(snapshot, errand)?)))
             .collect::<Vec<_>>();
+        // Only a hand still working gets a row: a done or failed one shows none, even while its
+        // pane is open (decision 73).
+        let hands = listed_panes
+            .iter()
+            .copied()
+            .filter(|(errand, _)| !matches!(errand.hand_state, HandState::Done | HandState::Failed))
+            .collect::<Vec<_>>();
         let hand_tabs = hands
+            .iter()
+            .map(|(_, pane)| pane.tab_id.as_str())
+            .collect::<HashSet<_>>();
+        // Every listed hand with a pane holds its tab, a row or not, so a done or failed hand's
+        // tab shows as no `tab` row of the reeve's (decisions 55, 73).
+        let listed_tabs = listed_panes
             .iter()
             .map(|(_, pane)| pane.tab_id.as_str())
             .collect::<HashSet<_>>();
@@ -189,7 +201,7 @@ pub(super) fn reeve_tree(
                     .filter(|tab| {
                         tab.workspace_id == reeve_pane.workspace_id
                             && tab.tab_id != reeve_pane.tab_id
-                            && !hand_tabs.contains(tab.tab_id.as_str())
+                            && !listed_tabs.contains(tab.tab_id.as_str())
                     })
                     .collect::<Vec<_>>()
             })
@@ -321,7 +333,7 @@ fn fit_hand_notes(state: HandState, notes: &[&str], width: usize) -> String {
         return all;
     }
     let rank = |note: &str| {
-        let repeats_mark = matches!(note, "decide" | "blocked" | "done" | "failed")
+        let repeats_mark = matches!(note, "decide" | "blocked")
             || (note == "asks" && state == HandState::NeedsDecision);
         if repeats_mark {
             usize::MAX
@@ -389,9 +401,8 @@ fn hand_mark(state: HandState, palette: &Palette) -> (&'static str, ratatui::sty
         HandState::Working => ("●", palette.yellow),
         HandState::NeedsDecision => ("?", palette.mauve),
         HandState::Blocked => ("!", palette.red),
-        HandState::Done => ("✓", palette.teal),
-        HandState::Failed => ("✗", palette.red),
-        HandState::Unknown => ("·", palette.overlay0),
+        // A done or failed hand gets no row to mark (decision 73).
+        HandState::Unknown | HandState::Done | HandState::Failed => ("·", palette.overlay0),
     }
 }
 
@@ -920,7 +931,8 @@ impl ClientShellState {
     /// Picks the selected item: shows a reeve's or a hand's own pane, brings a tab forward or
     /// focuses a workspace. None when the tree is not drawn or nothing is selected, so herdr's
     /// own pick runs. A selected key the tree no longer has (a finished hand whose tab is gone
-    /// too) picks nothing, rather than herdr's pick of the reeve's workspace.
+    /// too, or a hand reported done or failed, decision 73) picks nothing, rather than herdr's
+    /// pick of the reeve's workspace.
     fn pick_navigate_reeve_target(&self) -> Option<Option<crate::api::schema::Method>> {
         let tree = self.current_reeve_tree()?;
         let Some(item) = tree

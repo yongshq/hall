@@ -131,3 +131,15 @@ After seeing the tree's hand rows (2026-10-27), liege: "maybe a hand role scout-
 After the liege named the repo's remote (2026-10-26), liege: "use this for remote repo https://github.com/yongshq/hall.git for hall project":
 
 72. Amends 18. The repo has a remote: `origin` is `git@github.com:yongshq/hall.git`, and `main` tracks `origin/main`, first pushed 2026-10-26 at the liege's word. The GitHub repo is public, and stays so: asked whether that was meant (decision 18 planned private until version one), liege, 2026-10-28: "keep it public". `upstream` stays herdr's, fetch only, push disabled. Pushing still waits for the liege every time.
+
+Asked whether "active" should include finished hands whose pane is still open (they show with a check mark until the pane closes), or hide finished and failed hands too, liege (2026-10-28): "Show only hands still working":
+
+73. Amends 70. A reeve's rows list its hands still working only: a hand reported done or failed shows no row, even while its pane is open, so 70's "A hand reported done keeps its `✓` while its pane is open" no longer holds, and the `✓` and `✗` marks and the `done` and `failed` notes go from 52's notes and 59's ranking. A done or failed hand's pane stays tied to it: its tab shows no `tab <label>` row (55), and with that tab focused the focus shows on its reeve's row. Its badge and alerts are unchanged: what it waits on still counts toward its reeve's badge, and an alert it raises still marks its reeve's row (63, 70).
+
+Asked whether a hand with no pane that waits on the liege should have no row of its own and show only on its reeve's row, liege (2026-10-28): "yes":
+
+74. A hand whose pane hall does not have and that waits on the liege keeps no row (70): it shows only as its reeve's mark and in its reeve's badge count. No row is added for it.
+
+Asked whether a hand's label too long for its row should be shortened, its office cut down, rather than cut at its end, liege (2026-10-28): "keep it as is":
+
+75. Label width (57) is kept as is: an office-errand label too long for its row is cut at its end (71), and the office is not shortened.
