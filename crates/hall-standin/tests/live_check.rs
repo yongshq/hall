@@ -805,3 +805,53 @@ fn reeve_hall_dev_baseline() {
     ]));
     passes(&rig.run(&[]));
 }
+
+#[test]
+fn reeve_state_skips_the_shared_browsers_folder() {
+    // Reeve's shared browser keeps its profile under ~/.reeve/state/browser/:
+    // third-party files that held `ansel` and `bertil` by chance (decision 77).
+    let rig = Rig::new("browser");
+    let state = rig.user.join(".reeve/state");
+    let profile = state.join("browser/profile");
+    std::fs::create_dir_all(profile.join("ZxcvbnData/3.2.0.0")).unwrap();
+    std::fs::write(
+        profile.join("ZxcvbnData/3.2.0.0/us_tv_and_film.txt"),
+        "ansel\nbertil\n",
+    )
+    .unwrap();
+    std::fs::write(
+        profile.join("pane"),
+        "w1:p2@/Users/x/.config/hall-dev/sessions/hall-dev/herdr.sock\n",
+    )
+    .unwrap();
+    touch(&profile.join("ansel-fix/meta"));
+    let stdout = passes(&rig.run(&[]));
+    assert!(line(&stdout, "reeve-state").contains("pass"), "{stdout}");
+    assert!(line(&stdout, "reeve-hall-dev").contains("pass"), "{stdout}");
+    assert_eq!(
+        rig.baseline()["reeve-hall-dev"]["entries"],
+        serde_json::json!([])
+    );
+
+    // Only that folder: a `browser` elsewhere, or a file of that name, is read.
+    for file in ["sessions/browser/meta", "browser.log", "browserx/meta"] {
+        let p = state.join(file);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(&p, "reeve bertil\n").unwrap();
+        let (stdout, stderr) = fails(&rig.run(&[]));
+        assert!(
+            line(&stdout, "reeve-state").contains("FAIL 1 files"),
+            "{file}: {stdout}"
+        );
+        assert!(stderr.contains(p.to_str().unwrap()), "{stderr}");
+        std::fs::remove_file(&p).unwrap();
+    }
+    let p = state.join("sessions/s1/pane");
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    std::fs::write(&p, "w1:p1@/u/.config/hall-dev/herdr.sock\n").unwrap();
+    let (stdout, _) = fails(&rig.run(&[]));
+    assert!(
+        line(&stdout, "reeve-hall-dev").contains("FAIL 1 new files"),
+        "{stdout}"
+    );
+}

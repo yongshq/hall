@@ -42,7 +42,10 @@ part passes, 1 when any fails, 2 on a usage error:
       path component (/.reeve-hall-dev followed by a non-name character or the
       end); names match as whole words (not inside a longer run of letters,
       digits, `_` or `-`), so `ansel` does not match `anselm` or `ansel-fix`,
-      and `ansel-fix` is its own name.
+      and `ansel-fix` is its own name. The folder ~/.reeve/state/browser/ is
+      not read: reeve's shared browser keeps its profile there, third-party
+      data no hall test writes, whose files can hold the test names by chance
+      (decision 77). Every other file under ~/.reeve/state is.
 
   reeve-hall-dev
       No new file under ~/.reeve/state (read only) holds a hall-dev path in its
@@ -55,7 +58,8 @@ part passes, 1 when any fails, 2 on a usage error:
       live errand whose id is exactly hall-dev names it in its own files.
       Judged against the baseline's `reeve-hall-dev` entries, files under
       ~/.reeve/state: a file not in it fails until accepted. A baseline
-      recorded before this part existed has none.
+      recorded before this part existed has none. Like reeve-state, it does
+      not read ~/.reeve/state/browser/ (decision 77).
 
 The check never calls herdr: it reads the filesystem and the process table only.
 
@@ -91,6 +95,9 @@ HALL_DEV_PART = "reeve-hall-dev"
 # The debug hall's folder name (src/config/io.rs app_dir_name): in every debug
 # hall socket path, so in every pane key a reeve hook writes for a hall-dev pane.
 DEBUG_HALL_DIR = "hall-dev"
+# The folder under ~/.reeve/state that reeve-state and reeve-hall-dev do not
+# read: reeve's shared browser's profile, third-party data (decision 77).
+BROWSER_DIR = "browser"
 REPO = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 EXIT_USAGE = 2
 
@@ -388,8 +395,9 @@ def hall_dev_forms(session):
 
 
 def scan_reeve_state():
-    """Reads every regular file under ~/.reeve/state once, for reeve-state and
-    reeve-hall-dev. Raises RuntimeError when the test names do not read."""
+    """Reads every regular file under ~/.reeve/state but the browser's folder
+    once, for reeve-state and reeve-hall-dev. Raises RuntimeError when the test
+    names do not read."""
     root = os.path.join(home(), ".reeve/state")
     test_home, session, names = test_names()
     home_re = re.escape(os.path.basename(test_home.rstrip("/")))
@@ -409,7 +417,9 @@ def scan_reeve_state():
     }
     if not scan["exists"]:
         return scan
-    for dirpath, _dirs, filenames in os.walk(root):
+    for dirpath, dirs, filenames in os.walk(root):
+        if dirpath == root and BROWSER_DIR in dirs:
+            dirs.remove(BROWSER_DIR)
         for n in filenames:
             p = os.path.join(dirpath, n)
             # Regular files only: never follow a link, never open a fifo or socket.
