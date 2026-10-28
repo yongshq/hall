@@ -6,7 +6,8 @@
 //! sound when a read of the listing shows a hand newly blocked, asking or stuck. Every alert
 //! also raises a highlight on the reeve's row, and on the hand's row for a hand, apart from the
 //! sound, so it shows with the sound muted too. A highlight clears when the liege shows that
-//! reeve's or hand's pane, or when what raised it no longer holds. A hand's `waiting`, `idle`
+//! reeve's or hand's pane, or when what raised it no longer holds; showing a reeve also clears
+//! its done and failed hands' highlights, which no row of theirs could clear. A hand's `waiting`, `idle`
 //! or `wedged` that rises again on a spell already rung (the reeve's watch exited and came
 //! back), or is up at a client's first read, raises its highlight again without a sound,
 //! unless the liege has shown the hand since that spell rang, or is looking at its pane at
@@ -553,21 +554,45 @@ impl ClientShellState {
 
     /// The liege shows a pane: the alerts of the reeve or hand it belongs to clear, and a
     /// hand's flags rising again on the spells rung so far stay clear, as does a `waiting` the
-    /// dialog this client rang on that pane absorbs later.
+    /// dialog this client rang on that pane absorbs later. Showing a reeve shows its done and
+    /// failed hands with it, since they have no row of their own to show (decision 76).
     pub(super) fn show_reeve_alerts(&mut self, pane_id: &str) {
         let role = self.pane_alert_role(pane_id);
+        let finished = match role {
+            Some(AlertRole::Reeve) => self.finished_hands(pane_id),
+            _ => Vec::new(),
+        };
         let alerts = &mut self.reeve_alerts;
-        alerts.panes.remove(pane_id);
-        if alerts.dialogs.contains_key(pane_id) {
-            alerts.dialogs_highlighted.insert(pane_id.to_owned());
-            alerts.dialogs_shown.insert(pane_id.to_owned());
-        }
+        alerts.show_pane(pane_id);
         if let Some(AlertRole::Hand(id)) = role {
-            alerts.hands.remove(&id);
-            if let Some(facts) = alerts.seen.as_mut().and_then(|seen| seen.get_mut(&id)) {
-                facts.shown = facts.rung;
-            }
+            alerts.show_hand(&id);
         }
+        for (id, hand_pane) in finished {
+            if let Some(hand_pane) = hand_pane {
+                alerts.show_pane(&hand_pane);
+            }
+            alerts.show_hand(&id);
+        }
+    }
+
+    /// The listed hands reported done or failed of the reeve whose pane is `pane_id`, with
+    /// their panes as listed.
+    fn finished_hands(&self, pane_id: &str) -> Vec<(String, Option<String>)> {
+        let Some((listing, session)) = self.alert_listing() else {
+            return Vec::new();
+        };
+        let Some(reeve) = listing.reeves.iter().find(|reeve| {
+            reeve.session.in_session(session) && reeve.session.pane_id.as_deref() == Some(pane_id)
+        }) else {
+            return Vec::new();
+        };
+        alert_errands(listing, session)
+            .filter(|errand| {
+                errand.owner_reeve == reeve.name
+                    && matches!(errand.hand_state, HandState::Done | HandState::Failed)
+            })
+            .map(|errand| (errand.id.clone(), errand.session.pane_id.clone()))
+            .collect()
     }
 
     /// Forgets every alert and the seed, when the listing command changes or goes.
@@ -577,6 +602,24 @@ impl ClientShellState {
 }
 
 impl ReeveAlerts {
+    /// The liege shows the pane: its highlight clears, and a dialog rung on it counts as shown.
+    fn show_pane(&mut self, pane_id: &str) {
+        self.panes.remove(pane_id);
+        if self.dialogs.contains_key(pane_id) {
+            self.dialogs_highlighted.insert(pane_id.to_owned());
+            self.dialogs_shown.insert(pane_id.to_owned());
+        }
+    }
+
+    /// The liege shows the hand `id`: its listing alert clears, and its spells rung so far
+    /// count as shown.
+    fn show_hand(&mut self, id: &str) {
+        self.hands.remove(id);
+        if let Some(facts) = self.seen.as_mut().and_then(|seen| seen.get_mut(id)) {
+            facts.shown = facts.rung;
+        }
+    }
+
     /// Whether the hand `id`, whose pane is `pane_id`, has a highlight raised.
     pub(super) fn hand(&self, id: &str, pane_id: Option<&str>) -> bool {
         self.hands.contains(id) || pane_id.is_some_and(|pane_id| self.panes.contains_key(pane_id))

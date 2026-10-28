@@ -1346,3 +1346,75 @@ fn a_hand_with_no_pane_rings_and_marks_its_reeve() {
     );
     assert_eq!(alerting(&mut state), ["ansel"]);
 }
+
+#[test]
+fn showing_a_reeve_clears_its_finished_hands_alerts_until_the_next_rise() {
+    // A done or failed hand has no row to show (decision 73), so showing its reeve shows it
+    // too (decision 76).
+    for hand_state in [HandState::Done, HandState::Failed] {
+        let mut listing = listing();
+        errand_mut(&mut listing, "ansel-review").hand_state = hand_state;
+        let mut state = alert_state(listing.clone(), &[("p_a2", AgentStatus::Blocked)]);
+        errand_mut(&mut listing, "ansel-review").idle = true;
+        assert_eq!(
+            sounds(&state.set_reeve_listing(Ok(listing.clone()))),
+            [crate::sound::Sound::Request],
+            "{hand_state:?}"
+        );
+        // Its pane at a dialog marks its reeve too.
+        notify(
+            &mut state,
+            SemanticNotificationKind::NeedsAttention,
+            "p_a2",
+            "ws_a_t2",
+        );
+        assert_eq!(alerting(&mut state), ["ansel"], "{hand_state:?}");
+        // Walk to ansel and show it.
+        state.handle_input_bytes(b"\x02w");
+        let pick = state.handle_input_bytes(b"\r");
+        assert!(matches!(
+            picked_method(&pick),
+            Some(crate::api::schema::Method::PaneFocus(target)) if target.pane_id == "p_a0"
+        ));
+        assert!(alerting(&mut state).is_empty(), "{hand_state:?}: shown");
+        // Read again unchanged: nothing new rose, nothing rings or marks.
+        assert!(state.set_reeve_listing(Ok(listing.clone())).is_empty());
+        assert!(
+            alerting(&mut state).is_empty(),
+            "{hand_state:?}: stays clear"
+        );
+        // A new rise rings and marks its reeve again.
+        errand_mut(&mut listing, "ansel-review").wedged = true;
+        assert_eq!(
+            sounds(&state.set_reeve_listing(Ok(listing))),
+            [crate::sound::Sound::Request],
+            "{hand_state:?}"
+        );
+        assert_eq!(alerting(&mut state), ["ansel"], "{hand_state:?}: again");
+    }
+}
+
+#[test]
+fn showing_a_reeve_keeps_the_alert_of_a_hand_still_working() {
+    // A working hand with no pane (decision 74) keeps its mark on its reeve's row when the
+    // reeve is shown, as does a working hand with a pane: only done and failed hands clear.
+    let mut listing = listing();
+    errand_mut(&mut listing, "ansel-fix").session.pane_id = Some("p_gone".into());
+    let mut state = alert_state(listing.clone(), &[]);
+    {
+        let errand = errand_mut(&mut listing, "ansel-fix");
+        errand.waiting = true;
+        errand.since.waiting = Some(1);
+    }
+    errand_mut(&mut listing, "ansel-review").hand_state = HandState::Blocked;
+    assert_eq!(
+        sounds(&state.set_reeve_listing(Ok(listing))),
+        [crate::sound::Sound::Request]
+    );
+    assert_eq!(alerting(&mut state), ["ansel", "ansel-review"]);
+    state.show_reeve_alerts("p_a0");
+    assert_eq!(alerting(&mut state), ["ansel", "ansel-review"]);
+    // Showing the hand with a pane clears its own; the pane-less one still marks its reeve.
+    state.show_reeve_alerts("p_a2");
+    assert_eq!(alerting(&mut state), ["ansel"]);
+}

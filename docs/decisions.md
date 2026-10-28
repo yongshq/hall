@@ -143,3 +143,7 @@ Asked whether a hand with no pane that waits on the liege should have no row of 
 Asked whether a hand's label too long for its row should be shortened, its office cut down, rather than cut at its end, liege (2026-10-28): "keep it as is":
 
 75. Label width (57) is kept as is: an office-errand label too long for its row is cut at its end (71), and the office is not shortened.
+
+Asked how to clear an alert raised by a done or failed hand, which has no row to pick (73), offered (a) showing its reeve also clears its finished hands' alerts (recommended), (b) finished hands raise no new alerts, (c) keep it as is, liege (2026-10-28): "as you recommend":
+
+76. Amends 73. Showing a reeve (enter on its row, a click on it, or the focus moving onto its pane) also clears the alerts of its listed hands reported done or failed: their listing alerts, and the highlight of a dialog on their panes, with each spell rung so far counting as shown, as when a hand is shown (63). A hand still working keeps its alert when its reeve is shown, a hand with no pane too (74): it clears only when the hand is shown or its trigger clears. A new alert from a done or failed hand after that rings and marks its reeve's row as before (73).
