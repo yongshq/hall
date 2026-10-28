@@ -1,8 +1,8 @@
-//! hall: the reeve tree in the sidebar (plan step 3, decisions 12, 16, 17, 34, 49 to 56; the
-//! alert highlight of plan step 4, decisions 62 and 63).
+//! hall: the reeve tree in the sidebar (plan step 3, decisions 12, 16, 17, 34, 49 to 56, 70;
+//! the alert highlight of plan step 4, decisions 62 and 63).
 //!
-//! Every reeve the listing places in this hall session sits at the top level, its hands in
-//! flight beneath it (reeve = workspace, hand = tab), a mark per hand and a badge per reeve,
+//! Every reeve the listing places in this hall session sits at the top level, its active hands
+//! beneath it (reeve = workspace, hand = tab), a mark per hand and a badge per reeve,
 //! then the reeve's other tabs, dimmed. Workspaces that hold no reeve follow in a section of
 //! their own. The tree is built from the server's snapshot and reeve's listing on every frame;
 //! nothing of it is kept but the selection.
@@ -45,7 +45,7 @@ pub(super) struct ReeveTreeItem {
     pub(super) key: ReeveTreeKey,
     pub(super) kind: ReeveTreeItemKind,
     pub(super) label: String,
-    /// The pane picking the item shows: the reeve's or the hand's own, when hall has it.
+    /// The pane picking the item shows: the reeve's own when hall has it, a hand's always.
     pub(super) pane_id: Option<String>,
     pub(super) workspace_id: Option<String>,
     pub(super) focused: bool,
@@ -83,7 +83,7 @@ impl ReeveTree {
     }
 }
 
-fn hand_notes(errand: &ListedErrand, placed: bool) -> Vec<&'static str> {
+fn hand_notes(errand: &ListedErrand) -> Vec<&'static str> {
     let mut notes = Vec::new();
     match errand.hand_state {
         HandState::Working | HandState::Unknown => {}
@@ -108,10 +108,30 @@ fn hand_notes(errand: &ListedErrand, placed: bool) -> Vec<&'static str> {
             notes.push(note);
         }
     }
-    if !placed {
-        notes.push("no pane");
-    }
     notes
+}
+
+/// A hand's row names the hand as reeve names its worktree, its office before its errand
+/// (`scout-mend-lead-finder`), or the errand alone when the listing names no office or only
+/// blanks (decision 71).
+fn hand_label(errand: &ListedErrand) -> String {
+    let office = errand.office.trim();
+    if office.is_empty() {
+        errand.id.clone()
+    } else {
+        format!("{office}-{}", errand.id)
+    }
+}
+
+/// The hand's pane in `snapshot`, when hall has it. Only a hand with one is active and gets a
+/// row; one without (a finished hand whose pane closed before its teardown, say) gets none,
+/// though what it waits on still counts on its reeve's row (decision 70).
+fn hand_pane<'a>(
+    snapshot: &'a ClientShellSnapshot,
+    errand: &ListedErrand,
+) -> Option<&'a crate::protocol::ClientShellPane> {
+    let pane_id = errand.session.pane_id.as_ref()?;
+    snapshot.panes.iter().find(|pane| &pane.pane_id == pane_id)
 }
 
 /// Builds the tree for `session` from the snapshot, the last listing that read well and why
@@ -146,15 +166,18 @@ pub(super) fn reeve_tree(
         if let Some(workspace_id) = &workspace_id {
             reeve_workspaces.insert(workspace_id.clone());
         }
-        let hands = listing
+        let listed = listing
             .iter()
             .flat_map(|listing| &listing.errands)
             .filter(|errand| errand.owner_reeve == reeve.name && errand.session.in_session(session))
             .collect::<Vec<_>>();
+        let hands = listed
+            .iter()
+            .filter_map(|errand| Some((*errand, hand_pane(snapshot, errand)?)))
+            .collect::<Vec<_>>();
         let hand_tabs = hands
             .iter()
-            .filter_map(|errand| pane(errand.session.pane_id.as_ref()))
-            .map(|pane| pane.tab_id.as_str())
+            .map(|(_, pane)| pane.tab_id.as_str())
             .collect::<HashSet<_>>();
         // The reeve's workspace's other tabs: neither the reeve's own nor a listed hand's
         // (decision 55).
@@ -184,15 +207,17 @@ pub(super) fn reeve_tree(
         let hand_alert = |errand: &ListedErrand| {
             alerts.hand(
                 &errand.id,
-                pane(errand.session.pane_id.as_ref()).map(|pane| pane.pane_id.as_str()),
+                hand_pane(snapshot, errand).map(|pane| pane.pane_id.as_str()),
             )
         };
         tree.items.push(ReeveTreeItem {
             alert: alerts.pane(reeve_pane.map(|pane| pane.pane_id.as_str()))
-                || hands.iter().any(|errand| hand_alert(errand)),
+                // Every listed hand counts here, a row or not, so an alert from a hand with no
+                // pane still marks its reeve (decisions 63, 70).
+                || listed.iter().any(|errand| hand_alert(errand)),
             key: ReeveTreeKey::Reeve(reeve.name.clone()),
             kind: ReeveTreeItemKind::Reeve {
-                badge: hands
+                badge: listed
                     .iter()
                     .filter(|errand| errand.waits_on_liege())
                     .count(),
@@ -208,22 +233,19 @@ pub(super) fn reeve_tree(
                 }),
             workspace_id,
         });
-        for (index, errand) in hands.iter().enumerate() {
-            let hand_pane = pane(errand.session.pane_id.as_ref());
+        for (index, (errand, hand_pane)) in hands.iter().enumerate() {
             tree.items.push(ReeveTreeItem {
                 alert: hand_alert(errand),
                 key: ReeveTreeKey::Hand(errand.id.clone()),
                 kind: ReeveTreeItemKind::Hand {
                     state: errand.hand_state,
-                    notes: hand_notes(errand, hand_pane.is_some()),
+                    notes: hand_notes(errand),
                     last: index + 1 == hands.len() && other_tabs.is_empty(),
                 },
-                label: errand.id.clone(),
-                pane_id: hand_pane.map(|pane| pane.pane_id.clone()),
-                workspace_id: hand_pane.map(|pane| pane.workspace_id.clone()),
-                focused: hand_pane.is_some_and(|pane| {
-                    snapshot.focused_tab_id.as_deref() == Some(pane.tab_id.as_str())
-                }),
+                label: hand_label(errand),
+                pane_id: Some(hand_pane.pane_id.clone()),
+                workspace_id: Some(hand_pane.workspace_id.clone()),
+                focused: snapshot.focused_tab_id.as_deref() == Some(hand_pane.tab_id.as_str()),
             });
         }
         for (index, tab) in other_tabs.iter().enumerate() {
@@ -304,7 +326,7 @@ fn fit_hand_notes(state: HandState, notes: &[&str], width: usize) -> String {
         if repeats_mark {
             usize::MAX
         } else {
-            ["wedged", "asks", "waiting", "idle", "no pane"]
+            ["wedged", "asks", "waiting", "idle"]
                 .iter()
                 .position(|word| *word == note)
                 .unwrap_or(usize::MAX - 1)
@@ -591,11 +613,6 @@ fn render_item(
         }
         ReeveTreeItemKind::Hand { state, last, .. } => {
             let mark = hand_mark(*state, palette);
-            let label_style = if item.pane_id.is_some() {
-                label_style
-            } else {
-                Style::default().fg(palette.overlay0)
-            };
             (
                 if *last { "  └ " } else { "  ├ " },
                 mark,
@@ -651,8 +668,8 @@ fn render_item(
         );
         x = x.saturating_add(1);
     }
-    // The label (a reeve's name, a hand's id) comes first: the notes get what is left after
-    // it, whole notes, and the ones that do not fit are dropped (decisions 52, 59).
+    // The label (a reeve's name, a hand's office and id) comes first: the notes get what is
+    // left after it, whole notes, and the ones that do not fit are dropped (decisions 52, 59).
     let width = usize::from(right.saturating_sub(x));
     let label_width = text_width(&item.label);
     let room = width.saturating_sub(label_width + 1);

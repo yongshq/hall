@@ -45,7 +45,7 @@ JSON on stdout, exit status 0:
 | `reeves[].name` | The reeve's name, as shown in the reeve tree. |
 | `reeves[].session` | Its session location (below). |
 | `reeves[].live` | Whether the reeve is alive now; default `true`. |
-| `errands[]` | Errands in flight only (decision 16): one torn down, or never dispatched, is left out; a hand reported done shows `✓` until its teardown. |
+| `errands[]` | Errands in flight only (decision 16): one torn down, or never dispatched, is left out. The tree shows only those whose pane hall has (decision 70); a hand reported done shows `✓` while its pane is open. |
 | `errands[].id` | The errand id. |
 | `errands[].office` | The office the hand holds, or `null` when its record names none (read as none). |
 | `errands[].owner_reeve` | The reeve that dispatched it, or `null` when reeve cannot tell (the record names no valid reeve and its owning session has no name): the hand then nests under no reeve, and raises no alert, since no row could show its highlight. Its pane keeps herdr's own notifications, as a pane the listing does not name. |

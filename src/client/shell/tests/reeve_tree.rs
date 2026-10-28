@@ -73,7 +73,8 @@ pub(super) fn hall_dev_snapshot() -> ClientShellSnapshot {
     snapshot
 }
 
-/// The stand-in's listing for that layout, with every hand working and nothing waiting.
+/// The stand-in's listing for that layout, with every hand working and nothing waiting. Its
+/// errands name no office, so each hand's row reads as its bare errand id.
 pub(super) fn listing() -> ReeveListing {
     serde_json::from_value(serde_json::json!({
         "version": 1,
@@ -93,7 +94,7 @@ pub(super) fn listing() -> ReeveListing {
 
 fn errand(id: &str, owner: &str, pane: &str) -> serde_json::Value {
     serde_json::json!({
-        "id": id, "office": "artificer", "owner_reeve": owner,
+        "id": id, "office": null, "owner_reeve": owner,
         "hand_state": "working", "question": null,
         "waiting": false, "idle": false, "wedged": false,
         "session": { "backend": "hall", "name": "hall-dev", "pane_id": pane }
@@ -339,16 +340,60 @@ fn a_finished_and_cleaned_up_errand_drops_from_the_tree() {
 }
 
 #[test]
-fn a_hand_without_a_pane_and_a_gone_reeve_show_dimmed_notes() {
+fn a_hand_without_a_pane_drops_and_a_gone_reeve_shows_dimmed() {
     let mut listing = listing();
     errand_mut(&mut listing, "ansel-fix").session.pane_id = None;
     listing.reeves[1].live = false;
     let mut state = reeve_state(listing);
     let tree = tree_rows(&compose(&mut state));
-    assert_eq!(tree[3], "  ├ ● ansel-fix   no pane");
+    assert_eq!(tree[3], "  ├ ● ansel-review");
     // Hall cannot tie the hand to its tab, so the tab shows as one of the reeve's.
-    assert_eq!(tree[5], "  └ tab ansel-fix");
-    assert_eq!(tree[6], " · bertil            gone");
+    assert_eq!(tree[4], "  └ tab ansel-fix");
+    assert_eq!(tree[5], " · bertil            gone");
+}
+
+#[test]
+fn a_hand_row_names_its_office_before_its_errand() {
+    let mut listing = listing();
+    errand_mut(&mut listing, "ansel-fix").office = "scout".into();
+    errand_mut(&mut listing, "ansel-review").office = "  ".into();
+    errand_mut(&mut listing, "bertil-probe").office = "warden".into();
+    let mut state = reeve_state(listing);
+    let tree = tree_rows(&compose(&mut state));
+    assert_eq!(tree[3], "  ├ ● scout-ansel-fix");
+    // An office of blanks names none: the errand id alone.
+    assert_eq!(tree[4], "  └ ● ansel-review");
+    assert_eq!(tree[6], "  └ ● warden-bertil-probe");
+    // The row still picks the hand by its errand.
+    state.handle_input_bytes(b"\x02w\x1b[B");
+    assert_eq!(
+        state.navigate_reeve_key,
+        Some(ReeveTreeKey::Hand("ansel-fix".into()))
+    );
+}
+
+#[test]
+fn a_finished_hand_whose_pane_closed_drops_before_its_teardown() {
+    let mut listing = listing();
+    let errand = errand_mut(&mut listing, "ansel-review");
+    errand.hand_state = crate::client::reeve_listing::HandState::Done;
+    errand.question = Some("Land it?".into());
+    let mut state = reeve_state(listing);
+    let tree = tree_rows(&compose(&mut state));
+    assert_eq!(tree[2], " · ansel               1");
+    // The mark says done, so the narrow row keeps `asks` (decision 59).
+    assert_eq!(tree[4], "  └ ✓ ansel-review   asks");
+    // Its pane closes while the listing still names the errand: the row goes, and its
+    // question still counts toward the reeve's badge.
+    let mut snapshot = hall_dev_snapshot();
+    snapshot.tabs.retain(|tab| tab.tab_id != "ws_a_t2");
+    snapshot.panes.retain(|pane| pane.tab_id != "ws_a_t2");
+    state.set_snapshot(Box::new(snapshot));
+    let tree = tree_rows(&compose(&mut state));
+    assert_eq!(tree[2], " · ansel               1");
+    assert_eq!(tree[3], "  └ ● ansel-fix");
+    assert_eq!(tree[4], " · bertil");
+    assert!(!tree.iter().any(|row| row.contains("ansel-review")));
 }
 
 fn no_listing_state() -> ClientShellState {

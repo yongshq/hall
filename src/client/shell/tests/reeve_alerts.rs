@@ -1330,3 +1330,19 @@ fn a_reeve_dialog_rung_before_the_listing_names_the_reeve_highlights_it_once_nam
         assert!(alerting(&mut state).is_empty(), "delay {delay}: not twice");
     }
 }
+
+#[test]
+fn a_hand_with_no_pane_rings_and_marks_its_reeve() {
+    // The tree shows no row for a hand whose pane hall does not have (decision 70); its rise
+    // still rings, and the bar goes on its reeve's row, so the sound has a row to find it from.
+    let mut listing = listing();
+    errand_mut(&mut listing, "ansel-fix").session.pane_id = Some("p_gone".into());
+    let mut state = alert_state(listing.clone(), &[]);
+    assert!(alerting(&mut state).is_empty());
+    errand_mut(&mut listing, "ansel-fix").hand_state = HandState::Blocked;
+    assert_eq!(
+        sounds(&state.set_reeve_listing(Ok(listing))),
+        [crate::sound::Sound::Request]
+    );
+    assert_eq!(alerting(&mut state), ["ansel"]);
+}
