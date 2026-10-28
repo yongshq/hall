@@ -814,11 +814,14 @@ impl ClientShellState {
     }
 
     /// Takes a read: a good one replaces the tree, a failed one leaves the last good tree,
-    /// marked stale with the reason (decision 56). A row selected in the walk that the read
-    /// turns into another kind of row for the same tab keeps the selection: a hand the read
-    /// drops leaves its tab behind as a tab row (decision 55), and a tab row the read lists as
-    /// a hand becomes that hand's row (decision 61). A good read also raises the alerts of the
-    /// hands it shows newly stuck or asking, and gives the sound to play for them (decision 62).
+    /// marked stale with the reason (decision 56). A hand's row the read takes away while the
+    /// listing still names the hand (reported done or failed, decision 73, or its pane closed)
+    /// passes the selection to its reeve's row. Otherwise a row selected in the walk that the
+    /// read turns into another kind of row for the same tab keeps the selection: a hand the
+    /// read drops leaves its tab behind as a tab row (decision 55), and a tab row the read lists
+    /// as a hand becomes that hand's row (decision 61). A good read also raises the alerts of
+    /// the hands it shows newly stuck or asking, and gives the sound to play for them (decision
+    /// 62).
     pub(in crate::client) fn set_reeve_listing(
         &mut self,
         read: ReeveListingRead,
@@ -835,18 +838,39 @@ impl ClientShellState {
                 Vec::new()
             }
         };
-        if let (Some(key), Some(tab_id), Some(tree)) = (
-            self.navigate_reeve_key.as_ref(),
-            selected_tab,
-            self.current_reeve_tree(),
-        ) {
+        if let (Some(key), Some(tree)) =
+            (self.navigate_reeve_key.as_ref(), self.current_reeve_tree())
+        {
             if tree.position(key).is_none() {
-                if let Some(item) = self.tree_row_for_tab(&tree, &tab_id) {
+                if let Some(item) = self.hand_reeve_row(&tree, key).or_else(|| {
+                    selected_tab.and_then(|tab_id| self.tree_row_for_tab(&tree, &tab_id))
+                }) {
                     self.navigate_reeve_key = Some(item.key.clone());
                 }
             }
         }
         effects
+    }
+
+    /// The row in `tree` of the reeve the listing names as the owner of the hand `key` names,
+    /// when the listing still names the hand in this session.
+    fn hand_reeve_row<'a>(
+        &self,
+        tree: &'a ReeveTree,
+        key: &ReeveTreeKey,
+    ) -> Option<&'a ReeveTreeItem> {
+        let ReeveTreeKey::Hand(id) = key else {
+            return None;
+        };
+        let session = self.config.reeve_tree_session.as_deref()?;
+        let errand = self
+            .reeve_listing
+            .as_ref()?
+            .errands
+            .iter()
+            .find(|errand| &errand.id == id && errand.session.in_session(session))?;
+        let index = tree.position(&ReeveTreeKey::Reeve(errand.owner_reeve.clone()))?;
+        tree.items.get(index)
     }
 
     /// The tab a hand's or a tab's row selected in the walk stands for, if one is selected.
@@ -931,7 +955,7 @@ impl ClientShellState {
     /// Picks the selected item: shows a reeve's or a hand's own pane, brings a tab forward or
     /// focuses a workspace. None when the tree is not drawn or nothing is selected, so herdr's
     /// own pick runs. A selected key the tree no longer has (a finished hand whose tab is gone
-    /// too, or a hand reported done or failed, decision 73) picks nothing, rather than herdr's
+    /// too, or a hand whose reeve's row went with its own) picks nothing, rather than herdr's
     /// pick of the reeve's workspace.
     fn pick_navigate_reeve_target(&self) -> Option<Option<crate::api::schema::Method>> {
         let tree = self.current_reeve_tree()?;

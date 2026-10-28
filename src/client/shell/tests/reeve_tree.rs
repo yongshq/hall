@@ -374,24 +374,21 @@ fn a_hand_row_names_its_office_before_its_errand() {
 }
 
 #[test]
-fn a_finished_hand_whose_pane_closed_drops_before_its_teardown() {
+fn a_working_hand_whose_pane_closed_shows_no_row_and_still_counts_on_its_reeve() {
     let mut listing = listing();
-    let errand = errand_mut(&mut listing, "ansel-review");
-    errand.hand_state = crate::client::reeve_listing::HandState::Done;
-    errand.question = Some("Land it?".into());
-    let mut state = reeve_state(listing);
+    errand_mut(&mut listing, "ansel-review").question = Some("Land it?".into());
+    let mut state = reeve_state(listing.clone());
     let tree = tree_rows(&compose(&mut state));
-    // Done: no row while its pane is open, and its tab is no `tab` row of the reeve's; its
-    // question still counts toward the reeve's badge (decisions 70, 73).
+    // Working with its pane open: a row, and its question counts toward the reeve's badge.
     assert_eq!(tree[2], " · ansel               1");
-    assert_eq!(tree[3], "  └ ● ansel-fix");
-    assert_eq!(tree[4], " · bertil");
-    // Its pane closes while the listing still names the errand: still no row, and its
-    // question still counts.
+    assert_eq!(tree[4], "  └ ● ansel-review   asks");
+    // Its pane closes while the listing still names it working and asking: no row, and its
+    // question still counts (decisions 70, 74).
     let mut snapshot = hall_dev_snapshot();
     snapshot.tabs.retain(|tab| tab.tab_id != "ws_a_t2");
     snapshot.panes.retain(|pane| pane.tab_id != "ws_a_t2");
     state.set_snapshot(Box::new(snapshot));
+    state.set_reeve_listing(Ok(listing));
     let tree = tree_rows(&compose(&mut state));
     assert_eq!(tree[2], " · ansel               1");
     assert_eq!(tree[3], "  └ ● ansel-fix");
@@ -444,6 +441,45 @@ fn done_and_failed_hands_show_no_row_while_their_panes_are_open() {
         .map(|item| item.key.clone())
         .collect::<Vec<_>>();
     assert_eq!(focused, [ReeveTreeKey::Reeve("ansel".into())]);
+}
+
+#[test]
+fn a_failed_hand_that_waits_on_the_liege_marks_and_counts_on_its_reeve() {
+    let mut listing = listing();
+    errand_mut(&mut listing, "bertil-probe").hand_state =
+        crate::client::reeve_listing::HandState::Failed;
+    let mut state = reeve_state(listing.clone());
+    let tree = tree_rows(&compose(&mut state));
+    assert_eq!(tree[5], " · bertil");
+    // It starts waiting and asks: the alert rings and marks its reeve's row, and it counts
+    // once toward its reeve's badge, with no row of its own (decisions 63, 73).
+    {
+        let errand = errand_mut(&mut listing, "bertil-probe");
+        errand.waiting = true;
+        errand.question = Some("Retry?".into());
+    }
+    let effects = state.set_reeve_listing(Ok(listing));
+    assert!(effects
+        .iter()
+        .any(|effect| matches!(effect, ClientShellNotificationEffect::Sound { .. })));
+    let tree = tree_rows(&compose(&mut state));
+    assert_eq!(tree[5], "▌· bertil              1");
+    assert_eq!(tree[6], "");
+    assert!(!tree.iter().any(|row| row.contains("bertil-probe")));
+    // With the failed hand's tab focused, the focus shows on its reeve's row.
+    let mut snapshot = hall_dev_snapshot();
+    snapshot.focused_workspace_id = Some("ws_b".into());
+    snapshot.focused_tab_id = Some("ws_b_t1".into());
+    snapshot.focused_pane_id = Some("p_b1".into());
+    state.set_snapshot(Box::new(snapshot));
+    let model = state.current_reeve_tree().expect("tree");
+    let focused = model
+        .items
+        .iter()
+        .filter(|item| item.focused)
+        .map(|item| item.key.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(focused, [ReeveTreeKey::Reeve("bertil".into())]);
 }
 
 fn no_listing_state() -> ClientShellState {
@@ -1048,6 +1084,47 @@ fn enter_on_a_hand_that_finished_while_selected_shows_its_tab() {
     assert!(matches!(
         picked_method(&pick),
         Some(crate::api::schema::Method::TabFocus(target)) if target.tab_id == "ws_a_t2"
+    ));
+}
+
+#[test]
+fn a_hand_set_done_while_selected_passes_the_selection_to_its_reeve() {
+    let mut listing = listing();
+    let mut state = reeve_state(listing.clone());
+    compose(&mut state);
+    state.handle_input_bytes(b"\x02w\x1b[B\x1b[B");
+    assert_eq!(
+        state.navigate_reeve_key,
+        Some(ReeveTreeKey::Hand("ansel-review".into()))
+    );
+    // The hand reports done mid-walk: its row goes while its pane is open (decision 73), and
+    // the selection moves to its reeve's row.
+    errand_mut(&mut listing, "ansel-review").hand_state =
+        crate::client::reeve_listing::HandState::Done;
+    state.set_reeve_listing(Ok(listing));
+    let frame = compose(&mut state);
+    assert_eq!(tree_rows(&frame)[4], " · bertil");
+    assert_eq!(
+        state.navigate_reeve_key,
+        Some(ReeveTreeKey::Reeve("ansel".into()))
+    );
+    let (rect, _) = state
+        .hits
+        .agents
+        .iter()
+        .find(|(_, pane)| pane == "p_a0")
+        .cloned()
+        .expect("reeve row hit");
+    let cell = usize::from(rect.y) * usize::from(frame.width) + 2;
+    assert_eq!(
+        frame.cells[cell].bg,
+        crate::protocol::color_to_u32(state.config.palette.selection_bg),
+        "the reeve row is highlighted"
+    );
+    let pick = state.handle_input_bytes(b"\r");
+    assert!(matches!(
+        picked_method(&pick),
+        Some(crate::api::schema::Method::PaneFocus(target)) if target.pane_id == "p_a0"
     ));
 }
 
