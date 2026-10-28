@@ -127,3 +127,7 @@ After the liege saw finished errands with no pane listed under their reeve (2026
 After seeing the tree's hand rows (2026-10-27), liege: "maybe a hand role scout-mend-lead-finder, I'd like to see the active hand sent by a reeve in those branches instead":
 
 71. A hand's row is labelled as reeve names the hand's worktree: its office, a hyphen, then its errand id (`scout-mend-lead-finder`). When the listing names no office, or only blanks, the row reads the errand id alone. The row's key stays the errand id, so picking, alerts and the selection are unchanged; only the text differs. A label too long for the row is cut at its end (57).
+
+After the liege named the repo's remote (2026-10-26), liege: "use this for remote repo https://github.com/yongshq/hall.git for hall project":
+
+72. Amends 18. The repo has a remote: `origin` is `git@github.com:yongshq/hall.git`, and `main` tracks `origin/main`, first pushed 2026-10-26 at the liege's word. The GitHub repo is public, and stays so: asked whether that was meant (decision 18 planned private until version one), liege, 2026-10-28: "keep it public". `upstream` stays herdr's, fetch only, push disabled. Pushing still waits for the liege every time.

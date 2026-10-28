@@ -23,7 +23,7 @@ Out:
 - The reeve side of the bridge (a hall backend in reeve, and whether reeve pushes hand state to hall or hall reads the listing): decided with the liege at go-live, step 5 (decision 36). Decided by decisions 67 and 68: a `hall` backend in reeve, and hall reads reeve's listing; reeve's side is built in reeve's repository.
 - Narrowing the turn-end alert to replies that ask the liege something: later, if the alert proves noisy, and it needs a signal reeve does not record today (decision 22).
 - Herdr upstream changes past v0.9.0: ported only when chosen, by hand (decision 31).
-- Publishing: the repository stays private and local, with no remote to push to, until version one works (decisions 18, 32).
+- Publishing: the repository stays private and local, with no remote to push to, until version one works (decisions 18, 32). Superseded by decision 72: `origin` is `yongshq/hall` on GitHub, public, and pushes wait for the liege.
 
 ## Architecture sketch
 
