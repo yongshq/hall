@@ -1531,7 +1531,11 @@ impl ClientShellState {
                 Some(_) => {}
             }
         }
+        // hall: the tab the walk's selected row stands for, read on the tree before this
+        // snapshot, to pass the selection on if the snapshot takes that row away.
+        let selected_tab = self.selected_row_tab();
         self.snapshot = Some(snapshot);
+        self.rehome_reeve_selection(selected_tab);
         let pending_surface = self.pending_pane_surface.take();
         if let Some(surface) = pending_surface {
             let matching = self.snapshot.as_ref().is_some_and(|snapshot| {

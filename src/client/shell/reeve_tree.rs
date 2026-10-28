@@ -814,9 +814,9 @@ impl ClientShellState {
     }
 
     /// Takes a read: a good one replaces the tree, a failed one leaves the last good tree,
-    /// marked stale with the reason (decision 56). A hand's row the read takes away while the
-    /// listing still names the hand (reported done or failed, decision 73, or its pane closed)
-    /// passes the selection to its reeve's row. Otherwise a row selected in the walk that the
+    /// marked stale with the reason (decision 56). A hand's row the read, or a snapshot, takes
+    /// away while the listing still names the hand (reported done or failed, decision 73, or
+    /// its pane closed) passes the selection to its reeve's row. Otherwise a row selected in the walk that the
     /// read turns into another kind of row for the same tab keeps the selection: a hand the
     /// read drops leaves its tab behind as a tab row (decision 55), and a tab row the read lists
     /// as a hand becomes that hand's row (decision 61). A good read also raises the alerts of
@@ -838,6 +838,17 @@ impl ClientShellState {
                 Vec::new()
             }
         };
+        self.rehome_reeve_selection(selected_tab);
+        effects
+    }
+
+    /// After the tree changed under the walk, from a read or a snapshot: a selected row the
+    /// tree no longer has passes the selection on. A hand's row whose hand the listing still
+    /// names passes it to its reeve's row; otherwise the row that stands for `selected_tab`,
+    /// the tab the selected row stood for before the change, takes it. A snapshot that closes a
+    /// working hand's pane changes no read, since the reader sends only changed ones, so the
+    /// snapshot runs this too.
+    pub(super) fn rehome_reeve_selection(&mut self, selected_tab: Option<String>) {
         if let (Some(key), Some(tree)) =
             (self.navigate_reeve_key.as_ref(), self.current_reeve_tree())
         {
@@ -849,7 +860,6 @@ impl ClientShellState {
                 }
             }
         }
-        effects
     }
 
     /// The row in `tree` of the reeve the listing names as the owner of the hand `key` names,
@@ -874,7 +884,7 @@ impl ClientShellState {
     }
 
     /// The tab a hand's or a tab's row selected in the walk stands for, if one is selected.
-    fn selected_row_tab(&self) -> Option<String> {
+    pub(super) fn selected_row_tab(&self) -> Option<String> {
         let key = self.navigate_reeve_key.as_ref()?;
         match key {
             ReeveTreeKey::Tab(tab_id) => Some(tab_id.clone()),

@@ -1129,6 +1129,50 @@ fn a_hand_set_done_while_selected_passes_the_selection_to_its_reeve() {
 }
 
 #[test]
+fn a_selected_working_hand_whose_pane_closes_passes_the_selection_to_its_reeve() {
+    let mut state = reeve_state(listing());
+    compose(&mut state);
+    state.handle_input_bytes(b"\x02w\x1b[B\x1b[B");
+    assert_eq!(
+        state.navigate_reeve_key,
+        Some(ReeveTreeKey::Hand("ansel-review".into()))
+    );
+    // Its pane closes mid-walk with the hand still working: the listing does not change, so
+    // no read comes (the reader sends only changed ones), and the snapshot alone moves the
+    // selection to its reeve's row.
+    let mut snapshot = hall_dev_snapshot();
+    snapshot.tabs.retain(|tab| tab.tab_id != "ws_a_t2");
+    snapshot.panes.retain(|pane| pane.tab_id != "ws_a_t2");
+    state.set_snapshot(Box::new(snapshot));
+    assert_eq!(
+        state.navigate_reeve_key,
+        Some(ReeveTreeKey::Reeve("ansel".into()))
+    );
+    let frame = compose(&mut state);
+    assert!(!tree_rows(&frame)
+        .iter()
+        .any(|row| row.contains("ansel-review")));
+    let (rect, _) = state
+        .hits
+        .agents
+        .iter()
+        .find(|(_, pane)| pane == "p_a0")
+        .cloned()
+        .expect("reeve row hit");
+    let cell = usize::from(rect.y) * usize::from(frame.width) + 2;
+    assert_eq!(
+        frame.cells[cell].bg,
+        crate::protocol::color_to_u32(state.config.palette.selection_bg),
+        "the reeve row is highlighted"
+    );
+    let pick = state.handle_input_bytes(b"\r");
+    assert!(matches!(
+        picked_method(&pick),
+        Some(crate::api::schema::Method::PaneFocus(target)) if target.pane_id == "p_a0"
+    ));
+}
+
+#[test]
 fn a_selected_tab_that_the_listing_names_a_hand_keeps_the_selection() {
     let full = listing();
     let mut listing = full.clone();
@@ -1157,22 +1201,27 @@ fn a_selected_tab_that_the_listing_names_a_hand_keeps_the_selection() {
 }
 
 #[test]
-fn enter_on_a_hand_that_is_gone_from_the_tree_does_nothing() {
+fn enter_on_a_finished_hands_tab_that_is_gone_from_the_tree_does_nothing() {
     let mut listing = listing();
     let mut state = reeve_state(listing.clone());
     compose(&mut state);
     state.handle_input_bytes(b"\x02w\x1b[B\x1b[B");
-    // Finished and cleaned up at once: its tab is closed in the same breath.
+    // Finished and cleaned up: the listing drops it, so the selection follows its tab, left
+    // as a tab row (decision 55), and then that tab is closed too.
+    listing.errands.retain(|errand| errand.id != "ansel-review");
+    state.set_reeve_listing(Ok(listing));
+    assert_eq!(
+        state.navigate_reeve_key,
+        Some(ReeveTreeKey::Tab("ws_a_t2".into()))
+    );
     let mut snapshot = hall_dev_snapshot();
     snapshot.tabs.retain(|tab| tab.tab_id != "ws_a_t2");
     snapshot.panes.retain(|pane| pane.pane_id != "p_a2");
     state.set_snapshot(Box::new(snapshot));
-    listing.errands.retain(|errand| errand.id != "ansel-review");
-    state.set_reeve_listing(Ok(listing));
     compose(&mut state);
     assert_eq!(
         state.navigate_reeve_key,
-        Some(ReeveTreeKey::Hand("ansel-review".into()))
+        Some(ReeveTreeKey::Tab("ws_a_t2".into()))
     );
     let pick = state.handle_input_bytes(b"\r");
     assert!(

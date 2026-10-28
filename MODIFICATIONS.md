@@ -198,3 +198,9 @@ Hall is a modified version of herdr v0.9.0 (commit b99002ac99b09e00b4ca692436cb1
 | `docs/next/website/src/content/docs/configuration.mdx`, `docs/next/website/src/content/docs/agents.mdx` | The new default rows, the unnamed tab's fallback, the missing title, the repeated value, and the `machine` token shown only while more than one machine is connected or still shows cached agents (reconnecting or needing attention). |
 | `docs/next/website/src/data/config-reference.json` | The default of `ui.sidebar.agents.rows`. |
 | `docs/next/website/src/content/docs/connecting-machines.mdx` | The `machine` token shows while more than one machine is connected or still shows cached agents (reconnecting or needing attention). |
+
+## The walk's selection on a hand whose pane closes (2026-10-28)
+
+| File | Change |
+|---|---|
+| `src/client/shell/state.rs` | Taking a snapshot passes the reeve tree walk's selection on when the snapshot takes its row away, as a listing read does: a working hand whose pane closes changes no read, so the selection moves to its reeve's row here. |
