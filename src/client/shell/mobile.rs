@@ -954,6 +954,8 @@ impl ClientShellState {
                     .snapshot
                     .as_deref()
                     .and_then(|snapshot| snapshot.focused_workspace_id.clone());
+                // hall: every way into navigate mode starts the tree walk at the focus.
+                self.start_reeve_tree_navigation();
                 outcome.repaint = true;
                 return true;
             }

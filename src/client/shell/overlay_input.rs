@@ -89,6 +89,10 @@ impl ClientShellState {
         } else {
             ClientShellMode::Navigate
         };
+        if self.mode == ClientShellMode::Navigate {
+            // hall: every way into navigate mode starts the tree walk at the focus.
+            self.start_reeve_tree_navigation();
+        }
         self.push_endpoint_method_with_kind(
             crate::api::schema::Method::ReleaseNotesDismiss(
                 crate::api::schema::ReleaseNotesDismissParams {
@@ -921,6 +925,9 @@ impl ClientShellState {
                     .snapshot
                     .as_deref()
                     .and_then(|snapshot| snapshot.focused_workspace_id.clone());
+                // hall: the tree walk restarts at the focus too, never at a key left from an
+                // earlier walk whose row may be gone.
+                self.start_reeve_tree_navigation();
                 outcome.repaint = true;
             }
             return;

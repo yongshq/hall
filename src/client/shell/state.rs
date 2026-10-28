@@ -1155,6 +1155,8 @@ impl ClientShellState {
             self.navigate_workspace_id = None;
         } else {
             self.mode = ClientShellMode::Navigate;
+            // hall: every way into navigate mode starts the tree walk at the focus.
+            self.start_reeve_tree_navigation();
         }
         true
     }
@@ -1533,7 +1535,8 @@ impl ClientShellState {
         }
         // hall: the tab the walk's selected row stands for, read on the tree before this
         // snapshot, to pass the selection on if the snapshot takes that row away. Only during
-        // the walk: a key left from a walk ended by esc is overwritten when the next one starts.
+        // the walk: every way into navigate mode starts the walk at the focus, so a key left
+        // from a walk that ended is overwritten before it is read.
         let walking = self.mode == ClientShellMode::Navigate;
         let selected_tab = walking.then(|| self.selected_row_tab()).flatten();
         self.snapshot = Some(snapshot);

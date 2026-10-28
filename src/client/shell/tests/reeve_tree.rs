@@ -1197,6 +1197,115 @@ fn a_snapshot_after_esc_leaves_the_ended_walks_selection_alone() {
     );
 }
 
+/// A walk on ansel-review ended by esc, then that hand's pane closed: the key left behind names
+/// a row the tree no longer has.
+fn state_with_a_dead_key_from_an_ended_walk() -> ClientShellState {
+    let mut state = reeve_state(listing());
+    compose(&mut state);
+    state.handle_input_bytes(b"\x02w\x1b[B\x1b[B");
+    state.handle_input_bytes(b"\x1b");
+    let mut snapshot = hall_dev_snapshot();
+    snapshot.tabs.retain(|tab| tab.tab_id != "ws_a_t2");
+    snapshot.panes.retain(|pane| pane.tab_id != "ws_a_t2");
+    state.set_snapshot(Box::new(snapshot));
+    assert_eq!(
+        state.navigate_reeve_key,
+        Some(ReeveTreeKey::Hand("ansel-review".into()))
+    );
+    state
+}
+
+/// The layout with nothing focused, as when the focused workspace has gone.
+fn unfocused_snapshot() -> ClientShellSnapshot {
+    let mut snapshot = hall_dev_snapshot();
+    snapshot.tabs.retain(|tab| tab.tab_id != "ws_a_t2");
+    snapshot.panes.retain(|pane| pane.tab_id != "ws_a_t2");
+    snapshot.focused_workspace_id = None;
+    snapshot.focused_tab_id = None;
+    snapshot.focused_pane_id = None;
+    for workspace in &mut snapshot.workspaces {
+        workspace.focused = false;
+    }
+    snapshot
+}
+
+#[test]
+fn esc_on_the_close_confirm_starts_the_walk_at_the_focus() {
+    let mut state = state_with_a_dead_key_from_an_ended_walk();
+    // ctrl+b shift+d asks to close the focused workspace; esc goes back to navigate mode, as
+    // herdr's walk does, at the focus rather than at the dead key.
+    state.handle_input_bytes(b"\x02D");
+    assert!(matches!(
+        &state.overlay,
+        Some(ClientShellOverlay::ConfirmClose(confirm)) if confirm.workspace_id == "ws_a"
+    ));
+    state.handle_input_bytes(b"\x1b");
+    assert_eq!(state.mode, ClientShellMode::Navigate);
+    assert_eq!(
+        state.navigate_reeve_key,
+        Some(ReeveTreeKey::Reeve("ansel".into()))
+    );
+    let pick = state.handle_input_bytes(b"\r");
+    assert!(matches!(
+        picked_method(&pick),
+        Some(crate::api::schema::Method::PaneFocus(target)) if target.pane_id == "p_a0"
+    ));
+}
+
+#[test]
+fn the_mobile_switch_starts_the_walk_at_the_focus() {
+    let mut state = reeve_state(listing());
+    compose(&mut state);
+    state.handle_input_bytes(b"\x02w\x1b[B\x1b[B");
+    state.handle_input_bytes(b"\x1b");
+    // The mobile switch opens navigate mode; the narrow layout draws no tree, so no row is
+    // selected, and the walk's old key is gone.
+    state.compose(44, 20).expect("mobile frame");
+    let switch = state.hits.mobile_switch;
+    state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: switch.x,
+        row: switch.y,
+        modifiers: KeyModifiers::empty(),
+    })]);
+    assert_eq!(state.mode, ClientShellMode::Navigate);
+    assert_eq!(state.navigate_reeve_key, None);
+    // Widened, the tree is back and ↓ walks on from the focus, not from ansel-review.
+    compose(&mut state);
+    state.handle_input_bytes(b"\x1b[B");
+    assert_eq!(
+        state.navigate_reeve_key,
+        Some(ReeveTreeKey::Hand("ansel-fix".into()))
+    );
+}
+
+#[test]
+fn resuming_the_mobile_switcher_with_nothing_focused_drops_a_dead_key() {
+    let mut state = state_with_a_dead_key_from_an_ended_walk();
+    state.mobile_switcher_suspended = true;
+    state.set_snapshot(Box::new(unfocused_snapshot()));
+    assert_eq!(state.mode, ClientShellMode::Navigate);
+    assert_eq!(state.navigate_reeve_key, None);
+}
+
+#[test]
+fn dismissing_release_notes_with_nothing_focused_drops_a_dead_key() {
+    let mut state = state_with_a_dead_key_from_an_ended_walk();
+    let mut snapshot = unfocused_snapshot();
+    snapshot.latest_release_notes_available = true;
+    snapshot.release_notes = Some(crate::protocol::ClientShellReleaseNotes {
+        version: "0.9.1".into(),
+        body: "notes".into(),
+        preview: true,
+    });
+    state.set_snapshot(Box::new(snapshot));
+    state.open_release_notes();
+    state.handle_input_bytes(b"\r");
+    assert!(state.overlay.is_none());
+    assert_eq!(state.mode, ClientShellMode::Navigate);
+    assert_eq!(state.navigate_reeve_key, None);
+}
+
 #[test]
 fn a_selected_tab_that_the_listing_names_a_hand_keeps_the_selection() {
     let full = listing();

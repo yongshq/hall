@@ -204,3 +204,11 @@ Hall is a modified version of herdr v0.9.0 (commit b99002ac99b09e00b4ca692436cb1
 | File | Change |
 |---|---|
 | `src/client/shell/state.rs` | Taking a snapshot passes the reeve tree walk's selection on when the snapshot takes its row away, as a listing read does: a working hand whose pane closes changes no read, so the selection moves to its reeve's row here. Only while the walk is on, so a selection left from a walk ended by esc costs a snapshot no tree builds. |
+
+## Every way into the walk starts it at the focus (2026-10-28)
+
+| File | Change |
+|---|---|
+| `src/client/shell/overlay_input.rs` | Esc on the close confirm, and dismissing the release notes with nothing focused, start the reeve tree walk at the focus as they enter navigate mode, so a key left from an earlier walk, whose row may be gone, never becomes the selection. |
+| `src/client/shell/mobile.rs` | Opening navigate mode from the mobile switch starts the reeve tree walk at the focus too. |
+| `src/client/shell/state.rs` | Resuming the mobile switcher into navigate mode starts the reeve tree walk at the focus too. |
